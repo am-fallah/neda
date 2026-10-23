@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1 and the approved M2 initial slice complete; M3 SCH-001 monitor foundation complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, and durable monitor CRUD/validation/config-version rules. The scheduler loop, MrBilit adapter, HTTP authentication endpoints, notifications, and dashboard are not implemented yet.
+**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001, and M3 SCH-002 are complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, and the due-time scheduler foundation. The scheduler runs idle in production until the SCH-004 check runner exists; provider-check execution, the MrBilit adapter, HTTP authentication endpoints, notifications, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -37,11 +37,19 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/store`: real-SQLite monitor and provider-target repository with active/inactive target rows retained for history, atomic material-edit transactions, old-episode closure with `config_changed`, and near-term scheduling after commit.
 - Material edits bump affected `config_version`s; label-only and booking-slug-only edits do not reset scheduling. Provider removal deactivates without deleting history; re-adding reactivates and bumps again.
 - Expired monitors cannot resume until a future departure-date edit recomputes expiry and clears `expired_at`; paused monitors remain paused.
-- A scheduler wake callback is invoked after committed monitor changes; the actual jitter/wake channel and scheduler loop remain `SCH-002`.
+- A scheduler wake callback is invoked after committed monitor changes; `SCH-002` supplies the wake channel, jitter, and scheduler loop, and production remains idle until `SCH-004` composes a check runner.
+
+**M3 SCH-002 scheduler foundation (approved slice complete)**
+
+- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers for `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and an explicit `Runner`/`Result` contract for `SCH-004`.
+- `internal/store`: schedule projection, startup recovery/stagger, and the SQLite `poll_interval_seconds` setting seeded to 300s and validated against 60–3600s.
+- `MonitorService` near-term scheduling is injectable and deterministic; a material edit's post-commit wake is covered by a scheduler integration test.
+- `cmd/neda` starts and gracefully stops the scheduler. With no runner it performs recovery only and stays idle, so it cannot dispatch no-op jobs or busy-loop.
+- No provider-check execution, availability/health transitions, notifications, API endpoints, or frontend work is included.
 
 ## Not implemented yet
 
-The scheduler loop, provider-check execution, health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. Nothing in this repository authorizes live provider traffic or deployment.
+Provider-check execution, availability/health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. The scheduler is wired but idle until the SCH-004 check runner exists. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 
@@ -91,9 +99,10 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
+| `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
 
-`.env.example` lists placeholders for settings validated by the loader but reserved for later milestones (workers and VAPID). The HTTP endpoints that consume the session settings are pending `API-001`/`API-005`. Do not commit real secrets.
+The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. The HTTP endpoints that consume the session settings are pending `API-001`/`API-005`. Do not commit real secrets.
 
 ## Repository layout
 
@@ -105,6 +114,7 @@ internal/db/          SQLite open/PRAGMAs, migration runner, readiness
 internal/migrations/  embedded forward-only SQL migrations
 internal/store/       transaction helper and core repositories
 internal/domain/      monitor model, validation, expiry, and CRUD service
+internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, runner boundary
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider

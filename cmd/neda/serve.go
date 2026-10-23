@@ -7,12 +7,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/am-fallah/neda/internal/config"
 	"github.com/am-fallah/neda/internal/db"
 	"github.com/am-fallah/neda/internal/httpapi"
 	"github.com/am-fallah/neda/internal/logging"
 	"github.com/am-fallah/neda/internal/migrations"
+	"github.com/am-fallah/neda/internal/provider"
+	"github.com/am-fallah/neda/internal/scheduler"
+	"github.com/am-fallah/neda/internal/store"
 )
 
 func runServe(stdout, stderr io.Writer) int {
@@ -48,14 +52,79 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	logger.Info("database ready", "migrations", applied)
 
+	appStore := store.New(database.DB)
+	if err := appStore.EnsurePollInterval(ctx, time.Now().UTC()); err != nil {
+		logger.Error("poll interval initialization failed", "error", err)
+		return 1
+	}
+	pollInterval, err := appStore.PollInterval(ctx)
+	if err != nil {
+		logger.Error("poll interval configuration is invalid", "error", err)
+		return 1
+	}
+
+	// PRV-009 (production provider configuration) remains deferred. The
+	// scheduler is intentionally idle until SCH-004 supplies a check runner, so
+	// this empty registry is never consulted for dispatch in this slice.
+	providerRegistry, err := provider.NewRegistry()
+	if err != nil {
+		logger.Error("provider registry initialization failed", "error", err)
+		return 1
+	}
+	// The waker is the scheduler's wake source and the intended post-commit
+	// hook for MonitorService when the API layer composes it. The scheduler is
+	// idle in this slice because no check runner exists yet.
+	waker := scheduler.NewWaker()
+	sched, err := scheduler.New(scheduler.Config{
+		Repository: appStore,
+		Providers:  providerRegistry,
+		Interval:   appStore,
+		Runner:     nil,
+		Workers:    cfg.Workers,
+		Wake:       waker.C(),
+		Logger:     logger,
+	})
+	if err != nil {
+		logger.Error("scheduler initialization failed", "error", err)
+		return 1
+	}
+	logger.Info("scheduler configured",
+		"workers", cfg.Workers,
+		"poll_interval", pollInterval.String(),
+		"mode", "idle-until-check-runner",
+	)
+
 	server := httpapi.New(httpapi.Config{
 		Addr:       cfg.HTTPAddr,
 		Production: cfg.IsProduction(),
 		PublicURL:  cfg.PublicURL,
 	}, logger, database, applied)
 
-	if err := server.Run(ctx); err != nil {
-		logger.Error("server stopped with error", "error", err)
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		err := server.Run(runCtx)
+		cancel()
+		serverErr <- err
+	}()
+
+	schedErr := sched.Run(runCtx)
+	unexpectedStop := schedErr == nil && runCtx.Err() == nil
+	cancel()
+	serverRunErr := <-serverErr
+
+	if schedErr != nil {
+		logger.Error("scheduler stopped with error", "error", schedErr)
+	}
+	if unexpectedStop {
+		logger.Error("scheduler stopped unexpectedly")
+	}
+	if serverRunErr != nil {
+		logger.Error("server stopped with error", "error", serverRunErr)
+	}
+	if schedErr != nil || unexpectedStop || serverRunErr != nil {
 		return 1
 	}
 	logger.Info("service stopped")

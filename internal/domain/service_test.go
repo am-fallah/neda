@@ -90,9 +90,11 @@ func newServiceHarness(t *testing.T) *serviceHarness {
 	}
 	h := &serviceHarness{store: store.New(database.DB), sqlDB: database.DB}
 	h.svc, err = domain.NewMonitorService(h.store, registry, domain.MonitorServiceConfig{
-		Now:           func() time.Time { return serviceNow },
-		Location:      location,
-		NearTermDelay: 2 * time.Second,
+		Now:      func() time.Time { return serviceNow },
+		Location: location,
+		NearTermSchedule: func(now time.Time) time.Time {
+			return now.Add(2 * time.Second)
+		},
 		NewID: func() (string, error) {
 			h.nextID++
 			return fmt.Sprintf("monitor-%d", h.nextID), nil
@@ -454,9 +456,34 @@ func TestMonitorServiceConstructorValidation(t *testing.T) {
 	if _, err := domain.NewMonitorService(h.store, nil, domain.MonitorServiceConfig{}); err == nil {
 		t.Fatal("NewMonitorService(nil providers) succeeded")
 	}
-	if _, err := domain.NewMonitorService(h.store, registry, domain.MonitorServiceConfig{NearTermDelay: -time.Second}); err == nil {
-		t.Fatal("NewMonitorService(negative delay) succeeded")
+
+	clamped, err := domain.NewMonitorService(h.store, registry, domain.MonitorServiceConfig{
+		Now:      func() time.Time { return serviceNow },
+		Location: mustTehran(t),
+		NearTermSchedule: func(time.Time) time.Time {
+			return serviceNow.Add(-time.Hour)
+		},
+		NewID: func() (string, error) { return "clamped-monitor", nil },
+	})
+	if err != nil {
+		t.Fatalf("NewMonitorService(clamped schedule): %v", err)
 	}
+	created, err := clamped.Create(context.Background(), fakeInput())
+	if err != nil {
+		t.Fatalf("Create(clamped schedule): %v", err)
+	}
+	if created.Providers[0].NextDueAt == nil || !created.Providers[0].NextDueAt.Equal(serviceNow) {
+		t.Fatalf("clamped next due = %v, want %v", created.Providers[0].NextDueAt, serviceNow)
+	}
+}
+
+func mustTehran(t *testing.T) *time.Location {
+	t.Helper()
+	location, err := domain.TehranLocation()
+	if err != nil {
+		t.Fatalf("TehranLocation: %v", err)
+	}
+	return location
 }
 
 func insertEpisode(t *testing.T, db *sql.DB, targetID, configVersion int64) int64 {
