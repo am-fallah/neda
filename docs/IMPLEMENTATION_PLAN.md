@@ -1,7 +1,7 @@
 # Neda — Implementation Plan and Task Registry
 
-**Status:** Planning baseline approved under `GATE-001`; `GATE-002` authorizes M1.1 implementation on `feat/m1-service-skeleton`. `GATE-003` and `GATE-004` remain unauthorized.
-**Date:** 2026-10-23
+**Status:** Planning baseline approved under `GATE-001`; `GATE-002` authorized M1.1 and `GATE-006` authorizes M1.2 (`FND-008`/`FND-009`) on `feat/m1.2-store-auth`. PR #1 is merged on `main`. `GATE-003` and `GATE-004` remain unauthorized.
+**Date:** 2026-10-24
 **Authoritative product source:** `docs/BRIEF.md`; behavior: `PRODUCT_SPEC.md`; design: `ARCHITECTURE.md`.
 **Repository path:** `docs/IMPLEMENTATION_PLAN.md`
 
@@ -40,9 +40,9 @@
 | Item | Finding | Evidence |
 |---|---|---|
 | Working directory | `/Users/fallah/Desktop/Neda` | `pwd` |
-| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/*.md`, M1.1 Go source/tests under `cmd/` and `internal/`, CI workflow, `docs/.codegraph/` (generated empty index, ignored), `.codegraph/` (generated root index, ignored), `.DS_Store` | `find . -type f`; `git ls-files`; see §2.4 |
-| Git | Git repository; `feat/m1-service-skeleton` tracks `origin` with M1.1 commits; `main` remains at `6c4470f`; working tree clean at last check; root `.gitignore` present | `git status -sb`; `git log --oneline main..HEAD`; `git ls-files` |
-| Existing work | Approved planning docs plus M1.1 Go skeleton/tests; PR #1 open and CI-green; no frontend or feature-level monitoring code | `git diff --stat main...HEAD`; PR #1; `make check` |
+| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/*.md`, M1.1 Go source/tests under `cmd/` and `internal/`, CI workflow, `docs/.codegraph/` (generated empty index, ignored), `.codegraph/` (generated root index, ignored), `.DS_Store`; M1.2 adds `internal/store`, `internal/auth`, and `neda set-password` | `find . -type f`; `git ls-files`; see §2.4 |
+| Git | Git repository; PR #1 merged into `main` at `f2252e5`; PR #2 is open from `feat/m1.2-store-auth`; working tree clean at last check; root `.gitignore` present | `git status -sb`; `git log --oneline -8`; `git ls-files` |
+| Existing work | Approved planning docs plus merged M1.1 Go skeleton/tests; M1.2 store/auth foundation implemented and locally verified; PR #1 merged and PR #2 open with green CI; no frontend or feature-level monitoring code | PR #1; PR #2; `.github/workflows/ci.yml`; see §2.3 |
 | Planning documents | Reviewed copies are committed in `docs/` at `6c4470f`; the superseded working copies remain outside the repository in `/Users/fallah/.opencode/plan/` and are not authoritative. | `git show --stat 6c4470f`; `git ls-files docs/` |
 | OpenCode | 2.1.4 | `opencode --version` |
 | Local timezone | `Asia/Tehran` (+0330) | `date`, `/etc/localtime` |
@@ -69,7 +69,10 @@
 ### 2.3 GitHub
 
 - Authenticated account: `am-fallah`; scopes include `repo`, `workflow`, `gist`, `read:org`.
-- Repository `am-fallah/neda` exists and is **private**; default branch `main`; `origin/main` is `6c4470f4f63a2f3b806cb1fee95cdb80a7dfeb44`.
+- Repository `am-fallah/neda` exists and is **private**; default branch `main`; `origin/main` is `f2252e57f8272cdc3fd41c105f6e24396b4f626c`.
+- PR #1 (`M1.1: bootable service skeleton and schema foundation`) is **merged** (2026-10-23T20:50:10Z) by `am-fallah`; PR head `b87cf56`, merge commit `f2252e5`.
+- CI: PR #1 head run [40021998627](https://github.com/am-fallah/neda/actions/runs/40021998627) passed; `main` push run [40022275486](https://github.com/am-fallah/neda/actions/runs/40022275486) passed.
+- PR #2 (`M1.2: repository layer and authentication foundation`) is **OPEN** against `main` at <https://github.com/am-fallah/neda/pull/2>; code/evidence head `29e6614`; Go checks run [40025493263](https://github.com/am-fallah/neda/actions/runs/40025493263) passed in 30s. An earlier code head `0098697` also passed in run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) (2m36s). Not merged.
 - The initial documentation commit contains exactly the nine approved paths; `.gitignore` is in history.
 - No token, cookie, key, or credential value was printed or stored.
 
@@ -108,8 +111,9 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 | `GATE-003` | Bounded MrBilit live validation | TODO | GATE-002 | Explicit owner approval + target route/date + terms confirmation; dedicated one-process run with no retries/redirects, at most five read-only HTTP GET attempts total, and each request starting at least five seconds after the previous response completes. | Authorizes only that bounded protocol. Does not authorize auth bypass, parallel probing, load testing, scraping, following redirects, or retries. |
 | `GATE-004` | Deployment | TODO | OPS-005, DISC-005 | Explicit owner approval of the reviewed deployment plan; plan covers server, proxy/TLS, key/volume permissions, backups, rollback. | Authorizes only the approved deployment plan. No automatic approval from prior gates. |
 | `GATE-005` | Scope/security/data change (standing) | TODO | — | Explicit owner approval recorded when such a change is proposed. | Authorizes only the approved change; prohibits silent deviation from the brief. |
+| `GATE-006` | M1.2 implementation | DONE | GATE-002, FND-007 | Explicit owner approval recorded 2026-10-24 for `FND-008`/`FND-009` on `feat/m1.2-store-auth`, with the narrow store scope, auth primitives/middleware only (no HTTP auth endpoints), CSRF option A (separate HttpOnly `neda_csrf` cookie; hash only in DB), and the proposed security defaults. | Authorizes code/tests/CLI for M1.2 and a PR to `main`. Does not authorize HTTP auth endpoints, live MrBilit calls, server access, or deployment. |
 
-**Current stop point:** `GATE-002` approved for M1.1 only. `GATE-003` (live provider validation) and `GATE-004` (deployment) remain blocked and unauthorized.
+**Current stop point:** `GATE-006` approved for M1.2 only. `GATE-003` (live provider validation) and `GATE-004` (deployment) remain blocked and unauthorized.
 
 ---
 
@@ -160,8 +164,8 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 | `FND-005` | P0 | DONE | FND-003 | Structured logging, request IDs, redaction helpers. AC: JSON logs; no tokens/cookies/endpoints/bodies; redaction tests. | `go test ./internal/logging/...` passed; JSON/text handlers; attribute/URL/bearer/query redaction; request-ID context tests. |
 | `FND-006` | P0 | DONE | FND-003..005 | HTTP server skeleton: timeouts, body limits, middleware, `/healthz`, `/readyz`, graceful shutdown, 404/405, panic recovery; explicit Host-header behavior per architecture §14.5. AC: tests and local curl. | `go test ./internal/httpapi/...` and `go test -race ./internal/httpapi/...` passed; `go test ./cmd/neda/...` passed; local production-mode run verified `/healthz` and `/readyz` 200, wrong Host 421, `neda healthcheck` ok, SIGTERM graceful stop; log redaction/query omission tests. |
 | `FND-007` | P0 | DONE | FND-003 | SQLite open/PRAGMAs/migration runner/embedded baseline migrations (`0001`–`0003`); `NTF-000` adds the notifications migration. AC: WAL/FK/busy timeout; `synchronous=FULL` per §7.1 and §6.1; effective `PRAGMA synchronous` is `FULL` (2) on initial and replacement connections; `check_runs` running/finished CHECK and enum/boolean/counter constraints per Architecture §7.2; idempotent migrations; checksum mismatch rejected; failing migration rolls back; `foreign_key_check`/`integrity_check` clean. | `go test ./internal/db/...` passed; `go test -race ./internal/db/...` passed; initial/replacement PRAGMA tests; checksum/rollback/newer-database tests; constraint matrix; FK/integrity checks; `modernc.org/sqlite v1.61.0`. |
-| `FND-008` | P0 | TODO | FND-007 | Repository layer and transaction helper for core tables. AC: CRUD + tx tests; no SQL string concatenation; FK behavior verified. | `go test ./internal/store/...`; `go vet ./...`. |
-| `FND-009` | P0 | TODO | FND-007 | Auth foundation: users/sessions, Argon2id, `neda set-password` TTY-only, session middleware, CSRF for authenticated routes, login Origin/Referer + rate limiting. AC: no default password; no password args; cookie flags; login CSRF policy matches architecture §14.2/§14.7; tests. | `go test ./internal/auth/...`; manual `neda set-password`; inspect cookie flags via `httptest`. |
+| `FND-008` | P0 | DONE | FND-007 | Repository layer and transaction helper for core tables. AC: CRUD + tx tests; no SQL string concatenation; FK behavior verified. | `go test ./internal/store/...` and `go test -race ./internal/store/...` passed; transaction commit/rollback/panic/canceled-context/nested tests; settings CRUD; single-row user CRUD and optimistic password update; session create/lookup/touch/revoke/revoke-all; FK rejection/cascade and `foreign_key_check` clean; SQL-concatenation scan empty; `go vet ./...` passed. |
+| `FND-009` | P0 | DONE | FND-007, FND-008 | Auth foundation: users/sessions, Argon2id, `neda set-password` TTY-only, session middleware, CSRF for authenticated routes, login Origin/Referer + rate limiting. AC: no default password; no password args; cookie flags; login CSRF policy matches architecture §14.2/§14.7; tests. | `go test ./internal/auth/...` and `-race` passed; `httptest` cookie/CSRF/expiry/revocation/rate-limit tests passed; manual TTY `set-password` exit 0 with no echo; non-TTY exit 1; password argument exit 2; stored hash `$argon2id$`; local Argon2 benchmark 79.7 ms/op at 64 MiB; `go test ./...`, `go vet ./...`, and `gofmt -l .` passed. |
 | `FND-010` | P1 | DONE | FND-003 | Go CI workflow: gofmt/vet/test/race/build; no secrets/deploy; pinned Go version. AC: Go CI passes on a clean branch; frontend CI is separate. | GitHub Actions run [40019219808](https://github.com/am-fallah/neda/actions/runs/40019219808) passed in 2m27s on PR #1; latest head run [40019673683](https://github.com/am-fallah/neda/actions/runs/40019673683) passed in 39s; local `make check`/`make race` also passed. |
 | `FND-011` | P0 | DONE | FND-003 | Initialize CodeGraph only after meaningful Go source exists. Ensure root `.gitignore` has `.codegraph/` and `**/.codegraph/`; `codegraph status`; `codegraph init` at root; `codegraph status`; use explore for one non-trivial trace; record. AC: graph initialized; root and nested graph data ignored; no graph data committed; existing `docs/.codegraph` not deleted/moved without owner approval. | `codegraph status` → not initialized; `codegraph init` → 17 files, 281 nodes, 611 edges; `codegraph status` → up to date; MCP `codegraph_codegraph_explore` traced serve startup (`main`/`runServe` → config/db/httpapi) and returned 37 symbols; `git check-ignore -v .codegraph/ docs/.codegraph/codegraph.db` passed; no graph data tracked. |
 | `FND-012` | P1 | DONE | FND-003 | Update the English planning-state README as implementation starts; add only verified commands/configuration and distinguish implemented from planned functionality; do not add environment-variable names/values or setup details until they exist and are verified; final implementation-specific sections remain in `OPS-004`. AC: English-only; README reviewed against actual files; no unverified setup/details/features; no secrets; commands reflect reality. | README reviewed against implemented packages/commands; `make check`, `make race`, `make run`, health/ready curl, and `NEDA_ENV=development go run ./cmd/neda healthcheck` verified; planned features explicitly marked not implemented; `.env.example` placeholders identified as reserved where applicable; no secrets. |
@@ -414,8 +418,14 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 | 2026-10-23 | `FND-011` | TODO → DONE | `codegraph status` → not initialized; `codegraph init` → 17 files, 281 nodes, 611 edges; `codegraph status` → index up to date; MCP explore returned the serve startup path and 37 symbols; `git check-ignore -v .codegraph/ docs/.codegraph/codegraph.db` confirms both ignored; no graph data staged. |
 | 2026-10-23 | `FND-012` | TODO → DONE | README updated to implementation-in-progress status with implemented/planned split. Verified `make check`, `make race`, `make run`, `/healthz`, `/readyz`, and development healthcheck; all commands and configuration listed match the implemented skeleton; no secrets. |
 | 2026-10-23 | `FND-010` | IN_PROGRESS → DONE | PR #1 opened; GitHub Actions run [40019219808](https://github.com/am-fallah/neda/actions/runs/40019219808) passed the Go checks job (2m27s). Latest head run [40019673683](https://github.com/am-fallah/neda/actions/runs/40019673683) passed in 39s. Local `make check`/`make race` also passed. |
+| 2026-10-24 | `GATE-006` | TODO → DONE | Owner explicitly approved M1.2: narrow `FND-008` store scope, `FND-009` primitives/middleware/CLI only (no HTTP auth endpoints), CSRF option A, proposed security defaults, branch `feat/m1.2-store-auth`, PR #2 without merge. `GATE-003`/`GATE-004` remain unauthorized. |
+| 2026-10-24 | `FND-008` | TODO → IN_PROGRESS | Verified PR #1 merged (`f2252e5`), `main` CI run [40022275486](https://github.com/am-fallah/neda/actions/runs/40022275486) passed, and local tree clean at `origin/main`. Created `feat/m1.2-store-auth`; implementing transaction helper plus settings/users/sessions repositories only. |
+| 2026-10-24 | `FND-008` | IN_PROGRESS → DONE | `internal/store` added with `WithTx` and settings/users/sessions repositories. `go test ./internal/store/...` passed (1.405s); `go test -race ./internal/store/...` passed (1.714s); `go vet ./...` passed. Tests cover commit/rollback/panic/canceled context/nested rejection, settings CRUD and validation, single-row user upsert/optimistic password update, session create/lookup/touch/revoke/revoke-all/revoke-other, FK rejection/cascade, and clean `foreign_key_check`. SQL-concatenation scan returned no matches; all queries are constants using placeholders. |
+| 2026-10-24 | `FND-009` | IN_PROGRESS → DONE | `internal/auth` and `neda set-password` added. `go test ./internal/auth/...` passed (0.558s); `go test -race ./internal/auth/...` passed (3.586s); `go test ./...`, `go vet ./...`, and `gofmt -l .` passed. Tests cover Argon2id hash/verify and malformed hashes, password policy, setup-required, login, token-hash-only storage, cookie flags, absolute/idle expiry, touch throttling, logout and password-change revocation, CSRF double-submit + origin checks, login origin policy, and per-client/global rate limits. Manual TTY check via a pty: exit 0, no password echo, stored `$argon2id$` hash; non-TTY exit 1; password argument exit 2. Local Argon2id benchmark: 79,650,666 ns/op, 64 MiB memory. HTTP auth endpoints remain explicitly out of scope (`API-005`). |
 
 **Not run in M1.1:** Docker build/compose validation (Docker not installed), live MrBilit/Telegram/Push requests, server inspection, deployment. No claim of success for these.
+
+**M1.2 milestone verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed; PR #2 Go checks run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) (code head `0098697`) and run [40025493263](https://github.com/am-fallah/neda/actions/runs/40025493263) (docs/evidence head `29e6614`) passed. `codegraph status` reports 37 files, 632 nodes, 1,654 edges, up to date; `.codegraph/` and `docs/.codegraph/` remain ignored and no graph data is tracked. Manual TTY `set-password` via a pty: exit 0, no echo, `$argon2id$` hash; non-TTY exit 1; password argument exit 2. No Docker, live provider, server, or deployment checks were run for M1.2.
 
 ### 7.1 Correction history (document-only, 2026-10-23)
 
@@ -537,7 +547,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | Monitor concurrency interpretation | Open decision | Per-pair vs monitor-wide serialization affects worker guard, rate limits, and `SCH-002`/`SCH-008` tests | Recorded as Product A-33; owner must confirm. If monitor-wide is chosen, update architecture and those tasks separately. | Yes |
 | No production access | Deployment risk | Unknown host conflicts | `OPS-005` plan + `GATE-004`; no SSH now. | Yes |
 
-**Current blockers summary:** `GATE-001` (independent re-review after `CORR-009` and owner approval), `DISC-005` (server facts), `FND-001` (Go absent), and optional Docker. No implementation has started.
+**Current blockers summary:** M1.1 is merged and green; M1.2 is implemented, locally verified, and has green PR #2 CI; only owner review/merge remains for M1.2 close. Remaining external blockers for later milestones: `DISC-005` (server facts), `GATE-003` (live provider validation), `GATE-004` (deployment), and the owner decisions `A-21` and `A-33`. Optional Docker remains unavailable; it is not required for M1.2.
 
 ---
 
@@ -546,8 +556,8 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | # | Brief DoD item | Tasks | Current status |
 |---|---|---|---|
 | 1 | Code in verified private GitHub repository `neda` | `REPO-001`, `REPO-002`, `REPO-003` | DONE (private repo; initial docs push verified) |
-| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | Go skeleton started (M1.1); frontend not started |
-| 3 | Persistent SQLite and migrations work safely | FND-007/008, SCH-001 | Migrations/PRAGMAs done (`FND-007`); repository layer pending (`FND-008`) |
+| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | Go foundation and M1.2 auth primitives implemented; HTTP auth endpoints and frontend not started |
+| 3 | Persistent SQLite and migrations work safely | FND-007/008, SCH-001 | Migrations/PRAGMAs done (`FND-007`); core auth/settings repository layer done (`FND-008`); monitor repositories remain `SCH-001` |
 | 4 | Multiple monitors survive restarts | SCH-001/002/009 | Not started |
 | 5 | One job can select multiple providers | SCH-001/008, PRV-009 | Not started |
 | 6 | MrBilit first real adapter; fake provider proves independence | PRV-001..009 | Not started |
@@ -559,8 +569,8 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | 12 | Real server-side Web Push/service worker; browser closed | `PSH-001`–`PSH-006` | Not started |
 | 13 | Validated booking links included; unverified omitted | `PRV-007`, `WEB-006` | Not started |
 | 14 | Jalali/Gregorian conversion and Tehran expiry tested | `PRV-008`, `WEB-004`, `SCH-007` | Not started |
-| 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | Not started |
-| 16 | Critical tests/builds/static checks pass | `OPS-007` | M1.1 checks pass; full suite pending |
+| 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | `FND-009` primitives/middleware done and locally tested; HTTP endpoints and private-route enforcement pending `API-001`/`API-005` |
+| 16 | Critical tests/builds/static checks pass | `OPS-007` | M1.2 local checks and PR #2 CI pass; full suite later |
 | 17 | Deployment/backup workflow documented for constrained host | `OPS-004`/`OPS-005`/`OPS-009` | Not started |
 | 18 | No production deployment without approval | `GATE-004` | Not started |
 | 19 | Docs/limitations accurately reflect behavior | `PLAN`, `OPS-004`/`OPS-008` | In progress/planning |
@@ -569,10 +579,11 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 ## 11. Next proposed action
 
-1. **M1.1 status:** all M1.1 tasks (`FND-001`, `FND-003`, `FND-004`, `FND-005`, `FND-007`, `FND-006`, `FND-010`, `FND-011`, `FND-012`) are `DONE` on `feat/m1-service-skeleton`; PR #1 is green and awaiting owner merge. M1 remains `IN_PROGRESS` because `FND-008`/`FND-009` are not done.
-2. **M1.2:** `FND-008` (repository/transaction layer) and `FND-009` (auth foundation) complete the M1 exit criteria.
+1. **M1.1 status:** all M1.1 tasks (`FND-001`, `FND-003`, `FND-004`, `FND-005`, `FND-007`, `FND-006`, `FND-010`, `FND-011`, `FND-012`) are `DONE`; PR #1 is merged into `main` at `f2252e5` and both PR-head and `main` CI passed.
+2. **M1.2:** `GATE-006` authorizes `FND-008` (repository/transaction layer) and `FND-009` (auth foundation) on `feat/m1.2-store-auth`. Both tasks are `DONE` with local evidence; the narrow store scope, auth primitives/middleware only, and CSRF option A are implemented. PR #2 is open with green CI and awaits owner review/merge; the agent must not merge it.
 3. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
 4. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
+5. **PR #2:** open against `main` for owner review; the agent must not merge it.
 
 **Hard stop:** no live provider calls, server access, or deployment under the current approval. Silence or a status request is not approval for a new gate.
 

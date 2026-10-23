@@ -19,6 +19,10 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	return runWithInput(args, os.Stdin, stdout, stderr)
+}
+
+func runWithInput(args []string, stdin *os.File, stdout, stderr io.Writer) int {
 	command := "serve"
 	if len(args) > 0 {
 		command = args[0]
@@ -27,6 +31,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch command {
 	case "serve":
 		return runServe(stdout, stderr)
+	case "set-password":
+		return runSetPassword(args[1:], stdout, stderr, termPrompter{in: stdin})
 	case "healthcheck":
 		return runHealthcheck(stdout, stderr)
 	case "version", "--version", "-version":
@@ -46,8 +52,9 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: neda <command>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  serve        Run the Neda service (default)")
-	fmt.Fprintln(w, "  healthcheck  Probe the local health endpoint")
-	fmt.Fprintln(w, "  version      Print build version information")
-	fmt.Fprintln(w, "  help         Print this help")
+	fmt.Fprintln(w, "  serve          Run the Neda service (default)")
+	fmt.Fprintln(w, "  set-password   Set the owner password interactively (TTY only)")
+	fmt.Fprintln(w, "  healthcheck    Probe the local health endpoint")
+	fmt.Fprintln(w, "  version        Print build version information")
+	fmt.Fprintln(w, "  help           Print this help")
 }

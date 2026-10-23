@@ -49,6 +49,24 @@ func Load() (Config, error) {
 	return LoadFrom(os.LookupEnv)
 }
 
+// LoadDBPath reads only NEDA_DB_PATH. Offline commands such as set-password do
+// not need production key material or a public URL.
+func LoadDBPath() (string, error) {
+	return LoadDBPathFrom(os.LookupEnv)
+}
+
+// LoadDBPathFrom is LoadDBPath with an injectable environment source.
+func LoadDBPathFrom(get func(string) (string, bool)) (string, error) {
+	if get == nil {
+		return "", errors.New("config: nil environment lookup")
+	}
+	path := value(get, "NEDA_DB_PATH", "/data/neda.db")
+	if strings.TrimSpace(path) == "" {
+		return "", errors.New("NEDA_DB_PATH must not be empty")
+	}
+	return path, nil
+}
+
 // LoadFrom reads configuration from the supplied lookup function. It is
 // exported for deterministic tests and for callers that provide their own
 // environment source.

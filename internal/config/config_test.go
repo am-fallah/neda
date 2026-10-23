@@ -61,6 +61,28 @@ func TestLoadProductionDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadDBPath(t *testing.T) {
+	path, err := LoadDBPathFrom(lookup(map[string]string{"NEDA_DB_PATH": "./data/test.db"}))
+	if err != nil {
+		t.Fatalf("LoadDBPathFrom: %v", err)
+	}
+	if path != "./data/test.db" {
+		t.Fatalf("path = %q", path)
+	}
+
+	path, err = LoadDBPathFrom(lookup(nil))
+	if err != nil {
+		t.Fatalf("LoadDBPathFrom default: %v", err)
+	}
+	if path != "/data/neda.db" {
+		t.Fatalf("default path = %q", path)
+	}
+
+	if _, err := LoadDBPathFrom(nil); err == nil {
+		t.Fatal("LoadDBPathFrom(nil) succeeded")
+	}
+}
+
 func TestLoadDevelopmentDefaults(t *testing.T) {
 	cfg, err := LoadFrom(lookup(map[string]string{"NEDA_ENV": "development"}))
 	if err != nil {
