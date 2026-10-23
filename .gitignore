@@ -32,3 +32,6 @@ bin/
 build/
 coverage/
 tmp/
+
+# Local Go binary
+/neda
