@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1 complete; M2 initial provider foundation complete.** The repository contains the approved planning documents, a bootable Go service foundation, the repository/auth primitives, and the normalized provider boundary with a deterministic test-only fake provider. The MrBilit adapter, HTTP authentication endpoints, route protection, monitoring, scheduling, notifications, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1 and the approved M2 initial slice complete; M3 SCH-001 monitor foundation complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, and durable monitor CRUD/validation/config-version rules. The scheduler loop, MrBilit adapter, HTTP authentication endpoints, notifications, and dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -31,9 +31,17 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
 - Fake-provider UI labeling and the MrBilit adapter remain for later milestones.
 
+**M3 SCH-001 monitor foundation (approved slice complete)**
+
+- `internal/domain`: durable monitor model, validation (label/route/date/passenger/provider rules), Tehran end-of-day expiry, active/paused/expired status, config-version update planning, and a `MonitorService` for create/get/list/edit/pause/resume/delete.
+- `internal/store`: real-SQLite monitor and provider-target repository with active/inactive target rows retained for history, atomic material-edit transactions, old-episode closure with `config_changed`, and near-term scheduling after commit.
+- Material edits bump affected `config_version`s; label-only and booking-slug-only edits do not reset scheduling. Provider removal deactivates without deleting history; re-adding reactivates and bumps again.
+- Expired monitors cannot resume until a future departure-date edit recomputes expiry and clears `expired_at`; paused monitors remain paused.
+- A scheduler wake callback is invoked after committed monitor changes; the actual jitter/wake channel and scheduler loop remain `SCH-002`.
+
 ## Not implemented yet
 
-HTTP authentication endpoints and private-route enforcement, monitor CRUD, the MrBilit adapter, scheduler behavior, availability episodes/events, Telegram, Web Push, the dashboard, Docker packaging, and deployment. Nothing in this repository authorizes live provider traffic or deployment.
+The scheduler loop, provider-check execution, health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 
@@ -96,6 +104,7 @@ internal/logging/     structured logging and redaction
 internal/db/          SQLite open/PRAGMAs, migration runner, readiness
 internal/migrations/  embedded forward-only SQL migrations
 internal/store/       transaction helper and core repositories
+internal/domain/      monitor model, validation, expiry, and CRUD service
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider
