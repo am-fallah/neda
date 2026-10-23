@@ -72,7 +72,7 @@
 - Repository `am-fallah/neda` exists and is **private**; default branch `main`; `origin/main` is `f2252e57f8272cdc3fd41c105f6e24396b4f626c`.
 - PR #1 (`M1.1: bootable service skeleton and schema foundation`) is **merged** (2026-10-23T20:50:10Z) by `am-fallah`; PR head `b87cf56`, merge commit `f2252e5`.
 - CI: PR #1 head run [40021998627](https://github.com/am-fallah/neda/actions/runs/40021998627) passed; `main` push run [40022275486](https://github.com/am-fallah/neda/actions/runs/40022275486) passed.
-- PR #2 (`M1.2: repository layer and authentication foundation`) is **OPEN** against `main` at <https://github.com/am-fallah/neda/pull/2>; head `0098697`; Go checks run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) passed in 2m36s. Not merged.
+- PR #2 (`M1.2: repository layer and authentication foundation`) is **OPEN** against `main` at <https://github.com/am-fallah/neda/pull/2>; code/evidence head `29e6614`; Go checks run [40025493263](https://github.com/am-fallah/neda/actions/runs/40025493263) passed in 30s. An earlier code head `0098697` also passed in run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) (2m36s). Not merged.
 - The initial documentation commit contains exactly the nine approved paths; `.gitignore` is in history.
 - No token, cookie, key, or credential value was printed or stored.
 
@@ -425,7 +425,7 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 
 **Not run in M1.1:** Docker build/compose validation (Docker not installed), live MrBilit/Telegram/Push requests, server inspection, deployment. No claim of success for these.
 
-**M1.2 milestone verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed; PR #2 Go checks run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) passed in 2m36s. `codegraph status` reports 37 files, 632 nodes, 1,654 edges, up to date; `.codegraph/` and `docs/.codegraph/` remain ignored and no graph data is tracked. Manual TTY `set-password` via a pty: exit 0, no echo, `$argon2id$` hash; non-TTY exit 1; password argument exit 2. No Docker, live provider, server, or deployment checks were run for M1.2.
+**M1.2 milestone verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed; PR #2 Go checks run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) (code head `0098697`) and run [40025493263](https://github.com/am-fallah/neda/actions/runs/40025493263) (docs/evidence head `29e6614`) passed. `codegraph status` reports 37 files, 632 nodes, 1,654 edges, up to date; `.codegraph/` and `docs/.codegraph/` remain ignored and no graph data is tracked. Manual TTY `set-password` via a pty: exit 0, no echo, `$argon2id$` hash; non-TTY exit 1; password argument exit 2. No Docker, live provider, server, or deployment checks were run for M1.2.
 
 ### 7.1 Correction history (document-only, 2026-10-23)
 
