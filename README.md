@@ -41,7 +41,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 
 **M3 SCH-002 scheduler foundation (approved slice complete)**
 
-- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% per-check jitter and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and an explicit `Runner`/`Result` contract for `SCH-004`.
+- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers for `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and an explicit `Runner`/`Result` contract for `SCH-004`.
 - `internal/store`: schedule projection, startup recovery/stagger, and the SQLite `poll_interval_seconds` setting seeded to 300s and validated against 60–3600s.
 - `MonitorService` near-term scheduling is injectable and deterministic; a material edit's post-commit wake is covered by a scheduler integration test.
 - `cmd/neda` starts and gracefully stops the scheduler. With no runner it performs recovery only and stays idle, so it cannot dispatch no-op jobs or busy-loop.
