@@ -1,6 +1,6 @@
 # Neda — Implementation Plan and Task Registry
 
-**Status:** M1 is complete and PR #2 is merged. `GATE-007` authorizes the approved M2 initial slice (`PRV-001`, `PRV-010`, `PRV-002`) on `feat/m2-provider-foundation`; `GATE-003` and `GATE-004` remain unauthorized.
+**Status:** M1 is complete and PR #2 is merged. The approved M2 initial slice (`PRV-001`, `PRV-010`, `PRV-002`) is implemented under `GATE-007`; PR #3 is pending review. `GATE-003` and `GATE-004` remain unauthorized.
 **Date:** 2026-10-24
 **Authoritative product source:** `docs/BRIEF.md`; behavior: `PRODUCT_SPEC.md`; design: `ARCHITECTURE.md`.
 **Repository path:** `docs/IMPLEMENTATION_PLAN.md`
@@ -42,7 +42,7 @@
 | Working directory | `/Users/fallah/Desktop/Neda` | `pwd` |
 | Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/*.md`, M1 Go source/tests under `cmd/` and `internal/`, CI workflow, `docs/.codegraph/` (generated empty index, ignored), `.codegraph/` (generated root index, ignored), `.DS_Store`; M2 initial slice adds `internal/provider` and `internal/provider/fake` | `find . -type f`; `git ls-files`; see §2.4 |
 | Git | Git repository; PR #2 merged into `main` at `40f1fc0`; local `main` synchronized with `origin/main`; `feat/m2-provider-foundation` created from `main`; working tree clean at M2 start; root `.gitignore` present | `git status -sb`; `git log --oneline -8`; `git ls-files` |
-| Existing work | Approved planning docs plus M1 Go service/store/auth foundation; PR #1 and PR #2 merged with green CI; M2 initial provider foundation in progress; no frontend or feature-level monitoring code | PR #1; PR #2; `.github/workflows/ci.yml`; see §2.3 |
+| Existing work | Approved planning docs plus M1 Go service/store/auth foundation; PR #1 and PR #2 merged with green CI; M2 initial provider foundation implemented on `feat/m2-provider-foundation`; no frontend or feature-level monitoring code | PR #1; PR #2; `.github/workflows/ci.yml`; see §2.3 |
 | Planning documents | Reviewed copies are committed in `docs/` at `6c4470f`; the superseded working copies remain outside the repository in `/Users/fallah/.opencode/plan/` and are not authoritative. | `git show --stat 6c4470f`; `git ls-files docs/` |
 | OpenCode | 2.1.4 | `opencode --version` |
 | Local timezone | `Asia/Tehran` (+0330) | `date`, `/etc/localtime` |
@@ -176,8 +176,8 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 
 | ID | Pri | Status | Depends on | Task and acceptance criteria | Verification / evidence |
 |---|---|---|---|---|---|
-| `PRV-001` | P0 | IN_PROGRESS | FND-003, FND-008 | Normalized provider types, interface, error taxonomy, explicit registry. AC: core has no MrBilit-specific JSON/business rules; registry rejects nil/duplicate; unit tests. | `go test ./internal/provider/...`; import-boundary check (`rg 'mrbilit' internal/availability internal/scheduler`). |
-| `PRV-002` | P0 | TODO | PRV-001 | Deterministic fake/test provider with different route-ID requirements and availability rule; never presented as real. AC: tests prove engine independence; fake disabled by default; UI labels test-only when enabled. | `go test ./internal/provider/fake/...`; config test `NEDA_FAKE_PROVIDER_ENABLED=false`; UI copy review; UI-label verification deferred to WEB milestone. |
+| `PRV-001` | P0 | DONE | FND-003, FND-008 | Normalized provider types, interface, error taxonomy, explicit registry. AC: core has no MrBilit-specific JSON/business rules; registry rejects nil/duplicate; unit tests. | `go test ./internal/provider/...` passed; registry nil/duplicate/empty-ID/empty-display-name tests; provider/error/state tests; no `mrbilit` references under `internal/`. |
+| `PRV-002` | P0 | DONE | PRV-001 | Deterministic fake/test provider with different route-ID requirements and availability rule; never presented as real. AC: tests prove engine independence; fake disabled by default; UI labels test-only when enabled. | `go test ./internal/provider/fake/...` passed; `Metadata.TestOnly=true`; config default `NEDA_FAKE_PROVIDER_ENABLED=false` tested; fake-only route prefixes and deterministic available/sold-out/unknown/empty/error scenarios; UI-label verification deferred to WEB milestone by owner. |
 | `PRV-003` | P0 | DEFERRED | PRV-001 | MrBilit request builder and bounded HTTP client. AC: exact endpoint/param names; Gregorian date; optional params omitted until validated; **honors the single 20s context deadline created by `SCH-004`** and owns only the 6s per-attempt timeout, bounded retry policy, `Retry-After` interpretation, redirect rejection, and retry/backoff behavior **within that caller-supplied deadline**; must not create a competing overall 20s timer; 2 MiB response and journey/offering caps; no cookies/secrets; httptest coverage. Does not own scheduler target backoff or per-provider spacing. | Deferred by owner on 2026-10-24 outside the M2 initial slice; unblock by explicit scope expansion + provider semantics. |
 | `PRV-004` | P0 | DEFERRED | PRV-003 | MrBilit response decoding, optional-field handling, journey/offering identity, sanitized warnings. AC: unexpected types become Unknown/error; exact normalized identity contract per architecture §9.3; caps enforced before allocation; stable keys; no raw storage; fixtures labeled observed/synthetic. | Deferred by owner on 2026-10-24 outside the M2 initial slice; depends on PRV-003 and provider semantics. |
 | `PRV-005` | P0 | DEFERRED | PRV-004 | Availability decision table and table-driven tests. AC: known negative sample; positive only with sufficient capacity + both flags; capacity shortfall Unknown; missing/null/unexpected/contradictions Unknown; error never NotReservable; empty list no closure; oversized/duplicate/conflicting results fail closed. | Deferred by owner on 2026-10-24 outside the M2 initial slice; depends on PRV-004 and provider semantics. |
@@ -185,7 +185,7 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 | `PRV-007` | P1 | TODO | PRV-004 | Booking URL and Jalali date format validation. AC: only validated slug/pattern; no derivation from city names; nil if unverified; URL scheme/host checks; tests. Owner-provided example is required for final real-world validation, but optional-slug implementation/tests can proceed. | `go test ./internal/provider/mrbilit/... -run TestBookingURL`; owner-verified fixture; negative slug/date tests. |
 | `PRV-008` | P1 | TODO | PRV-001 | Evaluate/select maintained Go Jalali library; wrapper + known date tests. AC: no manual algorithm; round trips/leap/boundaries; document library/version. | `go test ./internal/calendar/...`; `go list -m`; known fixture table (brief example provisional). |
 | `PRV-009` | P1 | DEFERRED | PRV-001, PRV-002 | Provider config validation and multi-provider registry integration. AC: per-provider IDs validated; duplicate provider rejected; fake/MrBilit differences covered. | Deferred by owner on 2026-10-24 outside the M2 initial slice; unblock by explicit scope expansion. |
-| `PRV-010` | P0 | IN_PROGRESS | PRV-001 | Provider error taxonomy and shared infrastructure/config/route/cancel classification contract used by health. AC: stable categories; no state change on error; provider-package tests; health consumes the contract without redefining it. | `go test ./internal/provider/...`; category table tests; import-boundary review. |
+| `PRV-010` | P0 | DONE | PRV-001 | Provider error taxonomy and shared infrastructure/config/route/cancel classification contract used by health. AC: stable categories; no state change on error; provider-package tests; health consumes the contract without redefining it. | `go test ./internal/provider/...` passed; table covers success, caller cancel/deadline, timeout, network, 429/5xx, 4xx, route/config, invalid response, provider-side cancellation, unknown errors; classification is pure and exposes `CountsTowardOutage`/`TargetBackoff` for SCH-006. Cross-package health consumption is deferred to SCH-006; no health package exists in this slice. |
 
 ### 5.4 M3 — Scheduler, state, health
 
@@ -426,6 +426,9 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 | 2026-10-24 | `FND-009` | IN_PROGRESS → DONE | `internal/auth` and `neda set-password` added. `go test ./internal/auth/...` passed (0.558s); `go test -race ./internal/auth/...` passed (3.586s); `go test ./...`, `go vet ./...`, and `gofmt -l .` passed. Tests cover Argon2id hash/verify and malformed hashes, password policy, setup-required, login, token-hash-only storage, cookie flags, absolute/idle expiry, touch throttling, logout and password-change revocation, CSRF double-submit + origin checks, login origin policy, and per-client/global rate limits. Manual TTY check via a pty: exit 0, no password echo, stored `$argon2id$` hash; non-TTY exit 1; password argument exit 2. Local Argon2id benchmark: 79,650,666 ns/op, 64 MiB memory. HTTP auth endpoints remain explicitly out of scope (`API-005`). |
 | 2026-10-24 | `GATE-007` | TODO → DONE | M1 verified complete after PR #2 merged as `40f1fc0`; local `main` fast-forwarded to `origin/main`; merged-`main` CI run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed. Owner approved only `PRV-001`, `PRV-010`, and `PRV-002` on `feat/m2-provider-foundation`; PRV-003–PRV-005/PRV-009 and MrBilit/live work deferred. |
 | 2026-10-24 | `PRV-001` | TODO → IN_PROGRESS | Started provider types/interface/registry on `feat/m2-provider-foundation`; no MrBilit-specific code, scheduler, frontend, or live traffic in scope. |
+| 2026-10-24 | `PRV-001` | IN_PROGRESS → DONE | `internal/provider` added with normalized IDs/states/errors, capabilities/metadata, request/result types, `Provider` interface, and immutable registry. `go test ./internal/provider/...` passed; registry rejects nil, duplicate, empty/whitespace IDs, and empty display names; no `mrbilit` references under `internal/`; no scheduler/UI changes. |
+| 2026-10-24 | `PRV-010` | TODO → DONE | `Classification`/`Classify` added with stable success, infrastructure, configuration, route, request, and abandoned categories. Tests cover caller cancel/deadline precedence, timeout/network/429/5xx, 4xx, route/config, invalid responses, provider-side cancellation, unknown errors, and retry/backoff/outage flags. `SCH-006` must consume this contract; cross-package health integration is deferred because no health package exists in this slice. |
+| 2026-10-24 | `PRV-002` | TODO → DONE | `internal/provider/fake` added with TestOnly metadata, fake-only route-ID prefixes, deterministic available/sold-out/unknown/empty/error scenarios, injected clock, and no network access. `go test ./internal/provider/fake/...` passed; config default `NEDA_FAKE_PROVIDER_ENABLED=false` tested; UI-label verification deferred to WEB. |
 
 **Not run in M1.1:** Docker build/compose validation (Docker not installed), live MrBilit/Telegram/Push requests, server inspection, deployment. No claim of success for these.
 
@@ -551,7 +554,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | Monitor concurrency interpretation | Open decision | Per-pair vs monitor-wide serialization affects worker guard, rate limits, and `SCH-002`/`SCH-008` tests | Recorded as Product A-33; owner must confirm. If monitor-wide is chosen, update architecture and those tasks separately. | Yes |
 | No production access | Deployment risk | Unknown host conflicts | `OPS-005` plan + `GATE-004`; no SSH now. | Yes |
 
-**Current blockers summary:** M1 is complete and merged. M2's initial provider-foundation slice is in progress under `GATE-007`; `PRV-003`–`PRV-005` and `PRV-009` are deferred by owner decision, and `PRV-006` is blocked by unauthorized `GATE-003` plus the deferred `PRV-003`. Remaining external blockers for later milestones: `DISC-005` (server facts), `GATE-003` (live provider validation), `GATE-004` (deployment), and the owner decisions `A-21` and `A-33`. Optional Docker remains unavailable; it is not required for M2.
+**Current blockers summary:** M1 is complete and merged. M2's initial provider-foundation slice (`PRV-001`, `PRV-010`, `PRV-002`) is complete under `GATE-007`; `PRV-003`–`PRV-005` and `PRV-009` are deferred by owner decision, and `PRV-006` is blocked by unauthorized `GATE-003` plus the deferred `PRV-003`. Remaining external blockers for later milestones: `DISC-005` (server facts), `GATE-003` (live provider validation), `GATE-004` (deployment), and the owner decisions `A-21` and `A-33`. Optional Docker remains unavailable; it is not required for M2.
 
 ---
 
@@ -560,11 +563,11 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | # | Brief DoD item | Tasks | Current status |
 |---|---|---|---|
 | 1 | Code in verified private GitHub repository `neda` | `REPO-001`, `REPO-002`, `REPO-003` | DONE (private repo; initial docs push verified) |
-| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | Go foundation and M1.2 auth primitives implemented; HTTP auth endpoints and frontend not started |
+| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | M1 foundation and M2 provider boundary/fake provider implemented; HTTP auth endpoints, MrBilit adapter, and frontend not started |
 | 3 | Persistent SQLite and migrations work safely | FND-007/008, SCH-001 | Migrations/PRAGMAs done (`FND-007`); core auth/settings repository layer done (`FND-008`); monitor repositories remain `SCH-001` |
 | 4 | Multiple monitors survive restarts | SCH-001/002/009 | Not started |
-| 5 | One job can select multiple providers | SCH-001/008, PRV-009 | Not started |
-| 6 | MrBilit first real adapter; fake provider proves independence | PRV-001..009 | Not started |
+| 5 | One job can select multiple providers | SCH-001/008, PRV-009 | Provider registry boundary done; multi-provider integration `PRV-009` deferred |
+| 6 | MrBilit first real adapter; fake provider proves independence | PRV-001..009 | Normalized provider boundary and deterministic fake provider done; MrBilit adapter `PRV-003`–`PRV-005` deferred; live validation blocked |
 | 7 | Provider-specific evidence-backed rules; unknown/error never sold out | `PRV-005`, `SCH-005`, `SCH-010`, `NTF-000` | Not started |
 | 8 | One provider failure does not invalidate another success | SCH-008 | Not started |
 | 9 | Durable events/dedupe across restarts/retries/episodes | `SCH-005`, `SCH-010`, `NTF-000` | Not started |
@@ -574,7 +577,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | 13 | Validated booking links included; unverified omitted | `PRV-007`, `WEB-006` | Not started |
 | 14 | Jalali/Gregorian conversion and Tehran expiry tested | `PRV-008`, `WEB-004`, `SCH-007` | Not started |
 | 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | `FND-009` primitives/middleware done and locally tested; HTTP endpoints and private-route enforcement pending `API-001`/`API-005` |
-| 16 | Critical tests/builds/static checks pass | `OPS-007` | M1.2 local checks and PR #2 CI pass; full suite later |
+| 16 | Critical tests/builds/static checks pass | `OPS-007` | M2 slice local checks pass; PR #3 CI pending; full suite later |
 | 17 | Deployment/backup workflow documented for constrained host | `OPS-004`/`OPS-005`/`OPS-009` | Not started |
 | 18 | No production deployment without approval | `GATE-004` | Not started |
 | 19 | Docs/limitations accurately reflect behavior | `PLAN`, `OPS-004`/`OPS-008` | In progress/planning |
@@ -584,7 +587,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 ## 11. Next proposed action
 
 1. **M1 status:** complete. PR #1 (`f2252e5`) and PR #2 (`40f1fc0`) are merged; the merged-`main` CI run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed. `FND-002` remains an optional P2 Docker task; Docker is not installed and is not an M1 blocker.
-2. **M2 status:** `GATE-007` authorizes only `PRV-001`, `PRV-010`, and `PRV-002` on `feat/m2-provider-foundation`. `PRV-003`–`PRV-005` and `PRV-009` are `DEFERRED` by owner decision; `PRV-006` is `BLOCKED` by `GATE-003` and deferred `PRV-003`; `PRV-007`/`PRV-008` remain later `TODO`s. Fake-provider UI-label verification is deferred to the WEB milestone.
+2. **M2 status:** the `GATE-007` initial slice is complete: `PRV-001`, `PRV-010`, and `PRV-002` are `DONE` with local evidence and PR #3 pending review. `PRV-003`–`PRV-005` and `PRV-009` remain `DEFERRED` by owner decision; `PRV-006` is `BLOCKED` by `GATE-003` and deferred `PRV-003`; `PRV-007`/`PRV-008` remain later `TODO`s. Fake-provider UI-label verification is deferred to the WEB milestone.
 3. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
 4. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
 5. **PR #3:** open against `main` for owner review after M2-slice checks pass; the agent must not merge it.
