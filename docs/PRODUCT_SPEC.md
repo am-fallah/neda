@@ -104,7 +104,7 @@ Provider mappings are stored per provider. A city ID is never assumed to be glob
 - Hard bounds: **60 seconds minimum**, **3600 seconds maximum**.
 - The interval is configurable globally in Settings. There is no per-monitor interval in v1.
 - Monitoring runs in the backend independently of the browser.
-- The same monitor/provider pair must never execute concurrently. **Current proposed interpretation (not approved):** serialization is per monitor/provider pair, based on the brief’s job/provider-pair wording. The brief also says “Never overlap executions of the same monitor,” so monitor-wide serialization across all providers of one monitor is an open owner decision (A-33). If the owner requires monitor-wide serialization, the architecture and scheduler tests require a separate update.
+- Executions are serialized **per monitor**: at most one provider check for a given monitor may be in flight at any time. Different monitors may execute concurrently, subject to the global worker bound. This is the owner decision recorded in A-33 on 2026-10-24, choosing the stricter reading of the brief’s “Never overlap executions of the same monitor”; it is stricter than, and subsumes, per-provider concurrency 1.
 - Global worker concurrency is bounded. Proposal: 2 workers by default, configurable within a small range; per-provider concurrency 1; per-provider minimum spacing (proposal: 5 seconds, to be confirmed against provider terms). The minimum spacing must not be presented as a provider-published limit.
 - Scheduling jitter is applied so monitors do not align into thundering-herd bursts.
 - Transient failures use bounded exponential backoff; provider failures never permanently disable a monitor.
@@ -433,7 +433,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-30 | Single-user, password-protected dashboard; no registration. | VERIFIED (brief) | No multi-tenant design. |
 | A-31 | Polling default/bounds (300s; 60–3600s). | VERIFIED (brief) | Enforce server-side. |
 | A-32 | Deployment must not occur without a separate approved plan. | VERIFIED (brief) | `GATE-004`. |
-| A-33 | Current proposed interpretation (not approved): concurrency is serialized per monitor/provider pair, not monitor-wide across all providers of one monitor. The brief contains both “Never overlap executions of the same monitor” and the job/provider-pair wording. | REQUIRES OWNER INPUT | Owner must confirm per-pair or monitor-wide serialization. If monitor-wide is chosen, architecture and `SCH-002`/`SCH-008` need a separate update; do not silently implement either interpretation as approved. |
+| A-33 | Monitor concurrency: at most one provider check per monitor may be in flight; different monitors may run concurrently within the global worker bound. | VERIFIED (owner decision 2026-10-24) | The stricter reading of the brief’s “Never overlap executions of the same monitor”; it also satisfies per-provider concurrency 1. `SCH-008` must test multi-provider independence sequentially within one monitor, and no scheduler path may dispatch a second target for a monitor whose check is in flight. |
 
 ---
 
@@ -478,7 +478,7 @@ The owner does not need to answer anything already fixed by the brief. The follo
 8. **Provider-health channels**: confirm alerts should go to both configured channels by default (proposed).
 9. **Retention defaults**: confirm 14/30/180-day proposals or specify alternatives.
 10. **Local toolchain**: approval to install Go (and optionally Docker/Colima) on the development Mac before implementation. Go is currently absent; Homebrew metadata is only an observation. Verify the current stable version and compatibility with the selected SQLite/Web Push/Jalali libraries before pinning it.
-11. **Monitor concurrency**: confirm whether executions are serialized per monitor/provider pair (current proposed interpretation) or monitor-wide across all providers of one monitor; see A-33. This is unresolved and must not be treated as approved.
+11. **Monitor concurrency**: resolved by the owner on 2026-10-24 in favor of monitor-wide serialization (at most one in-flight check per monitor); see A-33. Different monitors may run concurrently.
 12. **Provider-health counting (A-21)**: choose Option A (infrastructure-only, current provisional default), Option B (every failed check, matching the brief’s literal wording), or Option C (strict consecutive checks). State the accepted consequences for provider-wide false positives/negatives; `SCH-006` cannot be marked `DONE` until this is recorded.
 
 ---
