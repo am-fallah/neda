@@ -1,9 +1,9 @@
-# Neda — Product Specification (Planning Draft)
+# Neda — Product Specification
 
-**Status:** Draft for owner review. Not implementation authority until `GATE-001` is explicitly approved.
+**Status:** Planning baseline approved under `GATE-001` (2026-10-23). Implementation proceeds under `GATE-002` only within the scope recorded in `IMPLEMENTATION_PLAN.md`.
 **Date:** 2026-10-23
 **Authoritative source:** `docs/BRIEF.md` (read completely). If this document and the brief conflict, the brief wins; the conflict must be reported, not silently resolved.
-**Repository path:** `docs/PRODUCT_SPEC.md` after `GATE-001` approval.
+**Repository path:** `docs/PRODUCT_SPEC.md`
 
 **Classification legend**
 
@@ -401,7 +401,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 
 | ID | Statement | Classification | Impact / action |
 |---|---|---|---|
-| A-01 | Working directory is `/Users/fallah/Desktop/Neda`; it contains starter docs plus a generated local `docs/.codegraph/` index and `.DS_Store`; it is not a root Git repository and has no application source files. | VERIFIED (corrected 2026-10-23) | Preserve existing docs; do not commit generated graph data. The absence of a root repository/source remains a current fact. |
+| A-01 | Working directory is `/Users/fallah/Desktop/Neda`; it is a Git repository on `main` at `6c4470f` with a clean working tree, containing approved planning docs, a generated local `docs/.codegraph/` index (ignored), and no application source files. | VERIFIED (updated 2026-10-23) | Preserve existing docs; do not commit generated graph data. Implementation begins under GATE-002 with M1.1. |
 | A-02 | GitHub CLI is authenticated to account `am-fallah` with `repo`/`workflow` scopes; no token was printed. | VERIFIED | Repo creation is possible after approval. |
 | A-03 | A repository named `neda` was not found under `am-fallah` in a read-only lookup. | VERIFIED (for this account) | Re-check before creation; do not assume no other owner has the name. |
 | A-04 | Git 2.54.0, Node 26.10.0, npm 11.19.1, pnpm 12.11.2, make 3.81, clang 21, sqlite3 3.54.0, curl 8.7.1 are available. | VERIFIED | Local frontend work is possible. |

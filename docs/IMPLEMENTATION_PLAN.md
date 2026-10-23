@@ -40,10 +40,10 @@
 | Item | Finding | Evidence |
 |---|---|---|
 | Working directory | `/Users/fallah/Desktop/Neda` | `pwd` |
-| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/.codegraph/` (generated empty index), `.DS_Store` | `find . -type f`; see §2.4 |
-| Git | Not a Git repository; no branch, remote, commit, or worktree; no root `.gitignore` | `git rev-parse --is-inside-work-tree` → fatal; `git status` → fatal; `ls .gitignore` |
-| Existing work | Starter docs only; preserved; no application source | Inspection |
-| Planning documents | Working copies at `/Users/fallah/.opencode/plan/PRODUCT_SPEC.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION_PLAN.md`; not yet in `docs/`. `REPO-003` copies them only after `GATE-001`; do not copy them before approval. | Inspection; document headers; `REPO-003` |
+| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/.codegraph/` (generated empty index, ignored), `.DS_Store` | `find . -type f`; `git ls-files`; see §2.4 |
+| Git | Git repository; branch `main` tracks `origin/main` at `6c4470f`; working tree clean at inspection; root `.gitignore` present | `git status -sb`; `git log -1 --oneline`; `git ls-files` |
+| Existing work | Approved planning docs only; preserved; no application source or tests | Inspection; `git ls-files` |
+| Planning documents | Reviewed copies are committed in `docs/` at `6c4470f`; the superseded working copies remain outside the repository in `/Users/fallah/.opencode/plan/` and are not authoritative. | `git show --stat 6c4470f`; `git ls-files docs/` |
 | OpenCode | 2.1.4 | `opencode --version` |
 | Local timezone | `Asia/Tehran` (+0330) | `date`, `/etc/localtime` |
 
@@ -68,9 +68,9 @@
 
 ### 2.3 GitHub
 
-- Authenticated account: `am-fallah`.
-- Read-only lookup of `am-fallah/neda`: **not found** (`gh repo view` → "Could not resolve to a Repository").
-- No repository was created, initialized, committed, or pushed.
+- Authenticated account: `am-fallah`; scopes include `repo`, `workflow`, `gist`, `read:org`.
+- Repository `am-fallah/neda` exists and is **private**; default branch `main`; `origin/main` is `6c4470f4f63a2f3b806cb1fee95cdb80a7dfeb44`.
+- The initial documentation commit contains exactly the nine approved paths; `.gitignore` is in history.
 - No token, cookie, key, or credential value was printed or stored.
 
 ### 2.4 CodeGraph
@@ -81,19 +81,18 @@
 | `codegraph --help` | Supported commands observed: `init`, `uninit`, `index`, `sync`, `status`, `query`, `explore`, `context`, `node`, `files`, `callers`, `callees`, `impact`, `affected`, `install`, `uninstall`, `telemetry`, `upgrade`, `daemon`, `unlock`, `version`, `help` |
 | Root `codegraph status` | Project `/Users/fallah/Desktop/Neda` — **not initialized** |
 | Nested index | `docs/.codegraph/codegraph.db` exists; `codegraph status docs` reports an initialized **empty** index (0 files/nodes/edges, 0.16 MB); `docs/.codegraph/.gitignore` exists |
-| Root `.gitignore` | **Absent**; the nested index has not been removed, moved, or ignored at the repository root |
+| Root `.gitignore` | **Present**; includes `.codegraph/` and `**/.codegraph/`; `git check-ignore` confirms root and nested graph data are ignored |
 | `opencode mcp list` | `codegraph` connected; `shadcn` connected |
 | MCP tool actually exposed | CodeGraph **explore** only (harness name `codegraph_codegraph_explore`; documented as `codegraph_explore`). No assumption of other MCP tools. |
-| Index action | No root index initialized; no `codegraph init`, sync, or query was run by this review. Removal/move of `docs/.codegraph` requires a separate owner decision. |
+| Index action | Root index not initialized at inspection; no root `codegraph init`, sync, or query was run during reconciliation. Removal/move of `docs/.codegraph` requires a separate owner decision. |
 | Query action | None run; the nested empty index is not a meaningful source graph |
 
 ### 2.5 Verification not performed
 
-- No application build/test/lint/race/benchmark was run (no source).
+- No application build/test/lint/race/benchmark was run before M1.1 (no source).
 - No live MrBilit request was made (planning phase forbids it; provider semantics unverified).
 - No Docker build/compose validation (Docker absent).
 - No server access, SSH, deployment, or production inspection.
-- No Git initialization, commit, push, or repository creation.
 - No secrets inspected or recorded.
 
 ---
@@ -104,13 +103,13 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 
 | Gate | Scope | Status | Depends on | Acceptance / evidence | What approval authorizes / does **not** authorize |
 |---|---|---|---|---|---|
-| `GATE-001` | Plan approval | IN_PROGRESS | PLAN-001..004 | Explicit owner approval after an independent re-review declares the documents consistent; CodeGraph/environment claims corrected; nested index disposition recorded; the initial documentation commit manifest is **exactly** these nine paths: `.gitignore`, `AGENTS.md`, `START_PROMPT.md`, `README.md`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`; no generated graph data staged; broad staging commands — `git add .`, `git add -A`, and `git add --all` — are prohibited; `git diff --cached --name-only` must match the nine paths exactly and `git status --porcelain` must be inspected for unexpected artifacts before commit; `REPO-003` requires the English planning-state README to be reviewed against actual files before the initial commit, explicitly state that application implementation is not present, and contain no invented commands/environment-variable names/values/features; all critical/high review findings resolved or explicitly accepted; `CORR-008` and `CORR-009` recorded. | Authorizes only repo creation/docs push. Does not authorize code, live calls, or deployment. |
-| `GATE-002` | Implementation start | TODO | REPO-003 | Explicit owner approval after repo/docs review, including permission to install Go (and optionally Docker/Colima). | Authorizes code/tests/local toolchain. Does not authorize live MrBilit calls or deployment. |
+| `GATE-001` | Plan approval | DONE | PLAN-001..004 | Owner confirmed completion at implementation start (2026-10-23). Repository `am-fallah/neda` is private; `origin/main` is `6c4470f`; the initial commit manifest is exactly the nine approved paths; `.gitignore` is in history; working tree clean; no generated graph data tracked. The original independent re-review/preflight transcripts are not present in the repository; this status records the owner's confirmation and the verified outcome, not a reconstructed review. | Authorized only repo creation/docs push. |
+| `GATE-002` | Implementation start | DONE | REPO-003 | Explicit owner approval recorded 2026-10-23: tracker reconciliation from verified evidence, `brew install go` with exact-version recording, and M1.1 implementation on `feat/m1-service-skeleton` with a PR to `main`, small conventional commits, explicit-path staging, and staged-diff/secret reviews. | Authorizes code/tests/local toolchain for M1.1. Does not authorize live MrBilit calls or deployment. |
 | `GATE-003` | Bounded MrBilit live validation | TODO | GATE-002 | Explicit owner approval + target route/date + terms confirmation; dedicated one-process run with no retries/redirects, at most five read-only HTTP GET attempts total, and each request starting at least five seconds after the previous response completes. | Authorizes only that bounded protocol. Does not authorize auth bypass, parallel probing, load testing, scraping, following redirects, or retries. |
 | `GATE-004` | Deployment | TODO | OPS-005, DISC-005 | Explicit owner approval of the reviewed deployment plan; plan covers server, proxy/TLS, key/volume permissions, backups, rollback. | Authorizes only the approved deployment plan. No automatic approval from prior gates. |
 | `GATE-005` | Scope/security/data change (standing) | TODO | — | Explicit owner approval recorded when such a change is proposed. | Authorizes only the approved change; prohibits silent deviation from the brief. |
 
-**Current stop point:** `GATE-001` is awaiting independent re-review after `CORR-009` and explicit owner approval. Silence or a status request is not approval.
+**Current stop point:** `GATE-002` approved for M1.1 only. `GATE-003` (live provider validation) and `GATE-004` (deployment) remain blocked and unauthorized.
 
 ---
 
@@ -151,9 +150,9 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 
 | ID | Pri | Status | Depends on | Task and acceptance criteria | Verification / evidence |
 |---|---|---|---|---|---|
-| `REPO-001` | P0 | TODO | GATE-001 | Immediately before any repository creation, preflight: re-run `gh auth status`; re-check `gh repo view am-fallah/neda`; verify the authenticated account and repository visibility; if `neda` already exists, stop and ask the owner before reusing, replacing, or modifying it; record the outcome. Then create the private GitHub repository `neda`, initialize Git in the project directory, and configure the remote. Do **not** commit docs yet. AC: preflight recorded; repo private; Git initialized; no history overwrite; no docs/generated data committed. | `gh auth status` (masked); `gh repo view am-fallah/neda`; `gh repo view` visibility; `git status`; `git remote -v`. No GitHub/network action in planning. |
-| `REPO-002` | P0 | TODO | REPO-001 | Create the root `.gitignore` **before the first documentation commit**; include `.env*` (except example), DB/WAL/SHM, keys, `web/node_modules`, `web/dist` (except `.gitkeep`), `.codegraph/`, `**/.codegraph/`, logs, `.DS_Store`, build artifacts. The file may remain unstaged here; `REPO-003` explicitly stages and commits it with the initial documentation manifest. AC: root ignore exists; root and nested `docs/.codegraph/` are ignored; no docs/generated data staged; check-ignore passes. | `git check-ignore -v .codegraph/ docs/.codegraph/ .env data/neda.db web/node_modules web/dist`; `git status`. |
-| `REPO-003` | P0 | TODO | REPO-002 | Copy the reviewed `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION_PLAN.md` from the planning workspace into `docs/` (they are not yet present in the repository); prepare/replace the repository README with an English planning-state README; review that README against the actual files before committing. `REPO-002` provides `.gitignore`; the other manifest files already exist in the starter repository, and the README is replaced by this task. **Do not use `git add .`, `git add -A`, or `git add --all`; stage only the nine paths below explicitly by path.** The README must explicitly state that application implementation is not yet present; must not invent commands, environment-variable names/values, unimplemented features, misleading setup instructions, or configuration placeholders presented as supported settings; must distinguish planned from implemented functionality; and must contain no secrets. Stage only this explicit initial manifest by path: `.gitignore`, `AGENTS.md`, `START_PROMPT.md`, `README.md`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`. Do not stage `.DS_Store`, `docs/.codegraph/`, database/WAL/SHM files, credentials, or generated index artifacts. Before committing, require `git diff --cached --name-only` to list exactly the nine paths and inspect `git status --porcelain` for unexpected staged or untracked artifacts; stop and correct any mismatch. Run a secret scan/staged-diff review, commit descriptively, and push to the verified private remote. AC: manifest exactly as listed; broad staging commands not used; `git diff --cached --name-only` exact; `git status --porcelain` inspected; `.gitignore` in history; English planning-state README reviewed against actual files and makes no implementation claim; no secrets/generated data; remote private; push successful; no force-push/history overwrite. | README review; `git diff --cached --name-only` (must equal the nine paths); `git status --porcelain` (unexpected artifacts inspected); `git ls-files`; `git log`; `gh repo view`; `git check-ignore -v docs/.codegraph/`. |
+| `REPO-001` | P0 | DONE | GATE-001 | Immediately before any repository creation, preflight: re-run `gh auth status`; re-check `gh repo view am-fallah/neda`; verify the authenticated account and repository visibility; if `neda` already exists, stop and ask the owner before reusing, replacing, or modifying it; record the outcome. Then create the private GitHub repository `neda`, initialize Git in the project directory, and configure the remote. Do **not** commit docs yet. AC: preflight recorded; repo private; Git initialized; no history overwrite; no docs/generated data committed. | `gh auth status` (masked); `gh repo view am-fallah/neda`; `gh repo view` visibility; `git status`; `git remote -v`. No GitHub/network action in planning. |
+| `REPO-002` | P0 | DONE | REPO-001 | Create the root `.gitignore` **before the first documentation commit**; include `.env*` (except example), DB/WAL/SHM, keys, `web/node_modules`, `web/dist` (except `.gitkeep`), `.codegraph/`, `**/.codegraph/`, logs, `.DS_Store`, build artifacts. The file may remain unstaged here; `REPO-003` explicitly stages and commits it with the initial documentation manifest. AC: root ignore exists; root and nested `docs/.codegraph/` are ignored; no docs/generated data staged; check-ignore passes. | `git check-ignore -v .codegraph/ docs/.codegraph/ .env data/neda.db web/node_modules web/dist`; `git status`. |
+| `REPO-003` | P0 | DONE | REPO-002 | Copy the reviewed `PRODUCT_SPEC.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION_PLAN.md` from the planning workspace into `docs/` (they are not yet present in the repository); prepare/replace the repository README with an English planning-state README; review that README against the actual files before committing. `REPO-002` provides `.gitignore`; the other manifest files already exist in the starter repository, and the README is replaced by this task. **Do not use `git add .`, `git add -A`, or `git add --all`; stage only the nine paths below explicitly by path.** The README must explicitly state that application implementation is not yet present; must not invent commands, environment-variable names/values, unimplemented features, misleading setup instructions, or configuration placeholders presented as supported settings; must distinguish planned from implemented functionality; and must contain no secrets. Stage only this explicit initial manifest by path: `.gitignore`, `AGENTS.md`, `START_PROMPT.md`, `README.md`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`. Do not stage `.DS_Store`, `docs/.codegraph/`, database/WAL/SHM files, credentials, or generated index artifacts. Before committing, require `git diff --cached --name-only` to list exactly the nine paths and inspect `git status --porcelain` for unexpected staged or untracked artifacts; stop and correct any mismatch. Run a secret scan/staged-diff review, commit descriptively, and push to the verified private remote. AC: manifest exactly as listed; broad staging commands not used; `git diff --cached --name-only` exact; `git status --porcelain` inspected; `.gitignore` in history; English planning-state README reviewed against actual files and makes no implementation claim; no secrets/generated data; remote private; push successful; no force-push/history overwrite. | README review; `git diff --cached --name-only` (must equal the nine paths); `git status --porcelain` (unexpected artifacts inspected); `git ls-files`; `git log`; `gh repo view`; `git check-ignore -v docs/.codegraph/`. |
 | `FND-001` | P0 | BLOCKED | GATE-002 | Install/verify Go and pin toolchain. **Blocker:** Go not installed. **Unblock:** owner approves installation after GATE-002. Homebrew’s `1.27.3` is an observation, not an approved pin: verify the current stable release and compatibility with `modernc.org/sqlite`, Web Push, and Jalali libraries, then record the exact version in `go.mod`/CI. AC: selected version builds the module. | `brew info go` (observation only); `go version`; `go env GOVERSION`; `go mod tidy`; `go build ./...`. |
 | `FND-002` | P2 | TODO | GATE-002 | Optional local Docker/Compose runtime. AC: `docker version`/`docker compose version` work; if not installed, CI Docker build is the fallback and this task remains P2/not run. | `docker version`; `docker compose version`; `docker run hello-world` only if approved. |
 | `FND-003` | P0 | TODO | FND-001, GATE-002 | Scaffold repository tree, `go.mod`, `cmd/neda`, package skeletons, Makefile, `.dockerignore`, `.env.example` (placeholders only); preserve/update the root `.gitignore` created by `REPO-002` without weakening `.codegraph/`, `**/.codegraph/`, or secret/database rules. AC: tree matches architecture; no secrets; build succeeds. | `go build ./...`; `gofmt -l .` (empty); `git status`; secret scan; `git check-ignore -v docs/.codegraph/`. |
@@ -398,8 +397,14 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 | 2026-10-23 | `PLAN-003` | TODO → DONE | This tracker created at `/Users/fallah/.opencode/plan/IMPLEMENTATION_PLAN.md`. |
 | 2026-10-23 | `PLAN-004` | TODO → DONE | Assumptions/risks/owner inputs recorded in docs. |
 | 2026-10-23 | `GATE-001` | TODO → IN_PROGRESS | Plan presented; awaiting explicit owner approval. No repo/code/deploy action taken. |
+| 2026-10-23 | `GATE-001` | IN_PROGRESS → DONE | Owner confirmed completion at implementation start. Verified `gh repo view am-fallah/neda` → private, default `main`; `git status -sb` → clean `main...origin/main`; `git log -1` → `6c4470f`; `git show --name-only 6c4470f` → exactly the nine approved paths; `.gitignore` includes `.codegraph/` and `**/.codegraph/`. Original re-review/preflight transcripts are not in the repository; status records owner confirmation and verified outcome. |
+| 2026-10-23 | `REPO-001` | TODO → DONE | Repository exists, is private, default branch `main`, remote configured; current state verified read-only. Original creation preflight transcript is not preserved in the repository. |
+| 2026-10-23 | `REPO-002` | TODO → DONE | Root `.gitignore` committed in `6c4470f`; `git check-ignore -v .codegraph/ docs/.codegraph/codegraph.db .env data/neda.db` confirms ignore rules. |
+| 2026-10-23 | `REPO-003` | TODO → DONE | Initial commit `6c4470f` contains exactly nine paths (`.gitignore`, `AGENTS.md`, `README.md`, `START_PROMPT.md`, and the five `docs/*.md` files); tracked tree contains no graph data or secrets; remote `origin/main` matches. |
+| 2026-10-23 | `GATE-002` | TODO → DONE | Owner explicitly approved implementation start, Go installation, tracker reconciliation, and M1.1 on `feat/m1-service-skeleton` with PR to `main`. |
+| 2026-10-23 | `FND-001` | BLOCKED → IN_PROGRESS | GATE-002 approved; installing Go and verifying the exact version. |
 
-**Not run:** application tests, builds, lint, race, Docker build, live MrBilit requests, server inspection, Git init/commit/push, repository creation. No claim of success for any of these.
+**Not run:** application tests, builds, lint, race, Docker build, live MrBilit requests, server inspection, deployment. No claim of success for any of these.
 
 ### 7.1 Correction history (document-only, 2026-10-23)
 
@@ -553,13 +558,12 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 ## 11. Next proposed action
 
-1. **Independent re-review:** verify the `CORR-009` corrections in this plan, `PRODUCT_SPEC.md`, and `ARCHITECTURE.md`; repeat the dependency/consistency checks. This correction pass is not an approval.
-2. **`GATE-001`:** after an independent re-review declares the documents ready and the owner approves, the reviewed plans may be copied from the planning workspace to `docs/` and committed to the private repository. Approval authorizes only repo creation/docs push.
-3. **`GATE-002`:** after repo/docs review, owner explicitly approves implementation start, including installation of Go (and optionally Docker/Colima). Application code begins with `M1`.
-4. **`GATE-003`:** owner approves the bounded live-validation protocol; `PRV-006` runs only under the exact five-attempt/no-retry/no-redirect rules.
-5. **`GATE-004`:** only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
+1. **M1.1 execution:** `FND-001`, `FND-003`, `FND-004`, `FND-005`, `FND-007`, `FND-006`, `FND-010`, `FND-011`, `FND-012` on `feat/m1-service-skeleton`, with evidence recorded here after each task.
+2. **M1.2:** `FND-008` (repository/transaction layer) and `FND-009` (auth foundation) complete the M1 exit criteria.
+3. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
+4. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
 
-**Hard stop:** no repository creation, Git init, commit/push, application code, live provider calls, or server access until the relevant gate is explicitly approved. Silence or a request to report status is not approval.
+**Hard stop:** no live provider calls, server access, or deployment under the current approval. Silence or a status request is not approval for a new gate.
 
 ---
 
