@@ -1,4 +1,4 @@
-.PHONY: build test race vet fmt fmt-check check
+.PHONY: build test race vet fmt fmt-check check run
 
 build:
 	go build ./...
@@ -19,3 +19,6 @@ fmt-check:
 	test -z "$$(gofmt -l .)"
 
 check: fmt-check vet test build
+
+run:
+	NEDA_ENV=development go run ./cmd/neda serve
