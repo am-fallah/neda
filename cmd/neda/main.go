@@ -19,12 +19,16 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	command := "help"
+	command := "serve"
 	if len(args) > 0 {
 		command = args[0]
 	}
 
 	switch command {
+	case "serve":
+		return runServe(stdout, stderr)
+	case "healthcheck":
+		return runHealthcheck(stdout, stderr)
 	case "version", "--version", "-version":
 		fmt.Fprintf(stdout, "neda %s (commit %s, built %s)\n", version, commit, date)
 		return 0
@@ -42,6 +46,8 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Usage: neda <command>")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Commands:")
-	fmt.Fprintln(w, "  version    Print build version information")
-	fmt.Fprintln(w, "  help       Print this help")
+	fmt.Fprintln(w, "  serve        Run the Neda service (default)")
+	fmt.Fprintln(w, "  healthcheck  Probe the local health endpoint")
+	fmt.Fprintln(w, "  version      Print build version information")
+	fmt.Fprintln(w, "  help         Print this help")
 }
