@@ -53,6 +53,9 @@ func TestLoadProductionDefaults(t *testing.T) {
 	if cfg.SessionTTL != 720*time.Hour || cfg.SessionIdle != 168*time.Hour {
 		t.Fatalf("session durations = %v/%v", cfg.SessionTTL, cfg.SessionIdle)
 	}
+	if cfg.FakeProviderEnabled {
+		t.Fatal("FakeProviderEnabled = true by default")
+	}
 	if cfg.Workers != 2 {
 		t.Fatalf("Workers = %d", cfg.Workers)
 	}
