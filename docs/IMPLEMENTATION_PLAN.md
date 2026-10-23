@@ -1,9 +1,9 @@
 # Neda — Implementation Plan and Task Registry
 
-**Status:** Draft for owner review. Awaiting `GATE-001`. No implementation is authorized by this document alone.
+**Status:** Planning baseline approved under `GATE-001`; `GATE-002` authorizes M1.1 implementation on `feat/m1-service-skeleton`. `GATE-003` and `GATE-004` remain unauthorized.
 **Date:** 2026-10-23
 **Authoritative product source:** `docs/BRIEF.md`; behavior: `PRODUCT_SPEC.md`; design: `ARCHITECTURE.md`.
-**Repository path:** `docs/IMPLEMENTATION_PLAN.md` after `GATE-001` approval.
+**Repository path:** `docs/IMPLEMENTATION_PLAN.md`
 
 > **Single tracker contract:** This file is the only active task tracker. Do not create a second TODO/status file. Update this file when a task starts, becomes blocked, or completes, and reconcile it at every session/milestone end.
 
@@ -40,9 +40,9 @@
 | Item | Finding | Evidence |
 |---|---|---|
 | Working directory | `/Users/fallah/Desktop/Neda` | `pwd` |
-| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/BRIEF.md`, `docs/CODEGRAPH_WORKFLOW.md`, `docs/PRODUCT_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/IMPLEMENTATION_PLAN.md`, `docs/.codegraph/` (generated empty index, ignored), `.DS_Store` | `find . -type f`; `git ls-files`; see §2.4 |
-| Git | Git repository; branch `main` tracks `origin/main` at `6c4470f`; working tree clean at inspection; root `.gitignore` present | `git status -sb`; `git log -1 --oneline`; `git ls-files` |
-| Existing work | Approved planning docs only; preserved; no application source or tests | Inspection; `git ls-files` |
+| Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/*.md`, M1.1 Go source/tests under `cmd/` and `internal/`, CI workflow, `docs/.codegraph/` (generated empty index, ignored), `.codegraph/` (generated root index, ignored), `.DS_Store` | `find . -type f`; `git ls-files`; see §2.4 |
+| Git | Git repository; `feat/m1-service-skeleton` tracks `origin` with M1.1 commits; `main` remains at `6c4470f`; working tree clean at last check; root `.gitignore` present | `git status -sb`; `git log --oneline main..HEAD`; `git ls-files` |
+| Existing work | Approved planning docs plus M1.1 Go skeleton/tests; PR #1 open and CI-green; no frontend or feature-level monitoring code | `git diff --stat main...HEAD`; PR #1; `make check` |
 | Planning documents | Reviewed copies are committed in `docs/` at `6c4470f`; the superseded working copies remain outside the repository in `/Users/fallah/.opencode/plan/` and are not authoritative. | `git show --stat 6c4470f`; `git ls-files docs/` |
 | OpenCode | 2.1.4 | `opencode --version` |
 | Local timezone | `Asia/Tehran` (+0330) | `date`, `/etc/localtime` |
@@ -79,13 +79,13 @@
 |---|---|
 | CLI | `codegraph 1.6.2` at `/Users/fallah/.local/bin/codegraph` |
 | `codegraph --help` | Supported commands observed: `init`, `uninit`, `index`, `sync`, `status`, `query`, `explore`, `context`, `node`, `files`, `callers`, `callees`, `impact`, `affected`, `install`, `uninstall`, `telemetry`, `upgrade`, `daemon`, `unlock`, `version`, `help` |
-| Root `codegraph status` | Project `/Users/fallah/Desktop/Neda` — **not initialized** |
+| Root `codegraph status` | Project `/Users/fallah/Desktop/Neda` — **initialized** after M1.1 Go source; 17 files, 281 nodes, 611 edges; index reported up to date |
 | Nested index | `docs/.codegraph/codegraph.db` exists; `codegraph status docs` reports an initialized **empty** index (0 files/nodes/edges, 0.16 MB); `docs/.codegraph/.gitignore` exists |
 | Root `.gitignore` | **Present**; includes `.codegraph/` and `**/.codegraph/`; `git check-ignore` confirms root and nested graph data are ignored |
 | `opencode mcp list` | `codegraph` connected; `shadcn` connected |
 | MCP tool actually exposed | CodeGraph **explore** only (harness name `codegraph_codegraph_explore`; documented as `codegraph_explore`). No assumption of other MCP tools. |
-| Index action | Root index not initialized at inspection; no root `codegraph init`, sync, or query was run during reconciliation. Removal/move of `docs/.codegraph` requires a separate owner decision. |
-| Query action | None run; the nested empty index is not a meaningful source graph |
+| Index action | `codegraph init` run at the root after M1.1 Go source existed; `codegraph status` verified. The nested `docs/.codegraph` was not removed or moved. |
+| Query action | MCP explore traced `cmd/neda` serve startup through config, db, and httpapi; 37 symbols returned. Findings checked against source/tests. |
 
 ### 2.5 Verification not performed
 
@@ -162,7 +162,7 @@ These gates are tracked here, not duplicated as implementation tasks in §5.
 | `FND-007` | P0 | DONE | FND-003 | SQLite open/PRAGMAs/migration runner/embedded baseline migrations (`0001`–`0003`); `NTF-000` adds the notifications migration. AC: WAL/FK/busy timeout; `synchronous=FULL` per §7.1 and §6.1; effective `PRAGMA synchronous` is `FULL` (2) on initial and replacement connections; `check_runs` running/finished CHECK and enum/boolean/counter constraints per Architecture §7.2; idempotent migrations; checksum mismatch rejected; failing migration rolls back; `foreign_key_check`/`integrity_check` clean. | `go test ./internal/db/...` passed; `go test -race ./internal/db/...` passed; initial/replacement PRAGMA tests; checksum/rollback/newer-database tests; constraint matrix; FK/integrity checks; `modernc.org/sqlite v1.61.0`. |
 | `FND-008` | P0 | TODO | FND-007 | Repository layer and transaction helper for core tables. AC: CRUD + tx tests; no SQL string concatenation; FK behavior verified. | `go test ./internal/store/...`; `go vet ./...`. |
 | `FND-009` | P0 | TODO | FND-007 | Auth foundation: users/sessions, Argon2id, `neda set-password` TTY-only, session middleware, CSRF for authenticated routes, login Origin/Referer + rate limiting. AC: no default password; no password args; cookie flags; login CSRF policy matches architecture §14.2/§14.7; tests. | `go test ./internal/auth/...`; manual `neda set-password`; inspect cookie flags via `httptest`. |
-| `FND-010` | P1 | IN_PROGRESS | FND-003 | Go CI workflow: gofmt/vet/test/race/build; no secrets/deploy; pinned Go version. AC: Go CI passes on a clean branch; frontend CI is separate. | Local: `go mod tidy`, `git diff --exit-code -- go.mod go.sum`, `make check`, `make race` passed. GitHub Actions result pending PR. |
+| `FND-010` | P1 | DONE | FND-003 | Go CI workflow: gofmt/vet/test/race/build; no secrets/deploy; pinned Go version. AC: Go CI passes on a clean branch; frontend CI is separate. | GitHub Actions run [40019219808](https://github.com/am-fallah/neda/actions/runs/40019219808) passed in 2m27s on PR #1; local `make check`/`make race` also passed. |
 | `FND-011` | P0 | DONE | FND-003 | Initialize CodeGraph only after meaningful Go source exists. Ensure root `.gitignore` has `.codegraph/` and `**/.codegraph/`; `codegraph status`; `codegraph init` at root; `codegraph status`; use explore for one non-trivial trace; record. AC: graph initialized; root and nested graph data ignored; no graph data committed; existing `docs/.codegraph` not deleted/moved without owner approval. | `codegraph status` → not initialized; `codegraph init` → 17 files, 281 nodes, 611 edges; `codegraph status` → up to date; MCP `codegraph_codegraph_explore` traced serve startup (`main`/`runServe` → config/db/httpapi) and returned 37 symbols; `git check-ignore -v .codegraph/ docs/.codegraph/codegraph.db` passed; no graph data tracked. |
 | `FND-012` | P1 | DONE | FND-003 | Update the English planning-state README as implementation starts; add only verified commands/configuration and distinguish implemented from planned functionality; do not add environment-variable names/values or setup details until they exist and are verified; final implementation-specific sections remain in `OPS-004`. AC: English-only; README reviewed against actual files; no unverified setup/details/features; no secrets; commands reflect reality. | README reviewed against implemented packages/commands; `make check`, `make race`, `make run`, health/ready curl, and `NEDA_ENV=development go run ./cmd/neda healthcheck` verified; planned features explicitly marked not implemented; `.env.example` placeholders identified as reserved where applicable; no secrets. |
 
@@ -413,6 +413,7 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 | 2026-10-23 | `FND-010` | TODO → IN_PROGRESS | `.github/workflows/ci.yml` added with formatting, tidy, vet, test, race, and build steps. Local `make check`, `make race`, and `go mod tidy` diff check passed; GitHub Actions run pending PR. |
 | 2026-10-23 | `FND-011` | TODO → DONE | `codegraph status` → not initialized; `codegraph init` → 17 files, 281 nodes, 611 edges; `codegraph status` → index up to date; MCP explore returned the serve startup path and 37 symbols; `git check-ignore -v .codegraph/ docs/.codegraph/codegraph.db` confirms both ignored; no graph data staged. |
 | 2026-10-23 | `FND-012` | TODO → DONE | README updated to implementation-in-progress status with implemented/planned split. Verified `make check`, `make race`, `make run`, `/healthz`, `/readyz`, and development healthcheck; all commands and configuration listed match the implemented skeleton; no secrets. |
+| 2026-10-23 | `FND-010` | IN_PROGRESS → DONE | PR #1 opened; GitHub Actions run [40019219808](https://github.com/am-fallah/neda/actions/runs/40019219808) passed the Go checks job (2m27s). Local `make check`/`make race` also passed. |
 
 **Not run in M1.1:** Docker build/compose validation (Docker not installed), live MrBilit/Telegram/Push requests, server inspection, deployment. No claim of success for these.
 
@@ -544,9 +545,9 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 | # | Brief DoD item | Tasks | Current status |
 |---|---|---|---|
-| 1 | Code in verified private GitHub repository `neda` | `REPO-001`, `REPO-002`, `REPO-003` | Not started |
-| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | Not started |
-| 3 | Persistent SQLite and migrations work safely | FND-007/008, SCH-001 | Not started |
+| 1 | Code in verified private GitHub repository `neda` | `REPO-001`, `REPO-002`, `REPO-003` | DONE (private repo; initial docs push verified) |
+| 2 | Go backend; React/TS/Vite/Tailwind/shadcn frontend | `FND-*`, `WEB-*`, `FND-013` | Go skeleton started (M1.1); frontend not started |
+| 3 | Persistent SQLite and migrations work safely | FND-007/008, SCH-001 | Migrations/PRAGMAs done (`FND-007`); repository layer pending (`FND-008`) |
 | 4 | Multiple monitors survive restarts | SCH-001/002/009 | Not started |
 | 5 | One job can select multiple providers | SCH-001/008, PRV-009 | Not started |
 | 6 | MrBilit first real adapter; fake provider proves independence | PRV-001..009 | Not started |
@@ -559,7 +560,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | 13 | Validated booking links included; unverified omitted | `PRV-007`, `WEB-006` | Not started |
 | 14 | Jalali/Gregorian conversion and Tehran expiry tested | `PRV-008`, `WEB-004`, `SCH-007` | Not started |
 | 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | Not started |
-| 16 | Critical tests/builds/static checks pass | `OPS-007` | Not started |
+| 16 | Critical tests/builds/static checks pass | `OPS-007` | M1.1 checks pass; full suite pending |
 | 17 | Deployment/backup workflow documented for constrained host | `OPS-004`/`OPS-005`/`OPS-009` | Not started |
 | 18 | No production deployment without approval | `GATE-004` | Not started |
 | 19 | Docs/limitations accurately reflect behavior | `PLAN`, `OPS-004`/`OPS-008` | In progress/planning |
@@ -568,7 +569,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 ## 11. Next proposed action
 
-1. **M1.1 execution:** `FND-001`, `FND-003`, `FND-004`, `FND-005`, `FND-007`, `FND-006`, `FND-010`, `FND-011`, `FND-012` on `feat/m1-service-skeleton`, with evidence recorded here after each task.
+1. **M1.1 status:** all M1.1 tasks (`FND-001`, `FND-003`, `FND-004`, `FND-005`, `FND-007`, `FND-006`, `FND-010`, `FND-011`, `FND-012`) are `DONE` on `feat/m1-service-skeleton`; PR #1 is green and awaiting owner merge. M1 remains `IN_PROGRESS` because `FND-008`/`FND-009` are not done.
 2. **M1.2:** `FND-008` (repository/transaction layer) and `FND-009` (auth foundation) complete the M1 exit criteria.
 3. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
 4. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.

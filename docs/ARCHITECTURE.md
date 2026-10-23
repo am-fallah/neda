@@ -1790,13 +1790,13 @@ Additional optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Do n
 ### 23.1 Verified current state (2026-10-23, corrected)
 
 - CLI: `codegraph 1.6.2` at `/Users/fallah/.local/bin/codegraph`.
-- `codegraph status` at the repository root: project `/Users/fallah/Desktop/Neda`, **not initialized**.
+- `codegraph status` at the repository root: after M1.1 Go source existed, the root index was initialized (17 files, 281 nodes, 611 edges) and reported up to date.
 - `codegraph status docs`: `docs/.codegraph/codegraph.db` exists as an **empty initialized index** (0 files/nodes/edges, 0.16 MB). `docs/.codegraph/.gitignore` also exists.
 - Root `.gitignore` is present and committed; it includes `.codegraph/` and `**/.codegraph/`. The existing nested index has not been removed or moved.
 - `opencode mcp list`: `codegraph` connected, `shadcn` connected.
 - OpenCode 2.1.4.
 - Actual MCP tool exposed in this session: the CodeGraph **explore** tool (harness name `codegraph_codegraph_explore`; documented as `codegraph_explore`). Do not assume `node`/`callers`/`impact` MCP tools are exposed. The CLI supports `init`, `index`, `sync`, `status`, `query`, `explore`, `context`, `node`, `files`, `callers`, `callees`, `impact`, `affected`, `install`, `uninstall`, `telemetry`, `upgrade`, `daemon`, `unlock`, `version`, `help`.
-- No root CodeGraph index was initialized at reconciliation; the nested empty index is not a meaningful source graph and must not be committed.
+- The root CodeGraph index was initialized after M1.1 source existed; it is ignored and untracked. The nested empty index is not a meaningful source graph and must not be committed.
 - Removing or moving `docs/.codegraph` requires a separate explicit owner decision; do not delete it as part of routine planning or repository setup.
 
 ### 23.2 Initialization timing and procedure

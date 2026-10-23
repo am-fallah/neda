@@ -401,7 +401,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 
 | ID | Statement | Classification | Impact / action |
 |---|---|---|---|
-| A-01 | Working directory is `/Users/fallah/Desktop/Neda`; it is a Git repository on `main` at `6c4470f` with a clean working tree, containing approved planning docs, a generated local `docs/.codegraph/` index (ignored), and no application source files. | VERIFIED (updated 2026-10-23) | Preserve existing docs; do not commit generated graph data. Implementation begins under GATE-002 with M1.1. |
+| A-01 | Working directory is `/Users/fallah/Desktop/Neda`; it is a Git repository on `main` at `6c4470f`, with M1.1 implementation on `feat/m1-service-skeleton` (PR #1), approved planning docs, an ignored local `docs/.codegraph/` index, an ignored root `.codegraph/` index, and no frontend source yet. | VERIFIED (updated 2026-10-23) | Preserve existing docs; do not commit generated graph data. M1.1 implementation is under GATE-002; feature-level monitoring work remains pending. |
 | A-02 | GitHub CLI is authenticated to account `am-fallah` with `repo`/`workflow` scopes; no token was printed. | VERIFIED | Repo creation is possible after approval. |
 | A-03 | A repository named `neda` was not found under `am-fallah` in a read-only lookup. | VERIFIED (for this account) | Re-check before creation; do not assume no other owner has the name. |
 | A-04 | Git 2.54.0, Node 26.10.0, npm 11.19.1, pnpm 12.11.2, make 3.81, clang 21, sqlite3 3.54.0, curl 8.7.1 are available. | VERIFIED | Local frontend work is possible. |
