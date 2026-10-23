@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1.2 repository and authentication foundation.** The repository contains the approved planning documents, a bootable Go service foundation, and the repository/auth primitives. HTTP authentication endpoints, route protection, monitoring, providers, scheduling, notifications, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1 complete; M2 initial provider foundation complete.** The repository contains the approved planning documents, a bootable Go service foundation, the repository/auth primitives, and the normalized provider boundary with a deterministic test-only fake provider. The MrBilit adapter, HTTP authentication endpoints, route protection, monitoring, scheduling, notifications, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -16,7 +16,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `neda healthcheck` for local/container health probes.
 - Backend CI for formatting, module tidiness, vet, tests, race tests, and build.
 
-**M1.2 repository and authentication foundation**
+**M1.2 repository and authentication foundation (complete)**
 
 - `internal/store`: transaction helper and repositories for settings, the single owner user, and sessions, with real-SQLite transaction, constraint, and foreign-key tests.
 - Argon2id password hashing with encoded parameters; minimum 12 characters and a bounded maximum.
@@ -24,9 +24,16 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - Session and CSRF primitives: 32-byte random tokens stored only as SHA-256 hashes, HttpOnly session and `neda_csrf` cookies, idle/absolute expiry, logout and password-change revocation.
 - Origin/Referer validation, double-submit CSRF middleware, and in-memory per-client/global login rate limiting. HTTP auth endpoints and route protection remain for the API milestone.
 
+**M2 initial provider foundation (approved slice complete)**
+
+- `internal/provider`: normalized provider IDs, availability states, capabilities, metadata, request/result types, `Provider` interface, and an explicit immutable registry that rejects nil, duplicate, empty-ID, and empty-display-name entries.
+- Shared error taxonomy and `Classify` contract for scheduler/health: success, infrastructure, configuration, route, request, and abandoned categories; timeout/network/429/5xx/invalid-response and provider-side cancellation are infrastructure failures, while 4xx/route/config are not.
+- `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
+- Fake-provider UI labeling and the MrBilit adapter remain for later milestones.
+
 ## Not implemented yet
 
-HTTP authentication endpoints and private-route enforcement, monitor CRUD, provider adapters, the fake provider, the scheduler, availability episodes/events, Telegram, Web Push, the dashboard, Docker packaging, and deployment. Nothing in this repository authorizes live provider traffic or deployment.
+HTTP authentication endpoints and private-route enforcement, monitor CRUD, the MrBilit adapter, scheduler behavior, availability episodes/events, Telegram, Web Push, the dashboard, Docker packaging, and deployment. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 
@@ -76,8 +83,9 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
 
-`.env.example` lists placeholders for settings validated by the loader but reserved for later milestones (workers, VAPID, and the fake provider). The HTTP endpoints that consume the session settings are pending `API-001`/`API-005`. Do not commit real secrets.
+`.env.example` lists placeholders for settings validated by the loader but reserved for later milestones (workers and VAPID). The HTTP endpoints that consume the session settings are pending `API-001`/`API-005`. Do not commit real secrets.
 
 ## Repository layout
 
@@ -89,6 +97,8 @@ internal/db/          SQLite open/PRAGMAs, migration runner, readiness
 internal/migrations/  embedded forward-only SQL migrations
 internal/store/       transaction helper and core repositories
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
+internal/provider/    normalized provider boundary, registry, and classification
+internal/provider/fake/ deterministic test-only provider
 internal/httpapi/     HTTP server, middleware, health/readiness
 docs/                 approved planning documents
 .github/workflows/    backend CI
@@ -109,4 +119,5 @@ docs/                 approved planning documents
 - No production server access or deployment is authorized by this repository state.
 - Runtime secrets must be supplied outside the repository.
 - The auth foundation stores only session/CSRF hashes; raw tokens live in HttpOnly cookies. HTTP auth endpoints are not implemented yet.
+- The fake provider is test-only, disabled by default, and must never be presented as a real ticket source.
 - Do not commit passwords, tokens, cookies, private keys, encryption keys, Push subscription material, production environment files, or private runtime data.
