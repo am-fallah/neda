@@ -41,8 +41,8 @@
 |---|---|---|
 | Working directory | `/Users/fallah/Desktop/Neda` | `pwd` |
 | Existing files | `AGENTS.md`, `README.md`, `START_PROMPT.md`, `.gitignore`, `docs/*.md`, M1 Go source/tests under `cmd/` and `internal/`, CI workflow, `docs/.codegraph/` (generated empty index, ignored), `.codegraph/` (generated root index, ignored), `.DS_Store`; M2 initial slice adds `internal/provider` and `internal/provider/fake` | `find . -type f`; `git ls-files`; see §2.4 |
-| Git | Git repository; PR #2 merged into `main` at `40f1fc0`; local `main` synchronized with `origin/main`; `feat/m2-provider-foundation` created from `main`; working tree clean at M2 start; root `.gitignore` present | `git status -sb`; `git log --oneline -8`; `git ls-files` |
-| Existing work | Approved planning docs plus M1 Go service/store/auth foundation; PR #1 and PR #2 merged with green CI; M2 initial provider foundation implemented on `feat/m2-provider-foundation`; no frontend or feature-level monitoring code | PR #1; PR #2; `.github/workflows/ci.yml`; see §2.3 |
+| Git | Git repository; PR #2 merged into `main` at `40f1fc0`; local `main` synchronized with `origin/main`; `feat/m2-provider-foundation` contains the M2 initial-slice commits and tracks `origin`; PR #3 is open; root `.gitignore` present | `git status -sb`; `git log --oneline -8`; `git ls-files` |
+| Existing work | Approved planning docs plus M1 Go service/store/auth foundation; PR #1 and PR #2 merged with green CI; M2 initial provider foundation implemented and PR #3 open with green CI; no frontend or feature-level monitoring code | PR #1; PR #2; PR #3; `.github/workflows/ci.yml`; see §2.3 |
 | Planning documents | Reviewed copies are committed in `docs/` at `6c4470f`; the superseded working copies remain outside the repository in `/Users/fallah/.opencode/plan/` and are not authoritative. | `git show --stat 6c4470f`; `git ls-files docs/` |
 | OpenCode | 2.1.4 | `opencode --version` |
 | Local timezone | `Asia/Tehran` (+0330) | `date`, `/etc/localtime` |
@@ -73,7 +73,7 @@
 - PR #1 (`M1.1: bootable service skeleton and schema foundation`) is **merged** (2026-10-23T20:50:10Z) by `am-fallah`; PR head `b87cf56`, merge commit `f2252e5`.
 - PR #2 (`M1.2: repository layer and authentication foundation`) is **merged** (2026-10-23T21:22:09Z) by `am-fallah`; PR head `055a08b`, merge commit `40f1fc0`.
 - CI: PR #1 head run [40021998627](https://github.com/am-fallah/neda/actions/runs/40021998627) passed; PR #2 head run [40025616168](https://github.com/am-fallah/neda/actions/runs/40025616168) passed; merged-`main` run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed in 2m46s.
-- No open PRs at M2 start.
+- PR #3 (`M2: provider boundary, classification, and fake provider`) is **OPEN** against `main` at <https://github.com/am-fallah/neda/pull/3>; head `1e7eaad`; Go checks run [40028313070](https://github.com/am-fallah/neda/actions/runs/40028313070) passed in 38s. Not merged.
 - The initial documentation commit contains exactly the nine approved paths; `.gitignore` is in history.
 - No token, cookie, key, or credential value was printed or stored.
 
@@ -434,6 +434,8 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 
 **M1.2 milestone verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed; PR #2 Go checks run [40025075987](https://github.com/am-fallah/neda/actions/runs/40025075987) (code head `0098697`) and run [40025493263](https://github.com/am-fallah/neda/actions/runs/40025493263) (docs/evidence head `29e6614`) passed. `codegraph status` reports 37 files, 632 nodes, 1,654 edges, up to date; `.codegraph/` and `docs/.codegraph/` remain ignored and no graph data is tracked. Manual TTY `set-password` via a pty: exit 0, no echo, `$argon2id$` hash; non-TTY exit 1; password argument exit 2. No Docker, live provider, server, or deployment checks were run for M1.2.
 
+**M2 initial-slice verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go test -race ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed. Coverage: `internal/provider` 95.6%, `internal/provider/fake` 88.9%. Tests cover registry nil/duplicate/empty-ID/empty-display-name rejection, safe typed error rendering, state/kind validation, the full classification matrix, deterministic fake-provider scenarios, context cancellation/deadline, fake-only route IDs, and default-disabled config. No `mrbilit` references exist under `internal/`; no scheduler/UI/database migration was added. `codegraph status` reports 43 files, 777 nodes, 2,063 edges, up to date. PR #3 Go checks run [40028313070](https://github.com/am-fallah/neda/actions/runs/40028313070) passed in 38s. No live provider, server, or deployment checks were run.
+
 ### 7.1 Correction history (document-only, 2026-10-23)
 
 | ID | Change | Evidence |
@@ -577,7 +579,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | 13 | Validated booking links included; unverified omitted | `PRV-007`, `WEB-006` | Not started |
 | 14 | Jalali/Gregorian conversion and Tehran expiry tested | `PRV-008`, `WEB-004`, `SCH-007` | Not started |
 | 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | `FND-009` primitives/middleware done and locally tested; HTTP endpoints and private-route enforcement pending `API-001`/`API-005` |
-| 16 | Critical tests/builds/static checks pass | `OPS-007` | M2 slice local checks pass; PR #3 CI pending; full suite later |
+| 16 | Critical tests/builds/static checks pass | `OPS-007` | M2 slice local checks and PR #3 CI pass; full suite later |
 | 17 | Deployment/backup workflow documented for constrained host | `OPS-004`/`OPS-005`/`OPS-009` | Not started |
 | 18 | No production deployment without approval | `GATE-004` | Not started |
 | 19 | Docs/limitations accurately reflect behavior | `PLAN`, `OPS-004`/`OPS-008` | In progress/planning |
@@ -587,10 +589,10 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 ## 11. Next proposed action
 
 1. **M1 status:** complete. PR #1 (`f2252e5`) and PR #2 (`40f1fc0`) are merged; the merged-`main` CI run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed. `FND-002` remains an optional P2 Docker task; Docker is not installed and is not an M1 blocker.
-2. **M2 status:** the `GATE-007` initial slice is complete: `PRV-001`, `PRV-010`, and `PRV-002` are `DONE` with local evidence and PR #3 pending review. `PRV-003`–`PRV-005` and `PRV-009` remain `DEFERRED` by owner decision; `PRV-006` is `BLOCKED` by `GATE-003` and deferred `PRV-003`; `PRV-007`/`PRV-008` remain later `TODO`s. Fake-provider UI-label verification is deferred to the WEB milestone.
+2. **M2 status:** the `GATE-007` initial slice is complete: `PRV-001`, `PRV-010`, and `PRV-002` are `DONE` with local evidence and green PR #3 CI. `PRV-003`–`PRV-005` and `PRV-009` remain `DEFERRED` by owner decision; `PRV-006` is `BLOCKED` by `GATE-003` and deferred `PRV-003`; `PRV-007`/`PRV-008` remain later `TODO`s. Fake-provider UI-label verification is deferred to the WEB milestone.
 3. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
 4. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
-5. **PR #3:** open against `main` for owner review after M2-slice checks pass; the agent must not merge it.
+5. **PR #3:** open against `main` at <https://github.com/am-fallah/neda/pull/3> for owner review; the agent must not merge it.
 
 **Hard stop:** no live provider calls, server access, or deployment under the current approval. Silence or a status request is not approval for a new gate.
 
