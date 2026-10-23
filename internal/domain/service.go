@@ -12,13 +12,17 @@ import (
 )
 
 // MonitorServiceConfig controls the monitor CRUD service. Zero values receive
-// safe defaults; tests inject a clock, location, ID generator, and wake hook.
+// safe defaults; tests inject a clock, location, near-term scheduler, ID
+// generator, and wake hook.
 type MonitorServiceConfig struct {
-	Now           func() time.Time
-	Location      *time.Location
-	NearTermDelay time.Duration // SCH-002 supplies jitter; zero schedules immediately
-	NewID         func() (string, error)
-	Wake          func()
+	Now func() time.Time
+	// NearTermSchedule returns the next due time for a create/edit/resume. It
+	// must return now or a future time; earlier values are clamped to now.
+	// SCH-002 supplies the jittered implementation in production.
+	NearTermSchedule func(now time.Time) time.Time
+	Location         *time.Location
+	NewID            func() (string, error)
+	Wake             func()
 }
 
 // MonitorService owns monitor validation and CRUD orchestration. It does not
@@ -28,7 +32,7 @@ type MonitorService struct {
 	providers ProviderResolver
 	now       func() time.Time
 	loc       *time.Location
-	delay     time.Duration
+	nearTerm  func(time.Time) time.Time
 	newID     func() (string, error)
 	wake      func()
 }
@@ -57,15 +61,15 @@ func NewMonitorService(repo MonitorRepository, providers ProviderResolver, cfg M
 	if cfg.Wake == nil {
 		cfg.Wake = func() {}
 	}
-	if cfg.NearTermDelay < 0 {
-		return nil, errors.New("domain: near-term delay must not be negative")
+	if cfg.NearTermSchedule == nil {
+		cfg.NearTermSchedule = func(now time.Time) time.Time { return now }
 	}
 	return &MonitorService{
 		repo:      repo,
 		providers: providers,
 		now:       cfg.Now,
 		loc:       cfg.Location,
-		delay:     cfg.NearTermDelay,
+		nearTerm:  cfg.NearTermSchedule,
 		newID:     cfg.NewID,
 		wake:      cfg.Wake,
 	}, nil
@@ -82,7 +86,7 @@ func (s *MonitorService) Create(ctx context.Context, input MonitorInput) (Monito
 	if err != nil {
 		return Monitor{}, fmt.Errorf("domain: generate monitor id: %w", err)
 	}
-	scheduleAt := now.Add(s.delay)
+	scheduleAt := s.nearTermAt(now)
 	monitor := Monitor{
 		ID:              id,
 		Label:           normalized.Label,
@@ -132,7 +136,7 @@ func (s *MonitorService) Update(ctx context.Context, id string, input MonitorInp
 	if err != nil {
 		return Monitor{}, err
 	}
-	result, err := s.repo.UpdateMonitor(ctx, id, normalized, now, now.Add(s.delay), s.loc)
+	result, err := s.repo.UpdateMonitor(ctx, id, normalized, now, s.nearTermAt(now), s.loc)
 	if err != nil {
 		return Monitor{}, err
 	}
@@ -167,7 +171,7 @@ func (s *MonitorService) Pause(ctx context.Context, id string) (Monitor, error) 
 // near-term. Expired monitors must first receive a future departure date.
 func (s *MonitorService) Resume(ctx context.Context, id string) (Monitor, error) {
 	now := s.now().UTC()
-	monitor, err := s.repo.ResumeMonitor(ctx, id, now, now.Add(s.delay))
+	monitor, err := s.repo.ResumeMonitor(ctx, id, now, s.nearTermAt(now))
 	if err != nil {
 		return Monitor{}, err
 	}
@@ -182,6 +186,14 @@ func (s *MonitorService) Delete(ctx context.Context, id string) error {
 	}
 	s.wake()
 	return nil
+}
+
+func (s *MonitorService) nearTermAt(now time.Time) time.Time {
+	due := s.nearTerm(now).UTC()
+	if due.Before(now) {
+		return now
+	}
+	return due
 }
 
 func randomMonitorID() (string, error) {
