@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1.2 repository and authentication foundation.** The repository contains the approved planning documents, a bootable Go service foundation, and the repository/auth primitives. HTTP authentication endpoints, route protection, monitoring, providers, scheduling, notifications, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1 complete; M2 provider foundation in progress.** The repository contains the approved planning documents, a bootable Go service foundation, the repository/auth primitives, and an in-progress provider boundary. HTTP authentication endpoints, the MrBilit adapter, route protection, monitoring, scheduling, notifications, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
