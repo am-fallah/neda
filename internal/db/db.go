@@ -82,6 +82,11 @@ func dataSourceName(path string) string {
 	} {
 		values.Add("_pragma", pragma)
 	}
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		if absolute, err := filepath.Abs(path); err == nil {
+			path = absolute
+		}
+	}
 	parsed := &url.URL{Scheme: "file", Path: path}
 	parsed.RawQuery = values.Encode()
 	return parsed.String()

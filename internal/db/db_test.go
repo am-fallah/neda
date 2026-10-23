@@ -303,3 +303,18 @@ func TestOpenRejectsEmptyPath(t *testing.T) {
 		t.Fatal("Open(empty) succeeded")
 	}
 }
+
+func TestOpenAcceptsRelativePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	database, err := Open(context.Background(), "./data/neda.db")
+	if err != nil {
+		t.Fatalf("Open(relative): %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
+		t.Fatalf("Migrate(relative): %v", err)
+	}
+	if err := database.Ready(context.Background(), 3); err != nil {
+		t.Fatalf("Ready(relative): %v", err)
+	}
+}

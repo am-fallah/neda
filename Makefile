@@ -21,4 +21,4 @@ fmt-check:
 check: fmt-check vet test build
 
 run:
-	NEDA_ENV=development go run ./cmd/neda serve
+	NEDA_ENV=development NEDA_DB_PATH=./data/neda.db go run ./cmd/neda serve
