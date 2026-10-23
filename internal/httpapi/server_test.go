@@ -45,6 +45,16 @@ func request(t *testing.T, server *Server, method, target, host string, body io.
 
 func TestHealthz(t *testing.T) {
 	server, _ := testServer(t, Config{}, &fakeReadiness{})
+	if server.cfg.MaxBodyBytes != defaultMaxBodyBytes {
+		t.Fatalf("MaxBodyBytes = %d, want %d", server.cfg.MaxBodyBytes, defaultMaxBodyBytes)
+	}
+	if server.cfg.ReadHeaderTimeout != defaultReadHeader ||
+		server.cfg.ReadTimeout != defaultReadTimeout ||
+		server.cfg.WriteTimeout != defaultWriteTimeout ||
+		server.cfg.IdleTimeout != defaultIdleTimeout ||
+		server.cfg.ShutdownTimeout != defaultShutdownTimeout {
+		t.Fatalf("server timeouts not defaulted: %+v", server.cfg)
+	}
 	response := request(t, server, http.MethodGet, "http://localhost/healthz", "localhost", nil)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
