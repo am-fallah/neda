@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -30,6 +31,48 @@ func TestJSONLoggerRedactsSensitiveFields(t *testing.T) {
 	}
 	if !strings.Contains(output, "[REDACTED]") {
 		t.Fatalf("log output has no redaction marker: %s", output)
+	}
+}
+
+func TestLoggersRedactErrorValues(t *testing.T) {
+	err := errors.New("provider request failed: Authorization: Bearer bearer-secret-value token=token-secret-value https://user:password@example.com/path?token=query-secret-value#fragment")
+	for _, format := range []string{"json", "text"} {
+		t.Run(format, func(t *testing.T) {
+			var buf bytes.Buffer
+			logger := NewWithWriter(&buf, "debug", format)
+			logger.Error("provider check failed", "error", err, "request_id", "req-123")
+
+			output := buf.String()
+			for _, secret := range []string{"bearer-secret-value", "token-secret-value", "query-secret-value", "user:password", "fragment"} {
+				if strings.Contains(output, secret) {
+					t.Fatal("log output contains a value that should have been redacted")
+				}
+			}
+			for _, want := range []string{"provider check failed", "req-123", "[REDACTED]", "example.com/path"} {
+				if !strings.Contains(output, want) {
+					t.Fatalf("log output missing safe context %q", want)
+				}
+			}
+		})
+	}
+}
+
+func TestRedactAttrPreservesNonErrorValues(t *testing.T) {
+	type safeContext struct {
+		RequestID string
+	}
+	payload := safeContext{RequestID: "req-123"}
+	attr := RedactAttr(nil, slog.Any("context", payload))
+	if attr.Value.Kind() != slog.KindAny {
+		t.Fatalf("non-error Any kind = %s, want %s", attr.Value.Kind(), slog.KindAny)
+	}
+	if got, ok := attr.Value.Any().(safeContext); !ok || got != payload {
+		t.Fatal("non-error Any value was changed")
+	}
+
+	intAttr := RedactAttr(nil, slog.Int("count", 3))
+	if intAttr.Value.Kind() != slog.KindInt64 || intAttr.Value.Int64() != 3 {
+		t.Fatalf("Int attr = %s/%d, want int64/3", intAttr.Value.Kind(), intAttr.Value.Int64())
 	}
 }
 

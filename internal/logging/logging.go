@@ -61,8 +61,13 @@ func RedactAttr(_ []string, attr slog.Attr) slog.Attr {
 	if isSensitiveKey(attr.Key) {
 		return slog.String(attr.Key, redacted)
 	}
-	if attr.Value.Kind() == slog.KindString {
+	switch attr.Value.Kind() {
+	case slog.KindString:
 		return slog.String(attr.Key, RedactString(attr.Value.String()))
+	case slog.KindAny:
+		if err, ok := attr.Value.Any().(error); ok {
+			return slog.String(attr.Key, RedactString(err.Error()))
+		}
 	}
 	return attr
 }
