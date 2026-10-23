@@ -1,9 +1,9 @@
-# Neda — Architecture (Planning Draft)
+# Neda — Architecture
 
-**Status:** Draft for owner review. Not implementation authority until `GATE-001` is approved.
+**Status:** Planning baseline approved under `GATE-001` (2026-10-23). Implementation proceeds under `GATE-002` only within the scope recorded in `IMPLEMENTATION_PLAN.md`.
 **Date:** 2026-10-23
 **Authoritative source:** `docs/BRIEF.md`. Behavior details are in `PRODUCT_SPEC.md`; task tracking is in `IMPLEMENTATION_PLAN.md`.
-**Repository path:** `docs/ARCHITECTURE.md` after `GATE-001` approval.
+**Repository path:** `docs/ARCHITECTURE.md`
 
 **Classification legend:** `VERIFIED`, `PROVISIONAL`, `REQUIRES OWNER INPUT` (same meaning as `PRODUCT_SPEC.md`).
 
@@ -196,7 +196,7 @@ neda/
 Notes:
 
 - `web/dist` is generated. To keep `go test ./...` compilable before a frontend build, commit `web/dist/.gitkeep` and use `//go:embed all:dist`; production builds replace the directory contents. This is a build convenience, not a source of truth.
-- `.codegraph/` and `**/.codegraph/` must be in the root `.gitignore` before initialization, and must be committed before or as part of the first documentation commit. A nested `docs/.codegraph/` currently exists locally and is not yet ignored at the repository root.
+- `.codegraph/` and `**/.codegraph/` are in the committed root `.gitignore`; `git check-ignore` confirms the root and nested graph data are ignored. A nested `docs/.codegraph/` exists locally and must remain uncommitted.
 - The README and normal repository documentation are English-only unless a specific product requirement explicitly requires another language. `REPO-003` prepares the English planning-state README for the initial documentation commit; it must describe the repository as planning-stage, explicitly state that application implementation is not yet present, and be reviewed against the actual files before that commit. It must not contain invented commands, environment-variable names/values, unimplemented features, configuration placeholders presented as supported settings, or secrets. Real configuration/setup sections are deferred until the implementation and configuration exist; `FND-012` may add only verified sections as implementation starts, and `OPS-004` completes the final README. The full eventual README scope is in `PRODUCT_SPEC.md` §3.11.
 - Do not commit `.env`, databases, WAL/SHM files, keys, Push subscriptions, logs, `node_modules`, or build artifacts.
 
@@ -1790,13 +1790,13 @@ Additional optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Do n
 ### 23.1 Verified current state (2026-10-23, corrected)
 
 - CLI: `codegraph 1.6.2` at `/Users/fallah/.local/bin/codegraph`.
-- `codegraph status` at the repository root: project `/Users/fallah/Desktop/Neda`, **not initialized**.
+- `codegraph status` at the repository root: after M1.1 Go source existed, the root index was initialized (17 files, 281 nodes, 611 edges) and reported up to date.
 - `codegraph status docs`: `docs/.codegraph/codegraph.db` exists as an **empty initialized index** (0 files/nodes/edges, 0.16 MB). `docs/.codegraph/.gitignore` also exists.
-- There is **no root `.gitignore`** yet. The existing nested index has not been removed, moved, or ignored at the repository root.
+- Root `.gitignore` is present and committed; it includes `.codegraph/` and `**/.codegraph/`. The existing nested index has not been removed or moved.
 - `opencode mcp list`: `codegraph` connected, `shadcn` connected.
 - OpenCode 2.1.4.
 - Actual MCP tool exposed in this session: the CodeGraph **explore** tool (harness name `codegraph_codegraph_explore`; documented as `codegraph_explore`). Do not assume `node`/`callers`/`impact` MCP tools are exposed. The CLI supports `init`, `index`, `sync`, `status`, `query`, `explore`, `context`, `node`, `files`, `callers`, `callees`, `impact`, `affected`, `install`, `uninstall`, `telemetry`, `upgrade`, `daemon`, `unlock`, `version`, `help`.
-- No CodeGraph query was run; no root index was initialized. The nested empty index is not a meaningful source graph and must not be committed.
+- The root CodeGraph index was initialized after M1.1 source existed; it is ignored and untracked. The nested empty index is not a meaningful source graph and must not be committed.
 - Removing or moving `docs/.codegraph` requires a separate explicit owner decision; do not delete it as part of routine planning or repository setup.
 
 ### 23.2 Initialization timing and procedure
@@ -1841,7 +1841,7 @@ After `GATE-002` and the first meaningful approved Go source exists (frontend Ty
 | D-14 | Provider health counting rule (A-21) | **REQUIRES OWNER INPUT** | Option A (infrastructure-only) is the provisional default; Options B/C are documented alternatives. `SCH-006` cannot be `DONE` until the owner chooses. |
 | D-15 | CodeGraph index deferred until source exists | VERIFIED (policy) | No meaningful graph yet; keep `.codegraph/` ignored. |
 
-Any status change to `ACCEPTED` requires owner approval of this plan. No decision is `ACCEPTED` before GATE-001. `PROVISIONAL` and `PROPOSED` items must be resolved/documented during the relevant task.
+Any status change to `ACCEPTED` requires owner approval of this plan. `GATE-001` and `GATE-002` are recorded as approved; `PROVISIONAL` and `PROPOSED` items must be resolved/documented during the relevant task.
 
 ---
 
