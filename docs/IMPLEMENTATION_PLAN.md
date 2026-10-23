@@ -1,6 +1,6 @@
 # Neda — Implementation Plan and Task Registry
 
-**Status:** M1 is complete and PR #3 is merged. The approved M3 initial slice, `SCH-001` (monitor repository/CRUD/validation), is implemented under `GATE-008`; PR #4 is pending review. `GATE-003` and `GATE-004` remain unauthorized.
+**Status:** M1 is complete and PR #3 is merged. The approved M3 initial slice, `SCH-001` (monitor repository/CRUD/validation), is implemented under `GATE-008`; PR #4 is open with green CI and awaits owner review. `GATE-003` and `GATE-004` remain unauthorized.
 **Date:** 2026-10-24
 **Authoritative product source:** `docs/BRIEF.md`; behavior: `PRODUCT_SPEC.md`; design: `ARCHITECTURE.md`.
 **Repository path:** `docs/IMPLEMENTATION_PLAN.md`
@@ -75,7 +75,7 @@
 - CI: PR #1 head run [40021998627](https://github.com/am-fallah/neda/actions/runs/40021998627) passed; PR #2 head run [40025616168](https://github.com/am-fallah/neda/actions/runs/40025616168) passed; merged-`main` run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed in 2m46s.
 - PR #3 (`M2: provider boundary, classification, and fake provider`) is **merged** (2026-10-23T23:03:16Z) by `am-fallah`; PR head `7534971`, merge commit `855f21f`.
 - CI: PR #1 head run [40021998627](https://github.com/am-fallah/neda/actions/runs/40021998627) passed; PR #2 head run [40025616168](https://github.com/am-fallah/neda/actions/runs/40025616168) passed; merged-`main` runs [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) and [40037410644](https://github.com/am-fallah/neda/actions/runs/40037410644) passed.
-- No open PRs at M3 start.
+- PR #4 (`M3 SCH-001: monitor repository, validation, and CRUD service`) is **OPEN** against `main` at <https://github.com/am-fallah/neda/pull/4>; head `a3cbbc2`; Go checks run [40038917631](https://github.com/am-fallah/neda/actions/runs/40038917631) passed in 38s. Not merged.
 - The initial documentation commit contains exactly the nine approved paths; `.gitignore` is in history.
 - No token, cookie, key, or credential value was printed or stored.
 
@@ -442,7 +442,7 @@ Optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Never run live 
 
 **M2 initial-slice verification (2026-10-24):** `make check` and `make race` passed; `go test ./...`, `go test -race ./...`, `go vet ./...`, `gofmt -l .`, and `go build ./...` passed. Coverage: `internal/provider` 95.6%, `internal/provider/fake` 88.9%. Tests cover registry nil/duplicate/empty-ID/empty-display-name rejection, safe typed error rendering, state/kind validation, the full classification matrix, deterministic fake-provider scenarios, context cancellation/deadline, fake-only route IDs, and default-disabled config. No `mrbilit` references exist under `internal/`; no scheduler/UI/database migration was added. `codegraph status` reports 43 files, 777 nodes, 2,063 edges, up to date. PR #3 Go checks run [40028313070](https://github.com/am-fallah/neda/actions/runs/40028313070) passed in 38s. No live provider, server, or deployment checks were run.
 
-**M3 SCH-001 verification (2026-10-24):** `go test ./internal/domain/... ./internal/store/...` and `go test -race -count=1 ./internal/domain/... ./internal/store/...` passed; `TZ=UTC` and `TZ=America/New_York` runs passed; `make check` and `make race` passed. Coverage: domain 84.6%, store 75.6%. Tests cover monitor CRUD, validation (label/route/date/passenger/provider rules), real-SQLite rollback, provider removal/re-add retention, config-version bumps, material episode closure with `config_changed`, no events on close, pause/resume, expired-resume rejection, future-date recovery while paused, label-only and booking-only stability, post-commit near-term scheduling, expired/paused scheduling exclusion, and wake-callback visibility after commit. `codegraph status` reports 52 files, 969 nodes, 2,765 edges, up to date. No scheduler loop, provider check, health, notification, frontend, MrBilit, or migration code was added.
+**M3 SCH-001 verification (2026-10-24):** `go test ./internal/domain/... ./internal/store/...` and `go test -race -count=1 ./internal/domain/... ./internal/store/...` passed; `TZ=UTC` and `TZ=America/New_York` runs passed; `make check` and `make race` passed. Coverage: domain 84.6%, store 75.6%. Tests cover monitor CRUD, validation (label/route/date/passenger/provider rules), real-SQLite rollback, provider removal/re-add retention, config-version bumps, material episode closure with `config_changed`, no events on close, pause/resume, expired-resume rejection, future-date recovery while paused, label-only and booking-only stability, post-commit near-term scheduling, expired/paused scheduling exclusion, and wake-callback visibility after commit. `codegraph status` reports 52 files, 969 nodes, 2,765 edges, up to date. PR #4 Go checks run [40038917631](https://github.com/am-fallah/neda/actions/runs/40038917631) passed in 38s. No scheduler loop, provider check, health, notification, frontend, MrBilit, or migration code was added.
 
 ### 7.1 Correction history (document-only, 2026-10-23)
 
@@ -564,7 +564,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | Monitor concurrency interpretation | Open decision | Per-pair vs monitor-wide serialization affects worker guard, rate limits, and `SCH-002`/`SCH-008` tests | Recorded as Product A-33; owner must confirm. If monitor-wide is chosen, update architecture and those tasks separately. | Yes |
 | No production access | Deployment risk | Unknown host conflicts | `OPS-005` plan + `GATE-004`; no SSH now. | Yes |
 
-**Current blockers summary:** M1, the approved M2 initial provider slice, and `SCH-001` are complete and locally verified; PR #4 is pending review/CI. `PRV-003`–`PRV-005`/`PRV-009` remain deferred, and `PRV-006` is blocked by unauthorized `GATE-003` and deferred `PRV-003`. Remaining external blockers for later milestones: `DISC-005` (server facts), `GATE-003` (live provider validation), `GATE-004` (deployment), and the owner decisions `A-21` and `A-33`. Optional Docker remains unavailable.
+**Current blockers summary:** M1, the approved M2 initial provider slice, and `SCH-001` are complete and locally verified; PR #4 is open with green CI and awaits owner review. `PRV-003`–`PRV-005`/`PRV-009` remain deferred, and `PRV-006` is blocked by unauthorized `GATE-003` and deferred `PRV-003`. Remaining external blockers for later milestones: `DISC-005` (server facts), `GATE-003` (live provider validation), `GATE-004` (deployment), and the owner decisions `A-21` and `A-33`. Optional Docker remains unavailable.
 
 ---
 
@@ -587,7 +587,7 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | 13 | Validated booking links included; unverified omitted | `PRV-007`, `WEB-006` | Not started |
 | 14 | Jalali/Gregorian conversion and Tehran expiry tested | `PRV-008`, `WEB-004`, `SCH-007` | Not started |
 | 15 | Auth/sessions/CSRF/rate/secrets/private routes protected | `FND-009`, `API-001`/`API-005`, `SEC-002`/`SEC-003` | `FND-009` primitives/middleware done and locally tested; HTTP endpoints and private-route enforcement pending `API-001`/`API-005` |
-| 16 | Critical tests/builds/static checks pass | `OPS-007` | M3 SCH-001 local checks pass; PR #4 CI pending; full suite later |
+| 16 | Critical tests/builds/static checks pass | `OPS-007` | M3 SCH-001 local checks and PR #4 CI pass; full suite later |
 | 17 | Deployment/backup workflow documented for constrained host | `OPS-004`/`OPS-005`/`OPS-009` | Not started |
 | 18 | No production deployment without approval | `GATE-004` | Not started |
 | 19 | Docs/limitations accurately reflect behavior | `PLAN`, `OPS-004`/`OPS-008` | In progress/planning |
@@ -598,10 +598,10 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 1. **M1 status:** complete. PR #1 (`f2252e5`) and PR #2 (`40f1fc0`) are merged; the merged-`main` CI run [40026251308](https://github.com/am-fallah/neda/actions/runs/40026251308) passed. `FND-002` remains an optional P2 Docker task; Docker is not installed and is not an M1 blocker.
 2. **M2 status:** the `GATE-007` initial slice is complete: `PRV-001`, `PRV-010`, and `PRV-002` are `DONE` with local evidence and green PR #3 CI. `PRV-003`–`PRV-005` and `PRV-009` remain `DEFERRED` by owner decision; `PRV-006` is `BLOCKED` by `GATE-003` and deferred `PRV-003`; `PRV-007`/`PRV-008` remain later `TODO`s. Fake-provider UI-label verification is deferred to the WEB milestone.
-3. **M3 status:** `SCH-001` is `DONE` with local evidence and PR #4 pending review/CI. Monitor persistence, validation, CRUD, pause/resume/delete, config-version rules, episode closure, expiry reconciliation, and wake-after-commit behavior are implemented. The scheduler loop (`SCH-002`), provider-check stage, health, notifications, and frontend remain out of scope. `PRV-003`–`PRV-005`/`PRV-009` remain deferred; `PRV-006` remains blocked by `GATE-003`.
+3. **M3 status:** `SCH-001` is `DONE` with local evidence and green PR #4 CI. Monitor persistence, validation, CRUD, pause/resume/delete, config-version rules, episode closure, expiry reconciliation, and wake-after-commit behavior are implemented. The scheduler loop (`SCH-002`), provider-check stage, health, notifications, and frontend remain out of scope. `PRV-003`–`PRV-005`/`PRV-009` remain deferred; `PRV-006` remains blocked by `GATE-003`.
 4. **`GATE-003`:** remains blocked; owner must approve the bounded live-validation protocol before `PRV-006`.
 5. **`GATE-004`:** remains blocked; only after `OPS-005`, a separate deployment plan and explicit approval authorize server access/deployment.
-6. **PR #4:** open against `main` for owner review after SCH-001 checks pass; the agent must not merge it.
+6. **PR #4:** open against `main` at <https://github.com/am-fallah/neda/pull/4> for owner review; the agent must not merge it.
 
 **Hard stop:** no live provider calls, server access, or deployment under the current approval. Silence or a status request is not approval for a new gate.
 
