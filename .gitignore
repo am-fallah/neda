@@ -1,0 +1,34 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+secrets/
+*.key
+*.pem
+
+# Local databases and SQLite sidecars
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+
+# Local generated CodeGraph data
+.codegraph/
+**/.codegraph/
+
+# Frontend dependencies and generated output
+web/node_modules/
+web/dist/*
+!web/dist/.gitkeep
+
+# Logs, OS metadata, and build artifacts
+*.log
+logs/
+.DS_Store
+**/.DS_Store
+bin/
+build/
+coverage/
+tmp/
