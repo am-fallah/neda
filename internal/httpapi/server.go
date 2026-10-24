@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/am-fallah/neda/internal/auth"
+	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/logging"
 )
 
@@ -50,6 +51,8 @@ type Config struct {
 	// optional for health-only tests; private routes fail closed when nil.
 	Auth       *auth.Manager
 	LoginGuard *auth.LoginGuard
+	Monitors   *domain.MonitorService
+	Now        func() time.Time
 }
 
 // ReadinessChecker verifies that the database and migrations are usable.
@@ -66,6 +69,8 @@ type Server struct {
 	handler            http.Handler
 	auth               *auth.Manager
 	loginGuard         *auth.LoginGuard
+	monitors           *domain.MonitorService
+	now                func() time.Time
 }
 
 // New constructs a Server. A nil logger falls back to slog.Default.
@@ -91,6 +96,9 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 	if cfg.ShutdownTimeout <= 0 {
 		cfg.ShutdownTimeout = defaultShutdownTimeout
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 
 	s := &Server{
 		cfg:                cfg,
@@ -99,6 +107,8 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		expectedMigrations: expectedMigrations,
 		auth:               cfg.Auth,
 		loginGuard:         cfg.LoginGuard,
+		monitors:           cfg.Monitors,
+		now:                cfg.Now,
 	}
 	s.handler = s.buildHandler()
 	return s
@@ -166,6 +176,10 @@ func (s *Server) buildHandler() http.Handler {
 }
 
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/api/v1/monitors" || strings.HasPrefix(r.URL.Path, "/api/v1/monitors/") {
+		s.privateAuth(http.HandlerFunc(s.handleMonitors)).ServeHTTP(w, r)
+		return
+	}
 	switch r.URL.Path {
 	case "/healthz":
 		if !requireGet(w, r) {

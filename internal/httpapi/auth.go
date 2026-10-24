@@ -67,7 +67,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 
 	var body loginRequest
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "invalid login request")
+		writeDecodeError(w, r, err, "invalid login request")
 		return
 	}
 	result, err := s.auth.Login(r.Context(), body.Password, r.UserAgent())
@@ -147,7 +147,7 @@ func (s *Server) password(w http.ResponseWriter, r *http.Request) {
 	}
 	var body passwordRequest
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "invalid password request")
+		writeDecodeError(w, r, err, "invalid password request")
 		return
 	}
 	if strings.TrimSpace(body.CurrentPassword) == "" || strings.TrimSpace(body.NewPassword) == "" {
@@ -180,6 +180,15 @@ func requirePost(w http.ResponseWriter, r *http.Request) bool {
 	w.Header().Set(headerAllow, http.MethodPost)
 	writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 	return false
+}
+
+func writeDecodeError(w http.ResponseWriter, r *http.Request, err error, message string) {
+	var maxBytes *http.MaxBytesError
+	if errors.As(err, &maxBytes) {
+		writeError(w, r, http.StatusRequestEntityTooLarge, "body_too_large", "request body is too large")
+		return
+	}
+	writeError(w, r, http.StatusBadRequest, "invalid_request", message)
 }
 
 // decodeJSON enforces a JSON media type, rejects unknown fields and trailing

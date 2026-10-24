@@ -16,8 +16,11 @@ import (
 
 	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/db"
+	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/httpapi"
 	"github.com/am-fallah/neda/internal/migrations"
+	"github.com/am-fallah/neda/internal/provider"
+	"github.com/am-fallah/neda/internal/provider/fake"
 	"github.com/am-fallah/neda/internal/store"
 )
 
@@ -36,11 +39,24 @@ type authClock struct{ now time.Time }
 
 func (c *authClock) Now() time.Time { return c.now }
 
+type permissiveProvider struct{ id provider.ID }
+
+func (p permissiveProvider) Metadata() provider.Metadata {
+	return provider.Metadata{ID: p.id, DisplayName: "permissive test provider", TestOnly: true}
+}
+
+func (p permissiveProvider) ValidateConfig(provider.MonitorProviderConfig) error { return nil }
+
+func (p permissiveProvider) Check(context.Context, provider.CheckRequest) (provider.Result, error) {
+	return provider.Result{ObservedAt: time.Now().UTC()}, nil
+}
+
 type authFixture struct {
-	server  *httpapi.Server
-	manager *auth.Manager
-	db      *sql.DB
-	clock   *authClock
+	server   *httpapi.Server
+	manager  *auth.Manager
+	monitors *domain.MonitorService
+	db       *sql.DB
+	clock    *authClock
 }
 
 func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword bool) *authFixture {
@@ -76,18 +92,33 @@ func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPasswo
 		t.Fatalf("auth.NewRateLimiter: %v", err)
 	}
 	guard := auth.NewLoginGuard(auth.OriginPolicy{PublicURL: publicURL, Production: true}, limiter, false)
+	registry, err := provider.NewRegistry(fake.NewWithClock(clock.Now), permissiveProvider{id: "alt"})
+	if err != nil {
+		t.Fatalf("provider.NewRegistry: %v", err)
+	}
+	monitors, err := domain.NewMonitorService(st, registry, domain.MonitorServiceConfig{
+		Now: clock.Now,
+		NearTermSchedule: func(now time.Time) time.Time {
+			return now.Add(time.Second)
+		},
+	})
+	if err != nil {
+		t.Fatalf("domain.NewMonitorService: %v", err)
+	}
 	server := httpapi.New(httpapi.Config{
 		Production: true,
 		PublicURL:  publicURL,
 		Auth:       manager,
 		LoginGuard: guard,
+		Monitors:   monitors,
+		Now:        clock.Now,
 	}, slog.New(slog.NewJSONHandler(io.Discard, nil)), authReadiness{}, applied)
 	if withPassword {
 		if err := manager.SetPassword(ctx, authTestPass); err != nil {
 			t.Fatalf("SetPassword: %v", err)
 		}
 	}
-	return &authFixture{server: server, manager: manager, db: database.DB, clock: clock}
+	return &authFixture{server: server, manager: manager, monitors: monitors, db: database.DB, clock: clock}
 }
 
 func (f *authFixture) request(t *testing.T, method, path, body, sessionCookie, csrf, origin string) *httptest.ResponseRecorder {
