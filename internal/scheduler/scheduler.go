@@ -434,11 +434,14 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				ConfigVersion: candidate.ConfigVersion,
 				NextDueAt:     due,
 			}
+			// Sample the dispatch time here, after due selection, so slow
+			// repository reads cannot shorten the start-to-start spacing.
+			dispatchAt := s.clock.Now().UTC()
 			select {
 			case jobs <- target:
 				delete(settled, candidate.ID)
 				inflight[candidate.MonitorID] = true
-				state.dispatch(now)
+				state.dispatch(dispatchAt)
 				running++
 				s.logger.Debug("scheduler dispatched check",
 					"monitor_id", target.MonitorID,

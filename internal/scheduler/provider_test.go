@@ -2,10 +2,12 @@ package scheduler_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/scheduler"
 )
 
@@ -82,6 +84,65 @@ func TestProviderSpacingIsStartToStart(t *testing.T) {
 	}
 	if first.MonitorID == second.MonitorID {
 		t.Fatalf("spacing test reused monitor %s", first.MonitorID)
+	}
+	running.stop(t)
+}
+
+// slowListRepository simulates slow due-target selection by advancing the
+// fake clock during the first ListScheduleTargets call. The scheduler must
+// sample the dispatch timestamp after that read.
+type slowListRepository struct {
+	scheduler.Repository
+	clock   *fakeClock
+	delay   time.Duration
+	advance sync.Once
+}
+
+func (r *slowListRepository) ListScheduleTargets(ctx context.Context, now time.Time) ([]domain.ScheduleTarget, error) {
+	r.advance.Do(func() { r.clock.Advance(r.delay) })
+	return r.Repository.ListScheduleTargets(ctx, now)
+}
+
+func TestProviderSpacingUsesDispatchTimeAfterSlowSelection(t *testing.T) {
+	st, _ := newSchedulerStore(t)
+	now := schedulerNow
+	past := now.Add(-time.Minute)
+	expires := now.Add(24 * time.Hour)
+	createSchedulerMonitor(t, st, "m1", true, expires,
+		targetSpec{providerID: "fake", active: true, due: &past})
+	createSchedulerMonitor(t, st, "m2", true, expires,
+		targetSpec{providerID: "fake", active: true, due: &past})
+
+	starts := make(chan scheduler.Target, 2)
+	clock := newFakeClock(now)
+	repo := &slowListRepository{
+		Repository: st,
+		clock:      clock,
+		delay:      10 * time.Second,
+	}
+	running := startSchedulerWithSpacing(t, repo, registryFor(t, "fake"), clock,
+		runnerFunc(func(_ context.Context, target scheduler.Target) (scheduler.Result, error) {
+			starts <- target
+			return scheduler.Result{Settled: true}, nil
+		}),
+		1, zeroRandom(), scheduler.NewWaker(), time.Second, 5*time.Second)
+
+	first := waitStart(t, starts)
+	firstAt := clock.Now()
+	if want := now.Add(10 * time.Second); !firstAt.Equal(want) {
+		t.Fatalf("first dispatch time = %v, want %v after slow selection", firstAt, want)
+	}
+	// The first check started at now+10s. The second must wait 5s from that
+	// dispatch, not from the timestamp sampled before due selection.
+	assertNoStart(t, starts, 100*time.Millisecond)
+	clock.WaitForTimer(t)
+	clock.Advance(5 * time.Second)
+	second := waitStart(t, starts)
+	if second.MonitorID == first.MonitorID {
+		t.Fatalf("spacing test reused monitor %s", first.MonitorID)
+	}
+	if gap := clock.Now().Sub(firstAt); gap < 5*time.Second {
+		t.Fatalf("provider dispatch gap = %v, want at least 5s", gap)
 	}
 	running.stop(t)
 }

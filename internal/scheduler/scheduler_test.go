@@ -286,7 +286,7 @@ func startScheduler(
 
 func startSchedulerWithSpacing(
 	t *testing.T,
-	st *store.Store,
+	repo scheduler.Repository,
 	registry *provider.Registry,
 	clock *fakeClock,
 	runner scheduler.Runner,
@@ -301,7 +301,7 @@ func startSchedulerWithSpacing(
 		random = zeroRandom()
 	}
 	sched, err := scheduler.New(scheduler.Config{
-		Repository:      st,
+		Repository:      repo,
 		Providers:       registry,
 		Interval:        fixedInterval(300 * time.Second),
 		Runner:          runner,
