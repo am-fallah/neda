@@ -314,10 +314,15 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_VAPID_SUBJECT` | — | `mailto:` address or HTTPS contact required for Web Push. VAPID keys are generated once when an encryption key is configured; the public key is available only through the authenticated Push config endpoint. |
 | `NEDA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
+| `NEDA_TRUST_PROXY` | `false` | Honor `X-Forwarded-For` only behind a trusted local reverse proxy. Keep false for direct exposure. |
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
-| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and ignored in production. |
+
+Compose-only variables: `NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID` select the non-root
+runtime user and must match the owner of `./data` and the key-secret target. They
+are not read by the Go service.
 
 The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader. Private auth, monitor, provider/health, event/delivery, overview, settings/Telegram, and Push routes are implemented. Web Push requires HTTPS in production (localhost is allowed for development) and an external browser Push service. Do not commit real secrets.
 
@@ -493,6 +498,9 @@ docs/                 approved planning documents and frontend acceptance checkl
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — single source of truth for tasks, gates, dependencies, and verification evidence.
 - [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
 - [`docs/BROWSER_PUSH_VALIDATION.md`](docs/BROWSER_PUSH_VALIDATION.md) — real Chrome service-worker/Push simulation and permission-denial evidence.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, rollback, and approval checklist.
+- [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence and limitations.
+- [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — Definition-of-done audit, blockers, and next milestone.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and unresolved security risks.
 - [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability-scan evidence.
 - [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) — encryption-key lifecycle and recovery constraints.
