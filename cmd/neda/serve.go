@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/config"
 	"github.com/am-fallah/neda/internal/crypto"
 	"github.com/am-fallah/neda/internal/db"
@@ -66,6 +67,28 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("poll interval configuration is invalid", "error", err)
 		return 1
 	}
+
+	authManager, err := auth.NewManager(appStore, auth.Config{
+		SessionTTL:  cfg.SessionTTL,
+		SessionIdle: cfg.SessionIdle,
+		Secure:      cfg.IsProduction(),
+		PublicURL:   cfg.PublicURL,
+		Production:  cfg.IsProduction(),
+		Now:         time.Now,
+	})
+	if err != nil {
+		logger.Error("auth manager initialization failed", "error", err)
+		return 1
+	}
+	loginLimiter, err := auth.NewRateLimiter(auth.DefaultRateLimitConfig(), time.Now)
+	if err != nil {
+		logger.Error("login limiter initialization failed", "error", err)
+		return 1
+	}
+	loginGuard := auth.NewLoginGuard(auth.OriginPolicy{
+		PublicURL:  cfg.PublicURL,
+		Production: cfg.IsProduction(),
+	}, loginLimiter, cfg.TrustProxy)
 
 	// P2/P3: load the external key only when configured. Development startup
 	// without a key remains usable; Telegram delivery is simply unavailable.
@@ -169,6 +192,8 @@ func runServe(stdout, stderr io.Writer) int {
 		Addr:       cfg.HTTPAddr,
 		Production: cfg.IsProduction(),
 		PublicURL:  cfg.PublicURL,
+		Auth:       authManager,
+		LoginGuard: loginGuard,
 	}, logger, database, applied)
 
 	runCtx, cancel := context.WithCancel(ctx)

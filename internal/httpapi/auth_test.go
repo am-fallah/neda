@@ -1,0 +1,303 @@
+package httpapi_test
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/am-fallah/neda/internal/auth"
+	"github.com/am-fallah/neda/internal/db"
+	"github.com/am-fallah/neda/internal/httpapi"
+	"github.com/am-fallah/neda/internal/migrations"
+	"github.com/am-fallah/neda/internal/store"
+)
+
+const (
+	authTestPass = "correct horse battery staple"
+	authNextPass = "another correct horse battery"
+	authOrigin   = "https://neda.example.com"
+	authHost     = "neda.example.com"
+)
+
+type authReadiness struct{}
+
+func (authReadiness) Ready(context.Context, int) error { return nil }
+
+type authClock struct{ now time.Time }
+
+func (c *authClock) Now() time.Time { return c.now }
+
+type authFixture struct {
+	server  *httpapi.Server
+	manager *auth.Manager
+	db      *sql.DB
+	clock   *authClock
+}
+
+func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword bool) *authFixture {
+	t.Helper()
+	ctx := context.Background()
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "httpapi-auth.db"))
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	applied, err := db.Migrate(ctx, database.DB, migrations.FS)
+	if err != nil {
+		t.Fatalf("db.Migrate: %v", err)
+	}
+	if err := database.Ready(ctx, applied); err != nil {
+		t.Fatalf("database.Ready: %v", err)
+	}
+	st := store.New(database.DB)
+	clock := &authClock{now: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}
+	publicURL, _ := url.Parse(authOrigin)
+	manager, err := auth.NewManager(st, auth.Config{
+		SessionTTL: 2 * time.Hour, SessionIdle: time.Hour, TouchInterval: 5 * time.Minute,
+		Secure: true, PublicURL: publicURL, Production: true,
+		Params:              auth.Params{Memory: 8192, Iterations: 1, Parallelism: 1, SaltLength: 16, KeyLength: 16},
+		MaxConcurrentHashes: 1,
+		Now:                 clock.Now,
+	})
+	if err != nil {
+		t.Fatalf("auth.NewManager: %v", err)
+	}
+	limiter, err := auth.NewRateLimiter(limiterConfig, clock.Now)
+	if err != nil {
+		t.Fatalf("auth.NewRateLimiter: %v", err)
+	}
+	guard := auth.NewLoginGuard(auth.OriginPolicy{PublicURL: publicURL, Production: true}, limiter, false)
+	server := httpapi.New(httpapi.Config{
+		Production: true,
+		PublicURL:  publicURL,
+		Auth:       manager,
+		LoginGuard: guard,
+	}, slog.New(slog.NewJSONHandler(io.Discard, nil)), authReadiness{}, applied)
+	if withPassword {
+		if err := manager.SetPassword(ctx, authTestPass); err != nil {
+			t.Fatalf("SetPassword: %v", err)
+		}
+	}
+	return &authFixture{server: server, manager: manager, db: database.DB, clock: clock}
+}
+
+func (f *authFixture) request(t *testing.T, method, path, body, sessionCookie, csrf, origin string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, authOrigin+path, strings.NewReader(body))
+	req.Host = authHost
+	req.RemoteAddr = "203.0.113.9:12345"
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	if sessionCookie != "" {
+		req.AddCookie(&http.Cookie{Name: auth.DefaultSessionCookieName, Value: sessionCookie})
+	}
+	if csrf != "" {
+		req.AddCookie(&http.Cookie{Name: auth.DefaultCSRFCookieName, Value: csrf})
+		req.Header.Set("X-CSRF-Token", csrf)
+	}
+	recorder := httptest.NewRecorder()
+	f.server.Handler().ServeHTTP(recorder, req)
+	return recorder
+}
+
+func (f *authFixture) login(t *testing.T, password string) (sessionCookie, csrf string, recorder *httptest.ResponseRecorder) {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"password": password})
+	recorder = f.request(t, http.MethodPost, "/api/v1/auth/login", string(body), "", "", authOrigin)
+	if recorder.Code != http.StatusOK {
+		return "", "", recorder
+	}
+	var payload struct {
+		CSRFToken string `json:"csrfToken"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("login JSON: %v", err)
+	}
+	csrf = payload.CSRFToken
+	for _, cookie := range recorder.Result().Cookies() {
+		switch cookie.Name {
+		case auth.DefaultSessionCookieName:
+			sessionCookie = cookie.Value
+		case auth.DefaultCSRFCookieName:
+			if cookie.Value != csrf {
+				t.Fatalf("CSRF cookie/body mismatch: %q/%q", cookie.Value, csrf)
+			}
+		}
+	}
+	return sessionCookie, csrf, recorder
+}
+
+func TestLoginSessionAndCookieSecurity(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	sessionCookie, csrf, recorder := fixture.login(t, authTestPass)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("login status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if sessionCookie == "" || csrf == "" {
+		t.Fatalf("login cookies = %q/%q", sessionCookie, csrf)
+	}
+	if strings.Contains(recorder.Body.String(), sessionCookie) {
+		t.Fatal("login response leaked the session cookie")
+	}
+	for _, cookie := range recorder.Result().Cookies() {
+		if !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode || cookie.Path != "/" {
+			t.Fatalf("cookie flags = %+v", cookie)
+		}
+	}
+	if recorder.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("unexpected CORS header")
+	}
+
+	session := fixture.request(t, http.MethodGet, "/api/v1/auth/session", "", sessionCookie, csrf, "")
+	if session.Code != http.StatusOK {
+		t.Fatalf("session status = %d body=%s", session.Code, session.Body.String())
+	}
+	var payload struct {
+		Authenticated bool   `json:"authenticated"`
+		CSRFToken     string `json:"csrfToken"`
+		SetupRequired bool   `json:"setupRequired"`
+	}
+	if err := json.Unmarshal(session.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !payload.Authenticated || payload.CSRFToken != csrf || payload.SetupRequired {
+		t.Fatalf("session payload = %+v", payload)
+	}
+
+	anonymous := fixture.request(t, http.MethodGet, "/api/v1/auth/session", "", "", "", "")
+	if anonymous.Code != http.StatusOK || !strings.Contains(anonymous.Body.String(), `"authenticated":false`) {
+		t.Fatalf("anonymous session = %d %s", anonymous.Code, anonymous.Body.String())
+	}
+}
+
+func TestLoginRejectsOriginAndRateLimits(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	body, _ := json.Marshal(map[string]string{"password": authTestPass})
+	if recorder := fixture.request(t, http.MethodPost, "/api/v1/auth/login", string(body), "", "", ""); recorder.Code != http.StatusForbidden {
+		t.Fatalf("missing-origin status = %d", recorder.Code)
+	}
+	if recorder := fixture.request(t, http.MethodPost, "/api/v1/auth/login", string(body), "", "", "https://evil.example"); recorder.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin status = %d", recorder.Code)
+	}
+
+	limited := newAuthFixture(t, auth.RateLimitConfig{
+		SoftLimit: 1, HardLimit: 2, Window: time.Minute, LockDuration: time.Minute,
+		SoftRetryAfter: time.Second, MaxEntries: 10,
+	}, true)
+	wrongBody, _ := json.Marshal(map[string]string{"password": "wrong password value"})
+	first := limited.request(t, http.MethodPost, "/api/v1/auth/login", string(wrongBody), "", "", authOrigin)
+	if first.Code != http.StatusUnauthorized {
+		t.Fatalf("first failure status = %d", first.Code)
+	}
+	second := limited.request(t, http.MethodPost, "/api/v1/auth/login", string(wrongBody), "", "", authOrigin)
+	if second.Code != http.StatusTooManyRequests || second.Header().Get("Retry-After") == "" {
+		t.Fatalf("rate-limit status/headers = %d/%q", second.Code, second.Header().Get("Retry-After"))
+	}
+}
+
+func TestLoginSetupRequired(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), false)
+	body, _ := json.Marshal(map[string]string{"password": authTestPass})
+	login := fixture.request(t, http.MethodPost, "/api/v1/auth/login", string(body), "", "", authOrigin)
+	if login.Code != http.StatusServiceUnavailable || !strings.Contains(login.Body.String(), `"code":"setup_required"`) {
+		t.Fatalf("setup login = %d %s", login.Code, login.Body.String())
+	}
+	probe := fixture.request(t, http.MethodGet, "/api/v1/auth/session", "", "", "", "")
+	if probe.Code != http.StatusOK || !strings.Contains(probe.Body.String(), `"setupRequired":true`) {
+		t.Fatalf("setup probe = %d %s", probe.Code, probe.Body.String())
+	}
+}
+
+func TestPrivateAuthRequiresSessionCSRFAndOrigin(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	sessionCookie, csrf, _ := fixture.login(t, authTestPass)
+
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/logout", "", "", "", authOrigin); response.Code != http.StatusUnauthorized {
+		t.Fatalf("no-session logout = %d", response.Code)
+	}
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/logout", "", sessionCookie, "", authOrigin); response.Code != http.StatusForbidden {
+		t.Fatalf("no-CSRF logout = %d", response.Code)
+	}
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/logout", "", sessionCookie, csrf, "https://evil.example"); response.Code != http.StatusForbidden {
+		t.Fatalf("wrong-origin logout = %d", response.Code)
+	}
+	response := fixture.request(t, http.MethodPost, "/api/v1/auth/logout", "", sessionCookie, csrf, authOrigin)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("logout = %d %s", response.Code, response.Body.String())
+	}
+	cleared := 0
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.MaxAge < 0 {
+			cleared++
+		}
+	}
+	if cleared != 2 {
+		t.Fatalf("cleared cookies = %d", cleared)
+	}
+	probe := fixture.request(t, http.MethodGet, "/api/v1/auth/session", "", sessionCookie, csrf, "")
+	if !strings.Contains(probe.Body.String(), `"authenticated":false`) {
+		t.Fatalf("post-logout probe = %s", probe.Body.String())
+	}
+}
+
+func TestPasswordChangeAndValidation(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	sessionCookie, csrf, _ := fixture.login(t, authTestPass)
+
+	weak, _ := json.Marshal(map[string]string{"currentPassword": authTestPass, "newPassword": "short"})
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/password", string(weak), sessionCookie, csrf, authOrigin); response.Code != http.StatusBadRequest {
+		t.Fatalf("weak password = %d %s", response.Code, response.Body.String())
+	}
+	wrongCurrent, _ := json.Marshal(map[string]string{"currentPassword": "wrong password", "newPassword": authNextPass})
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/password", string(wrongCurrent), sessionCookie, csrf, authOrigin); response.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong current password = %d %s", response.Code, response.Body.String())
+	}
+	change, _ := json.Marshal(map[string]string{"currentPassword": authTestPass, "newPassword": authNextPass})
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/password", string(change), sessionCookie, csrf, authOrigin); response.Code != http.StatusNoContent {
+		t.Fatalf("password change = %d %s", response.Code, response.Body.String())
+	}
+	if _, _, response := fixture.login(t, authTestPass); response.Code != http.StatusUnauthorized {
+		t.Fatalf("old password login = %d", response.Code)
+	}
+	if _, _, response := fixture.login(t, authNextPass); response.Code != http.StatusOK {
+		t.Fatalf("new password login = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestAuthJSONValidationAndMethodHandling(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"malformed", "{"},
+		{"unknown-field", `{"password":"x","extra":true}`},
+		{"empty", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := fixture.request(t, http.MethodPost, "/api/v1/auth/login", tc.body, "", "", authOrigin)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	if response := fixture.request(t, http.MethodGet, "/api/v1/auth/login", "", "", "", authOrigin); response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("GET login = %d", response.Code)
+	}
+	if response := fixture.request(t, http.MethodPost, "/api/v1/auth/session", "", "", "", ""); response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST session = %d", response.Code)
+	}
+}

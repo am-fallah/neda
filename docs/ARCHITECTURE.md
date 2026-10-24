@@ -1416,6 +1416,8 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 | POST | `/api/v1/push/test` | private | Send test Push. |
 | POST | `/api/v1/monitors/{id}/check` | private | Optional P2 manual check. |
 
+**API-001/API-005 implementation (2026-10-24).** The HTTP layer exposes `POST /api/v1/auth/login`, `GET /api/v1/auth/session`, `POST /api/v1/auth/logout`, and `POST /api/v1/auth/password`. Login is public but requires same-origin `Origin`/`Referer` and the in-memory rate limiter; it returns the CSRF token and sets HttpOnly session/CSRF cookies (`SameSite=Lax`, `Secure` in production). Logout/password use the private session + CSRF + origin wrappers. Session probing returns only authenticated/setup-required state, CSRF token, and expiry. JSON decoding is strict and bounded; no CORS headers are emitted; existing Host validation (421), security headers, request IDs, and no-store caching remain in force. Monitor/settings read/write endpoints remain later API tasks.
+
 ### 15.3 DTO notes
 
 - Monitor create/update: `label`, `originName`, `destinationName`, `departureDate`, `adults`, `children`, `infants`, `providers[]` (`providerId`, `originId`, `destinationId`, optional `bookingSlug`, optional `genderCode`).
