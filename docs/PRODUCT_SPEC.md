@@ -306,13 +306,13 @@ This follows the brief's rule that an empty list is not proof all tickets are so
 - Provider-level `last_attempt_at` and `last_duration_ms` update for every applicable completed outcome; `last_success_at` updates on success/empty; `last_failure_at` and `last_error_kind` update on applicable errors. These are diagnostics and do not by themselves imply an outage. Provider-level `consecutive_failures` and degraded/recovery episodes are governed by the table below.
 - Target-level `last_attempt_at`, `last_outcome`, and `last_error_*` update for applicable success/empty/error outcomes; discarded and abandoned checks update only their `check_runs` row. Target-level `consecutive_failures` increments only on applicable infrastructure failures, resets on applicable success/empty, and is unchanged on config/route/ordinary 4xx, discarded, and abandoned outcomes. Target backoff is applied only for failures classified as transient/infrastructure; config/route/ordinary 4xx use the normal interval. The approved formula is `interval × 2^failures` using the incremented failure count (first failure = 2× interval), capped at `max(4× interval, 30 minutes)`, with ±10% jitter applied after the cap and no normal-interval clamp. A classified `RetryAfter` value is a lower bound on the final retry delay; material edits and resume do not reset the counter.
 - A successful, applicable check — including a valid empty result — counts as health success and may recover an open degraded episode.
-- After **three applicable provider-infrastructure failures** under the provisional Option A below, create **one** deduplicated provider-degraded alert and deliver it through configured channels. Infrastructure failures are network failures, timeouts, HTTP 429/5xx, and invalid/malformed provider responses according to the existing classification.
+- After **three applicable provider-infrastructure failures** under the approved Option A below, create **one** deduplicated provider-degraded alert and deliver it through configured channels. Infrastructure failures are network failures, timeouts, HTTP 429/5xx, and invalid/malformed provider responses according to the existing classification.
 - Do not repeat the alert for every failed poll while the episode remains open.
 - Clear the alert episode on the first subsequent successful, applicable check and record a recovery notification/event. Provider-health counters, episode changes, events, and corresponding outbox rows commit in one transaction.
 - Cancellation, shutdown-abandoned checks, and discarded checks are not provider failures and do not update provider-health counters or create health events.
 - Provider-health messages are clearly labeled as provider issues, not ticket availability, and must not imply tickets are sold out.
 
-**Transition table (Option A — current provisional planning default):**
+**Transition table (A-21 Option A — approved 2026-10-24):**
 
 | Result class | Provider `consecutive_failures` / episode | Provider diagnostics | Target `consecutive_failures` / scheduling | Availability / episodes | Outbox / notification |
 |---|---|---|---|---|---|
@@ -322,15 +322,15 @@ This follows the brief's rule that an empty list is not proof all tickets are so
 | Discarded (target invalid/paused/expired/config changed/booking config changed) | unchanged | unchanged | unchanged; only the running `check_runs` row becomes `discarded` | unchanged | none; no worker wake |
 | Abandoned (caller cancellation/shutdown) | unchanged | unchanged | unchanged; only the running `check_runs` row becomes `abandoned` | unchanged | none; no worker wake |
 
-Under Option A, “consecutive” means consecutive applicable infrastructure failures since the last applicable success; config/route/ordinary 4xx, discarded, and abandoned outcomes do not increment and do not reset the count. This is a provisional interpretation, not an owner decision.
+Under approved Option A, “consecutive” means consecutive applicable infrastructure failures since the last applicable success; config/route/ordinary 4xx, discarded, abandoned, and business/availability outcomes do not increment and do not reset the count. This interpretation was approved by the owner on 2026-10-24 under `GATE-014`.
 
-**A-21 options — requires owner input:**
+**A-21 — resolved 2026-10-24 (Option A, infrastructure-only):**
 
-- **Option A (current provisional default):** only infrastructure failures count; non-counting outcomes leave the provider counter unchanged; only success/empty resets it. Consequence: route-specific config errors do not trigger a provider-wide alert, but three infrastructure failures separated by config errors still can.
-- **Option B (brief-literal):** every failed check counts, including config/route/ordinary 4xx; success/empty resets. Consequence: one bad route can falsely degrade a healthy provider and produce a provider-wide alert.
-- **Option C (strict consecutive checks):** any non-success outcome breaks or resets the sequence; only three consecutive failed checks count. Consequence: intermittent failures may never reach the threshold, reducing false alerts but also delaying real outage detection.
+- **Option A (approved):** only applicable infrastructure failures count; non-counting outcomes leave the provider counter unchanged; only success/empty resets it. Business outcomes such as NotReservable and ordinary availability results are not provider failures. Consequence: route-specific config errors do not trigger a provider-wide alert, but three infrastructure failures separated by config errors still can.
+- **Option B (not selected):** every failed check counts, including config/route/ordinary 4xx; success/empty resets. Consequence: one bad route could falsely degrade a healthy provider and produce a provider-wide alert.
+- **Option C (not selected):** any non-success outcome breaks or resets the sequence; only three consecutive failed checks count. Consequence: intermittent failures may never reach the threshold, reducing false alerts but also delaying real outage detection.
 
-The owner must choose A, B, or C. Until A-21 is explicitly accepted, Option A is a planning/test default only; `SCH-006` cannot be marked `DONE` and provider-health behavior must not be presented as approved.
+Rationale for Option A: provider health should reflect provider distress, not route/configuration mistakes or normal availability outcomes. The approved rule avoids a single bad route degrading a healthy provider while still detecting repeated infrastructure failures.
 
 ### 4.5 Cross-provider notifications
 
@@ -421,7 +421,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-18 | A real positive MrBilit sample exists and can be captured safely. | NOT VERIFIED | If no positive sample, classify positive behavior as unverified and use synthetic tests only, clearly labeled. |
 | A-19 | Initial `Reservable` observations should notify. | VERIFIED (brief) | Implement one initial event. |
 | A-20 | Empty lists must not close open episodes. | PROVISIONAL (derived from brief safety rule) | Document the re-notification limitation. |
-| A-21 | Provider-health counting rule. Option A (current provisional default): only infrastructure failures count; non-counting outcomes neither increment nor reset the provider counter; only success/empty resets. Option B (brief-literal): every failed check counts, including config/route/ordinary 4xx. Option C (strict consecutive): any non-success breaks/resets the sequence. | **REQUIRES OWNER INPUT** (`SCH-006` cannot be `DONE` until resolved) | The owner must choose A, B, or C and accept the false-positive/false-negative consequences. Do not silently implement Option A as approved. |
+| A-21 | Provider-health counting rule. Option A (approved 2026-10-24): only infrastructure failures count; non-counting outcomes neither increment nor reset the provider counter; only success/empty resets. Business/availability outcomes are not provider failures. Option B (brief-literal): every failed check counts, including config/route/ordinary 4xx. Option C (strict consecutive): any non-success breaks/resets the sequence. | **RESOLVED — Option A** (`GATE-014`, 2026-10-24) | Provider health counts only applicable infrastructure failures; route/config/ordinary 4xx and business outcomes do not count. Options B/C are not implemented. |
 | A-22 | Hard-deleting a monitor may remove its history. | PROVISIONAL | Owner may choose retention/soft delete before implementation. |
 | A-23 | Retention defaults (14/30/180 days) are appropriate. | PROVISIONAL | Measure and adjust; bounded by approval. |
 | A-24 | Proposed stack/dependencies (modernc SQLite, webpush library, Jalali library, RHF/Zod) are compatible and maintained. | PROVISIONAL | Evaluate at implementation; document deviations. |
@@ -455,7 +455,7 @@ These are product-level gates; the implementation plan maps each to tasks and ev
 | AC-10 | Validated booking links appear when available; unverified links are omitted with a visible limitation. |
 | AC-11 | Jalali/Gregorian conversion and Tehran departure-day expiry are tested independently of the server timezone. |
 | AC-12 | Authentication, sessions, CSRF/rate controls, secret storage, and private routes are protected; no default credentials; login uses same-origin checks plus rate limiting, and every authenticated state-changing route requires the session CSRF token. |
-| AC-13 | Provider-degraded alerts follow the owner-approved A-21 rule. Under provisional Option A, they appear once after three applicable infrastructure failures, do not repeat per poll, and clear with recovery; config/route/ordinary 4xx, cancellation/abandoned, and discarded outcomes do not increment outage counters and do not reset the provider counter. |
+| AC-13 | Provider-degraded alerts follow the approved A-21 rule. Under Option A, they appear once after three applicable infrastructure failures, do not repeat per poll, and clear with recovery; config/route/ordinary 4xx, cancellation/abandoned, discarded, and business/availability outcomes do not increment outage counters and do not reset the provider counter. |
 | AC-14 | The dashboard clearly distinguishes no reservable tickets, unknown/failed checks, paused, and expired states. |
 | AC-15 | Critical business logic has deterministic automated tests; builds/static checks actually pass; no ordinary test requires live provider access. |
 | AC-16 | Docker Compose deployment design covers non-root runtime, persistent DB/key volumes, health checks, resource limits, backups, and reverse proxy/HTTPS. |
@@ -479,7 +479,7 @@ The owner does not need to answer anything already fixed by the brief. The follo
 9. **Retention defaults**: confirm 14/30/180-day proposals or specify alternatives.
 10. **Local toolchain**: approval to install Go (and optionally Docker/Colima) on the development Mac before implementation. Go is currently absent; Homebrew metadata is only an observation. Verify the current stable version and compatibility with the selected SQLite/Web Push/Jalali libraries before pinning it.
 11. **Monitor concurrency**: resolved by the owner on 2026-10-24 in favor of monitor-wide serialization (at most one in-flight check per monitor); see A-33. Different monitors may run concurrently.
-12. **Provider-health counting (A-21)**: choose Option A (infrastructure-only, current provisional default), Option B (every failed check, matching the brief’s literal wording), or Option C (strict consecutive checks). State the accepted consequences for provider-wide false positives/negatives; `SCH-006` cannot be marked `DONE` until this is recorded.
+12. **Provider-health counting (A-21)**: resolved by the owner on 2026-10-24 to Option A (infrastructure-only). Config/route/ordinary 4xx and business/availability outcomes do not count as provider failures; success/empty resets the counter.
 
 ---
 
