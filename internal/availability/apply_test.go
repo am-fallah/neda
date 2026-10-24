@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
 	"path/filepath"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/am-fallah/neda/internal/migrations"
 	"github.com/am-fallah/neda/internal/notify"
 	"github.com/am-fallah/neda/internal/provider"
+	"github.com/google/uuid"
 )
 
 var testNow = time.Date(2026, 10, 24, 10, 0, 0, 0, time.UTC)
@@ -164,14 +164,10 @@ func resultWith(specs ...obsSpec) provider.Result {
 	return provider.Result{Journeys: journeys, ObservedAt: testNow}
 }
 
-var deliverySeq int
-
 func standardDeliveries() []notify.Delivery {
-	deliverySeq++
-	suffix := fmt.Sprintf("%d", deliverySeq)
 	return []notify.Delivery{
-		{ID: "delivery-telegram-" + suffix, Channel: notify.ChannelTelegram, TargetKey: "telegram"},
-		{ID: "delivery-push-" + suffix, Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
+		{Channel: notify.ChannelTelegram, TargetKey: "telegram"},
+		{Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
 	}
 }
 
@@ -749,6 +745,44 @@ func TestApplyConflictingDuplicateKeysMarksUnknownWithoutEvent(t *testing.T) {
 	}
 }
 
+func TestApplyMultipleEventsUsesDistinctDeliveryIDs(t *testing.T) {
+	database := newTestDB(t)
+	targetID := insertMonitorTarget(t, database, "m1", 1)
+	result := applyCommit(t, database, inputFor("m1", targetID, 1, testNow, resultWith(
+		obsSpec{journeyKey: "j1", offeringKey: "o1", state: provider.StateReservable, capacity: intPtr(3), reason: "available"},
+		obsSpec{journeyKey: "j1", offeringKey: "o2", state: provider.StateReservable, capacity: intPtr(2), reason: "available"},
+	)))
+	if len(result.EventsCreated) != 2 {
+		t.Fatalf("events created = %d, want 2", len(result.EventsCreated))
+	}
+	if count := countRows(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 4 {
+		t.Fatalf("delivery count = %d, want 4", count)
+	}
+
+	rows, err := database.Query(`SELECT id FROM notification_deliveries ORDER BY id`)
+	if err != nil {
+		t.Fatalf("query delivery ids: %v", err)
+	}
+	defer rows.Close()
+	seen := make(map[string]struct{})
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan delivery id: %v", err)
+		}
+		if _, err := uuid.Parse(id); err != nil {
+			t.Fatalf("delivery id %q is not a UUID: %v", id, err)
+		}
+		if _, exists := seen[id]; exists {
+			t.Fatalf("duplicate delivery id %q", id)
+		}
+		seen[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate delivery ids: %v", err)
+	}
+}
+
 func TestApplyDuplicateSameStateCreatesOneEpisodeAndEvent(t *testing.T) {
 	database := newTestDB(t)
 	targetID := insertMonitorTarget(t, database, "m1", 1)
@@ -834,7 +868,7 @@ func TestApplyFaultInjectionRollsBackPartialState(t *testing.T) {
 	firstTarget := insertMonitorTarget(t, database, "m1", 1)
 	firstInput := inputFor("m1", firstTarget, 1, testNow,
 		resultWith(obsSpec{journeyKey: "j1", offeringKey: "o1", state: provider.StateReservable, capacity: intPtr(3), reason: "available"}))
-	firstInput.Deliveries = []notify.Delivery{{ID: "delivery-duplicate", Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
+	firstInput.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
 	applyCommit(t, database, firstInput)
 	if count := countRows(t, database, `SELECT COUNT(*) FROM events`); count != 1 {
 		t.Fatalf("baseline events = %d, want 1", count)
@@ -843,13 +877,19 @@ func TestApplyFaultInjectionRollsBackPartialState(t *testing.T) {
 		t.Fatalf("baseline deliveries = %d, want 1", count)
 	}
 
+	mustExec(t, database, `CREATE TRIGGER fail_delivery_insert
+		BEFORE INSERT ON notification_deliveries
+		BEGIN
+			SELECT RAISE(ABORT, 'injected delivery failure');
+		END`)
+
 	secondTarget := insertMonitorTarget(t, database, "m2", 1)
 	tx := begin(t, database)
 	input := inputFor("m2", secondTarget, 1, testNow.Add(time.Minute),
 		resultWith(obsSpec{journeyKey: "j2", offeringKey: "o2", state: provider.StateReservable, capacity: intPtr(3), reason: "available"}))
-	input.Deliveries = []notify.Delivery{{ID: "delivery-duplicate", Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
+	input.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
 	if _, err := availability.Apply(context.Background(), tx, input); err == nil {
-		t.Fatal("Apply succeeded with a duplicate delivery primary key")
+		t.Fatal("Apply succeeded despite injected delivery failure")
 	}
 	rollback(t, tx)
 
@@ -906,7 +946,7 @@ func TestApplyValidatesInputBeforeWriting(t *testing.T) {
 		}()},
 		{"invalid delivery", func() availability.Input {
 			in := base
-			in.Deliveries = []notify.Delivery{{ID: "d", Channel: notify.ChannelTelegram, TargetKey: "chat"}}
+			in.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "chat"}}
 			return in
 		}()},
 	}

@@ -108,14 +108,10 @@ func insertMonitorTarget(t *testing.T, database *sql.DB, monitorID, providerID s
 	return targetID
 }
 
-var deliverySeq int
-
 func standardDeliveries() []notify.Delivery {
-	deliverySeq++
-	suffix := fmt.Sprintf("%d", deliverySeq)
 	return []notify.Delivery{
-		{ID: "health-telegram-" + suffix, Channel: notify.ChannelTelegram, TargetKey: "telegram"},
-		{ID: "health-push-" + suffix, Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
+		{Channel: notify.ChannelTelegram, TargetKey: "telegram"},
+		{Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
 	}
 }
 
@@ -619,7 +615,7 @@ func TestApplyHealthRejectsNonApplicableOutcomesAndInvalidInput(t *testing.T) {
 		{"negative duration", func() health.FailureInput { in := baseFailure; in.Duration = -time.Second; return in }()},
 		{"bad delivery", func() health.FailureInput {
 			in := baseFailure
-			in.Deliveries = []notify.Delivery{{ID: "d", Channel: notify.ChannelTelegram, TargetKey: "chat"}}
+			in.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "chat"}}
 			return in
 		}()},
 	}
@@ -651,7 +647,7 @@ func TestApplyHealthRejectsNonApplicableOutcomesAndInvalidInput(t *testing.T) {
 		{"negative duration", func() health.SuccessInput { in := baseSuccess; in.Duration = -time.Second; return in }()},
 		{"bad delivery", func() health.SuccessInput {
 			in := baseSuccess
-			in.Deliveries = []notify.Delivery{{ID: "d", Channel: notify.ChannelPush, TargetKey: "nope"}}
+			in.Deliveries = []notify.Delivery{{Channel: notify.ChannelPush, TargetKey: "nope"}}
 			return in
 		}()},
 	}
@@ -709,7 +705,7 @@ func TestApplyHealthFaultInjectionLeavesNoPartialEpisode(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		input := failureInput("fake", firstTarget, infra(provider.ErrTimeout, 0), testNow.Add(time.Duration(i)*time.Minute))
 		if i == 2 {
-			input.Deliveries = []notify.Delivery{{ID: "health-duplicate-delivery", Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
+			input.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
 		}
 		applyFailure(t, database, input)
 	}
@@ -721,11 +717,16 @@ func TestApplyHealthFaultInjectionLeavesNoPartialEpisode(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		applyFailure(t, database, failureInput("other", secondTarget, infra(provider.ErrTimeout, 0), testNow.Add(time.Duration(i)*time.Minute)))
 	}
+	mustExec(t, database, `CREATE TRIGGER fail_delivery_insert
+		BEFORE INSERT ON notification_deliveries
+		BEGIN
+			SELECT RAISE(ABORT, 'injected delivery failure');
+		END`)
 	tx := begin(t, database)
 	input := failureInput("other", secondTarget, infra(provider.ErrNetwork, 0), testNow.Add(2*time.Minute))
-	input.Deliveries = []notify.Delivery{{ID: "health-duplicate-delivery", Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
+	input.Deliveries = []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}}
 	if _, err := health.ApplyFailure(context.Background(), tx, input); err == nil {
-		t.Fatal("ApplyFailure succeeded with duplicate delivery primary key")
+		t.Fatal("ApplyFailure succeeded despite injected delivery failure")
 	}
 	rollback(t, tx)
 
