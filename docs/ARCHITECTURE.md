@@ -270,6 +270,8 @@ Global polling interval is stored in SQLite settings (default 300s, bounds 60–
 - **VAPID keys:** generated once and persisted; private key encrypted with the master key in `settings`; public key stored plaintext. If the master key is lost, Push config/subscriptions cannot be decrypted and must be reset; document this.
 - **Backups:** DB + encryption key are both required. Backing up only one is insufficient. Key rotation is not v1; a version column allows future migration.
 
+**P2 encryption implementation (2026-10-24).** `internal/crypto` implements the key-file checks above (regular non-symlink file, owner-only mode, runtime-UID ownership, base64/32-byte validation, bounded read) and versioned AES-256-GCM setting values (`v1:` envelope, fresh nonce, setting-key-bound AAD). `internal/config` delegates `NEDA_ENCRYPTION_KEY_FILE` validation to that loader, so production startup uses the same fail-closed checks. Encryption/decryption failures expose stable categories only and return no plaintext. Key generation and rotation remain operator/future work.
+
 ### 6.3 Settings stored in SQLite
 
 Plain: poll interval, Push enabled flag, Telegram last-test metadata, VAPID public key, schema/app version metadata.
@@ -1241,6 +1243,8 @@ Formatting:
 - Test endpoint sends a test message and records test status; does not require a ticket event.
 - Errors: map 400/401/403 to permanent config errors; 429/5xx/network to retryable; sanitize descriptions.
 - Bounded timeout (proposal: 10s), response size cap, context cancellation.
+
+**P2 Telegram implementation (2026-10-24).** `internal/notify/telegram.go` is a bounded, redirect-free Bot API client for `getMe` and `sendMessage`, with HTML escaping, a 64 KiB response cap, safe error categories (`permanent`, `transient`, `rate_limited`, `canceled`), `Retry-After` parsing, and redacted errors (no token, URL, body, or raw description). `internal/notify/telegramsettings` stores the token and chat ID as versioned AES-256-GCM values bound to their setting keys, fails closed on missing/tampered/wrong-key values, returns only a masked status view, and records sanitized last-test metadata. Delivery orchestration, retries, and the authenticated settings/test HTTP endpoint remain P3/`NTF-001`/`API-004`; no real credentials or Telegram calls are used in tests.
 
 ### 13.4 Web Push implementation
 

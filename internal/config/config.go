@@ -2,7 +2,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/am-fallah/neda/internal/crypto"
 )
 
 // Environment names the runtime mode. Production enables fail-closed checks.
@@ -281,26 +282,8 @@ func validateVAPIDSubject(raw string) error {
 }
 
 func validateKeyFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("NEDA_ENCRYPTION_KEY_FILE: unavailable: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("NEDA_ENCRYPTION_KEY_FILE: must be a regular file")
-	}
-	if info.Mode().Perm()&0o077 != 0 {
-		return errors.New("NEDA_ENCRYPTION_KEY_FILE: permissions must be owner-only (0400 or 0600)")
-	}
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("NEDA_ENCRYPTION_KEY_FILE: unreadable: %w", err)
-	}
-	decoded, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(contents)))
-	if err != nil {
-		return errors.New("NEDA_ENCRYPTION_KEY_FILE: contents must be base64")
-	}
-	if len(decoded) != 32 {
-		return fmt.Errorf("NEDA_ENCRYPTION_KEY_FILE: decoded key must be exactly 32 bytes, got %d", len(decoded))
+	if err := crypto.ValidateKeyFile(path); err != nil {
+		return fmt.Errorf("NEDA_ENCRYPTION_KEY_FILE: %w", err)
 	}
 	return nil
 }
