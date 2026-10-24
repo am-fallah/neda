@@ -52,6 +52,7 @@ type Config struct {
 	Auth       *auth.Manager
 	LoginGuard *auth.LoginGuard
 	Monitors   *domain.MonitorService
+	Now        func() time.Time
 }
 
 // ReadinessChecker verifies that the database and migrations are usable.
@@ -69,6 +70,7 @@ type Server struct {
 	auth               *auth.Manager
 	loginGuard         *auth.LoginGuard
 	monitors           *domain.MonitorService
+	now                func() time.Time
 }
 
 // New constructs a Server. A nil logger falls back to slog.Default.
@@ -94,6 +96,9 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 	if cfg.ShutdownTimeout <= 0 {
 		cfg.ShutdownTimeout = defaultShutdownTimeout
 	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
 
 	s := &Server{
 		cfg:                cfg,
@@ -103,6 +108,7 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		auth:               cfg.Auth,
 		loginGuard:         cfg.LoginGuard,
 		monitors:           cfg.Monitors,
+		now:                cfg.Now,
 	}
 	s.handler = s.buildHandler()
 	return s

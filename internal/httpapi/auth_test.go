@@ -39,6 +39,18 @@ type authClock struct{ now time.Time }
 
 func (c *authClock) Now() time.Time { return c.now }
 
+type permissiveProvider struct{ id provider.ID }
+
+func (p permissiveProvider) Metadata() provider.Metadata {
+	return provider.Metadata{ID: p.id, DisplayName: "permissive test provider", TestOnly: true}
+}
+
+func (p permissiveProvider) ValidateConfig(provider.MonitorProviderConfig) error { return nil }
+
+func (p permissiveProvider) Check(context.Context, provider.CheckRequest) (provider.Result, error) {
+	return provider.Result{ObservedAt: time.Now().UTC()}, nil
+}
+
 type authFixture struct {
 	server   *httpapi.Server
 	manager  *auth.Manager
@@ -80,7 +92,7 @@ func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPasswo
 		t.Fatalf("auth.NewRateLimiter: %v", err)
 	}
 	guard := auth.NewLoginGuard(auth.OriginPolicy{PublicURL: publicURL, Production: true}, limiter, false)
-	registry, err := provider.NewRegistry(fake.NewWithClock(clock.Now))
+	registry, err := provider.NewRegistry(fake.NewWithClock(clock.Now), permissiveProvider{id: "alt"})
 	if err != nil {
 		t.Fatalf("provider.NewRegistry: %v", err)
 	}
@@ -99,6 +111,7 @@ func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPasswo
 		Auth:       manager,
 		LoginGuard: guard,
 		Monitors:   monitors,
+		Now:        clock.Now,
 	}, slog.New(slog.NewJSONHandler(io.Discard, nil)), authReadiness{}, applied)
 	if withPassword {
 		if err := manager.SetPassword(ctx, authTestPass); err != nil {

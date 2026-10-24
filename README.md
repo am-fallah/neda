@@ -151,8 +151,8 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 **API-002 monitor CRUD API**
 
 - `internal/httpapi/monitors.go` adds private `GET/POST /api/v1/monitors`, `GET/PATCH/DELETE /api/v1/monitors/{id}`, and idempotent `POST /api/v1/monitors/{id}/pause|resume` endpoints.
-- Requests use camelCase monitor/provider DTOs. Responses expose monitor status, expiry, scheduling/diagnostics, and provider rows without internal secrets. Validation failures return a `validation_error` with path-keyed fields; expired resume returns 409; delete returns 204.
-- `cmd/neda/serve.go` composes the monitor service with the scheduler waker and near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider or production provider registration is involved.
+- Requests use camelCase monitor/provider DTOs. `PATCH` is partial: omitted fields/providers are preserved; supplying a provider list replaces the active set and inherits omitted optional fields from matching providers. Responses expose monitor status, expiry, scheduling/diagnostics, and provider rows without internal secrets. Validation failures return a `validation_error` with path-keyed fields; expired resume returns 409; delete returns 204.
+- `cmd/neda/serve.go` composes the monitor service with the scheduler waker and current-interval near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider is involved. Development may explicitly register the fake provider with `NEDA_FAKE_PROVIDER_ENABLED=true`; production keeps the provider registry empty until P1b/`PRV-009`, so production monitor create/edit rejects provider selections and no checks dispatch.
 - Remaining: monitor detail observations/diagnostics (`API-008`), overview/events/providers (`API-003`), and settings/Telegram (`API-004`).
 
 ## Not implemented yet
@@ -210,7 +210,7 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
 
-The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. The auth HTTP endpoints are implemented; monitor and settings endpoints remain pending later API tasks. Do not commit real secrets.
+The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. Auth and monitor CRUD endpoints are implemented; monitor detail/overview and settings endpoints remain pending later API tasks. Do not commit real secrets.
 
 ## Repository layout
 

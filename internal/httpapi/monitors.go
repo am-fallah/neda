@@ -30,6 +30,25 @@ type monitorProviderRequest struct {
 	GenderCode    string `json:"genderCode"`
 }
 
+type monitorPatchRequest struct {
+	Label           *string                        `json:"label"`
+	OriginName      *string                        `json:"originName"`
+	DestinationName *string                        `json:"destinationName"`
+	DepartureDate   *string                        `json:"departureDate"`
+	Adults          *int                           `json:"adults"`
+	Children        *int                           `json:"children"`
+	Infants         *int                           `json:"infants"`
+	Providers       *[]monitorProviderPatchRequest `json:"providers"`
+}
+
+type monitorProviderPatchRequest struct {
+	ProviderID    string  `json:"providerId"`
+	OriginID      *string `json:"originId"`
+	DestinationID *string `json:"destinationId"`
+	BookingSlug   *string `json:"bookingSlug"`
+	GenderCode    *string `json:"genderCode"`
+}
+
 type monitorResponse struct {
 	ID              string                    `json:"id"`
 	Label           string                    `json:"label"`
@@ -42,7 +61,7 @@ type monitorResponse struct {
 	Enabled         bool                      `json:"enabled"`
 	Status          string                    `json:"status"`
 	ExpiresAt       time.Time                 `json:"expiresAt"`
-	ExpiredAt       *time.Time                `json:"expiredAt,omitempty"`
+	ExpiredAt       *time.Time                `json:"expiredAt"`
 	CreatedAt       time.Time                 `json:"createdAt"`
 	UpdatedAt       time.Time                 `json:"updatedAt"`
 	Providers       []monitorProviderResponse `json:"providers"`
@@ -130,7 +149,7 @@ func (s *Server) listMonitors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	response := monitorListResponse{Monitors: make([]monitorResponse, 0, len(monitors))}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	for _, monitor := range monitors {
 		response.Monitors = append(response.Monitors, monitorDTO(monitor, now))
 	}
@@ -140,7 +159,7 @@ func (s *Server) listMonitors(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createMonitor(w http.ResponseWriter, r *http.Request) {
 	var body monitorRequest
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "invalid monitor request")
+		writeDecodeError(w, r, err, "invalid monitor request")
 		return
 	}
 	monitor, err := s.monitors.Create(r.Context(), body.toDomain())
@@ -149,7 +168,7 @@ func (s *Server) createMonitor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Location", "/api/v1/monitors/"+monitor.ID)
-	writeJSON(w, http.StatusCreated, monitorDTO(monitor, time.Now().UTC()))
+	writeJSON(w, http.StatusCreated, monitorDTO(monitor, s.now().UTC()))
 }
 
 func (s *Server) getMonitor(w http.ResponseWriter, r *http.Request, id string) {
@@ -158,21 +177,26 @@ func (s *Server) getMonitor(w http.ResponseWriter, r *http.Request, id string) {
 		s.writeMonitorError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, monitorDTO(monitor, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, monitorDTO(monitor, s.now().UTC()))
 }
 
 func (s *Server) updateMonitor(w http.ResponseWriter, r *http.Request, id string) {
-	var body monitorRequest
-	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid_request", "invalid monitor request")
-		return
-	}
-	monitor, err := s.monitors.Update(r.Context(), id, body.toDomain())
+	current, err := s.monitors.Get(r.Context(), id)
 	if err != nil {
 		s.writeMonitorError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, monitorDTO(monitor, time.Now().UTC()))
+	var body monitorPatchRequest
+	if err := decodeJSON(r, &body); err != nil {
+		writeDecodeError(w, r, err, "invalid monitor request")
+		return
+	}
+	monitor, err := s.monitors.Update(r.Context(), id, body.toDomain(current))
+	if err != nil {
+		s.writeMonitorError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, monitorDTO(monitor, s.now().UTC()))
 }
 
 func (s *Server) deleteMonitor(w http.ResponseWriter, r *http.Request, id string) {
@@ -189,7 +213,7 @@ func (s *Server) pauseMonitor(w http.ResponseWriter, r *http.Request, id string)
 		s.writeMonitorError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, monitorDTO(monitor, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, monitorDTO(monitor, s.now().UTC()))
 }
 
 func (s *Server) resumeMonitor(w http.ResponseWriter, r *http.Request, id string) {
@@ -198,7 +222,7 @@ func (s *Server) resumeMonitor(w http.ResponseWriter, r *http.Request, id string
 		s.writeMonitorError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, monitorDTO(monitor, time.Now().UTC()))
+	writeJSON(w, http.StatusOK, monitorDTO(monitor, s.now().UTC()))
 }
 
 func (s *Server) writeMonitorError(w http.ResponseWriter, r *http.Request, err error) {
@@ -219,6 +243,10 @@ func (s *Server) writeMonitorError(w http.ResponseWriter, r *http.Request, err e
 	case errors.Is(err, domain.ErrMonitorExpired):
 		writeError(w, r, http.StatusConflict, "monitor_expired", "monitor is expired; edit the departure date first")
 	default:
+		s.logger.Error("monitor request failed",
+			"request_id", logging.RequestID(r.Context()),
+			"error", err,
+		)
 		writeError(w, r, http.StatusInternalServerError, "internal_error", "internal server error")
 	}
 }
@@ -242,6 +270,101 @@ func (m monitorRequest) toDomain() domain.MonitorInput {
 		Adults:          m.Adults,
 		Children:        m.Children,
 		Infants:         m.Infants,
+		Providers:       providers,
+	}
+}
+
+func (p monitorPatchRequest) toDomain(current domain.Monitor) domain.MonitorInput {
+	input := monitorInputFromMonitor(current)
+	if p.Label != nil {
+		input.Label = *p.Label
+	}
+	if p.OriginName != nil {
+		input.OriginName = *p.OriginName
+	}
+	if p.DestinationName != nil {
+		input.DestinationName = *p.DestinationName
+	}
+	if p.DepartureDate != nil {
+		input.DepartureDate = *p.DepartureDate
+	}
+	if p.Adults != nil {
+		input.Adults = *p.Adults
+	}
+	if p.Children != nil {
+		input.Children = *p.Children
+	}
+	if p.Infants != nil {
+		input.Infants = *p.Infants
+	}
+	if p.Providers == nil {
+		return input
+	}
+
+	existing := make(map[provider.ID]domain.MonitorProvider, len(current.Providers))
+	for _, target := range current.Providers {
+		if target.Active {
+			existing[target.ProviderID] = target
+		}
+	}
+	input.Providers = make([]domain.ProviderInput, 0, len(*p.Providers))
+	for _, candidate := range *p.Providers {
+		providerID := provider.ID(candidate.ProviderID)
+		previous, found := existing[providerID]
+		originID := ""
+		if candidate.OriginID != nil {
+			originID = *candidate.OriginID
+		} else if found {
+			originID = previous.OriginID
+		}
+		destinationID := ""
+		if candidate.DestinationID != nil {
+			destinationID = *candidate.DestinationID
+		} else if found {
+			destinationID = previous.DestinationID
+		}
+		bookingSlug := ""
+		if candidate.BookingSlug != nil {
+			bookingSlug = *candidate.BookingSlug
+		} else if found {
+			bookingSlug = previous.BookingSlug
+		}
+		genderCode := ""
+		if candidate.GenderCode != nil {
+			genderCode = *candidate.GenderCode
+		} else if found {
+			genderCode = previous.GenderCode
+		}
+		input.Providers = append(input.Providers, domain.ProviderInput{
+			ProviderID:    providerID,
+			OriginID:      originID,
+			DestinationID: destinationID,
+			BookingSlug:   bookingSlug,
+			GenderCode:    genderCode,
+		})
+	}
+	return input
+}
+
+func monitorInputFromMonitor(monitor domain.Monitor) domain.MonitorInput {
+	providers := make([]domain.ProviderInput, 0, len(monitor.Providers))
+	for _, target := range monitor.ActiveProviders() {
+		providers = append(providers, domain.ProviderInput{
+			ProviderID:    target.ProviderID,
+			OriginID:      target.OriginID,
+			DestinationID: target.DestinationID,
+			BookingSlug:   target.BookingSlug,
+			GenderCode:    target.GenderCode,
+		})
+	}
+	return domain.MonitorInput{
+		Label:           monitor.Label,
+		OriginName:      monitor.OriginName,
+		DestinationName: monitor.DestinationName,
+		DepartureDate:   monitor.DepartureDate,
+		Adults:          monitor.Adults,
+		Children:        monitor.Children,
+		Infants:         monitor.Infants,
 		Providers:       providers,
 	}
 }

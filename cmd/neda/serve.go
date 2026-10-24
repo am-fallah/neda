@@ -21,6 +21,7 @@ import (
 	notifydelivery "github.com/am-fallah/neda/internal/notify/delivery"
 	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
+	"github.com/am-fallah/neda/internal/provider/fake"
 	"github.com/am-fallah/neda/internal/scheduler"
 	"github.com/am-fallah/neda/internal/store"
 )
@@ -110,12 +111,10 @@ func runServe(stdout, stderr io.Writer) int {
 		deliverySource = telegramSettings.DeliveryDestinations
 	}
 
-	// PRV-009 (production provider configuration) remains deferred, so this
-	// registry is empty and no target can be dispatched until provider
-	// integration is authorized. SCH-010 still composes the production check
-	// stage and outcome runner so the scheduler path is complete and tested;
-	// the empty registry keeps it inert.
-	providerRegistry, err := provider.NewRegistry()
+	// PRV-009 (production provider configuration) remains deferred, so the
+	// production registry is empty. Development/test may explicitly enable the
+	// deterministic fake provider; it is never registered in production.
+	providerRegistry, fakeProviderEnabled, err := providerRegistryForConfig(cfg)
 	if err != nil {
 		logger.Error("provider registry initialization failed", "error", err)
 		return 1
@@ -126,7 +125,11 @@ func runServe(stdout, stderr io.Writer) int {
 	monitorService, err := domain.NewMonitorService(appStore, providerRegistry, domain.MonitorServiceConfig{
 		Now: time.Now,
 		NearTermSchedule: func(now time.Time) time.Time {
-			return now.Add(scheduler.NearTermDelay(pollInterval, nil))
+			interval := pollInterval
+			if current, err := appStore.PollInterval(context.Background()); err == nil && current > 0 {
+				interval = current
+			}
+			return now.Add(scheduler.NearTermDelay(interval, nil))
 		},
 		Wake: waker.Wake,
 	})
@@ -197,7 +200,8 @@ func runServe(stdout, stderr io.Writer) int {
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
 		"delivery_worker", deliveryWorker != nil,
-		"mode", "runner-composed-empty-provider-registry",
+		"fake_provider", fakeProviderEnabled,
+		"mode", "runner-composed",
 	)
 
 	server := httpapi.New(httpapi.Config{
@@ -252,4 +256,17 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	logger.Info("service stopped")
 	return 0
+}
+
+func providerRegistryForConfig(cfg config.Config) (*provider.Registry, bool, error) {
+	providers := make([]provider.Provider, 0, 1)
+	fakeEnabled := cfg.FakeProviderEnabled && !cfg.IsProduction()
+	if fakeEnabled {
+		providers = append(providers, fake.New())
+	}
+	registry, err := provider.NewRegistry(providers...)
+	if err != nil {
+		return nil, false, err
+	}
+	return registry, fakeEnabled, nil
 }

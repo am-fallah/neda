@@ -27,6 +27,8 @@ type monitorPayload struct {
 	Providers       []struct {
 		ProviderID          string     `json:"providerId"`
 		Active              bool       `json:"active"`
+		BookingSlug         string     `json:"bookingSlug"`
+		GenderCode          string     `json:"genderCode"`
 		ConfigVersion       int64      `json:"configVersion"`
 		NextDueAt           *time.Time `json:"nextDueAt"`
 		ConsecutiveFailures int        `json:"consecutiveFailures"`
@@ -165,6 +167,11 @@ func TestMonitorsCRUDAndPauseResume(t *testing.T) {
 		t.Fatalf("resumed monitor = %+v", resumedPayload)
 	}
 
+	resumedAgain := fixture.request(t, http.MethodPost, "/api/v1/monitors/"+created.ID+"/resume", "", session, csrf, authOrigin)
+	if resumedAgain.Code != http.StatusOK {
+		t.Fatalf("idempotent resume status = %d", resumedAgain.Code)
+	}
+
 	deleted := fixture.request(t, http.MethodDelete, "/api/v1/monitors/"+created.ID, "", session, csrf, authOrigin)
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, body=%s", deleted.Code, deleted.Body.String())
@@ -172,6 +179,58 @@ func TestMonitorsCRUDAndPauseResume(t *testing.T) {
 	missing := fixture.request(t, http.MethodGet, "/api/v1/monitors/"+created.ID, "", session, "", "")
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("deleted monitor status = %d", missing.Code)
+	}
+}
+
+func TestMonitorsPartialPatchPreservesProvidersAndOptionalFields(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	session, csrf, _ := fixture.login(t, authTestPass)
+
+	body := monitorRequestBody("Multi provider")
+	providers := body["providers"].([]map[string]any)
+	body["providers"] = append(providers, map[string]any{
+		"providerId":    "alt",
+		"originId":      "alt-origin",
+		"destinationId": "alt-destination",
+		"bookingSlug":   "validated-slug",
+		"genderCode":    "M",
+	})
+	recorder := fixture.request(t, http.MethodPost, "/api/v1/monitors", mustJSON(t, body), session, csrf, authOrigin)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("create multi-provider status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var created monitorPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if len(created.Providers) != 2 {
+		t.Fatalf("created providers = %d, want 2", len(created.Providers))
+	}
+
+	recorder = fixture.request(t, http.MethodPatch, "/api/v1/monitors/"+created.ID,
+		`{"label":"Renamed only"}`, session, csrf, authOrigin)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("partial patch status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var patched monitorPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode patched: %v", err)
+	}
+	if patched.Label != "Renamed only" || len(patched.Providers) != 2 {
+		t.Fatalf("partial patch = %+v", patched)
+	}
+	var foundAlt bool
+	for _, target := range patched.Providers {
+		if target.ProviderID == "alt" {
+			foundAlt = true
+			if !target.Active || target.BookingSlug != "validated-slug" ||
+				target.GenderCode != "M" || target.ConfigVersion != 1 {
+				t.Fatalf("alt provider after partial patch = %+v", target)
+			}
+		}
+	}
+	if !foundAlt {
+		t.Fatal("alt provider was not preserved by partial patch")
 	}
 }
 
@@ -200,6 +259,7 @@ func TestMonitorsValidationAndExpiredResume(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("duplicate provider status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
+	validation = errorPayload{}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &validation); err != nil {
 		t.Fatalf("decode duplicate validation: %v", err)
 	}
@@ -224,6 +284,7 @@ func TestMonitorsValidationAndExpiredResume(t *testing.T) {
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("unknown field status = %d", recorder.Code)
 	}
+	validation = errorPayload{}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &validation); err != nil {
 		t.Fatalf("decode unknown field: %v", err)
 	}
@@ -240,6 +301,7 @@ func TestMonitorsValidationAndExpiredResume(t *testing.T) {
 	if resume.Code != http.StatusConflict {
 		t.Fatalf("expired resume status = %d, body=%s", resume.Code, resume.Body.String())
 	}
+	validation = errorPayload{}
 	if err := json.Unmarshal(resume.Body.Bytes(), &validation); err != nil {
 		t.Fatalf("decode expired resume: %v", err)
 	}
@@ -292,5 +354,18 @@ func TestMonitorsAuthAndMethodHandling(t *testing.T) {
 	extra := fixture.request(t, http.MethodGet, "/api/v1/monitors/missing/extra", "", session, "", "")
 	if extra.Code != http.StatusNotFound {
 		t.Fatalf("extra path status = %d", extra.Code)
+	}
+	for _, request := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, "/api/v1/monitors/missing/pause"},
+		{http.MethodPost, "/api/v1/monitors/missing/resume"},
+		{http.MethodDelete, "/api/v1/monitors/missing"},
+	} {
+		recorder := fixture.request(t, request.method, request.path, "", session, csrf, authOrigin)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("%s %s status = %d, want 404", request.method, request.path, recorder.Code)
+		}
 	}
 }

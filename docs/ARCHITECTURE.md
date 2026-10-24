@@ -1378,7 +1378,7 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 
 - Base path `/api/v1`; JSON UTF-8; camelCase fields; timestamps RFC3339 UTC; dates `YYYY-MM-DD`.
 - Error shape: `{"error":{"code":"validation_error","message":"...","fields":{...}},"requestId":"..."}`.
-- Status codes: 200/201/204 success; 400 validation; 401 unauthenticated; 403 CSRF/forbidden; 404 not found; 409 conflict (expired resume, duplicate); 429 rate limit with `Retry-After`; 500 internal; 503 setup/DB unavailable.
+- Status codes: 200/201/204 success; 400 validation; 401 unauthenticated; 403 CSRF/forbidden; 404 not found; 409 conflict (expired resume or other state conflict); 429 rate limit with `Retry-After`; 500 internal; 503 setup/DB unavailable.
 - Pagination: cursor-based for events/deliveries (`limit` max 100, opaque `cursor`); simple list for small resources.
 - All private routes require a session; authenticated POST/PATCH/DELETE requests require the session CSRF header and origin validation. Login is public and uses Origin/Referer + rate limiting instead.
 - No secrets in DTOs; settings return booleans/labels/status only.
@@ -1421,7 +1421,7 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 ### 15.3 DTO notes
 
 - Monitor create/update: `label`, `originName`, `destinationName`, `departureDate`, `adults`, `children`, `infants`, `providers[]` (`providerId`, `originId`, `destinationId`, optional `bookingSlug`, optional `genderCode`).
-- Monitor response: `id`, label, route names, Gregorian `departureDate`, passenger counts, `enabled`, derived status (`active`/`paused`/`expired`), `expiresAt`, `expiredAt`, timestamps, and provider rows with provider ID, active flag, route IDs, booking/gender config, `configVersion`, next/last attempt, last success/outcome/error, and consecutive failures. `GET /api/v1/monitors` returns `{"monitors":[...]}`; create/update/pause/resume return one monitor DTO; delete returns 204. Validation errors include a `fields` map keyed by request path.
+- Monitor response: `id`, label, route names, Gregorian `departureDate`, passenger counts, `enabled`, derived status (`active`/`paused`/`expired`), `expiresAt`, `expiredAt`, timestamps, and provider rows with provider ID, active flag, route IDs, booking/gender config, `configVersion`, next/last attempt, last success/outcome/error, and consecutive failures. `GET /api/v1/monitors` returns `{"monitors":[...]}`; create/update/pause/resume return one monitor DTO; delete returns 204. `PATCH` is partial: omitted scalar fields and providers are preserved; an explicitly supplied provider list is the full new active set, with omitted provider route/optional fields inherited from the matching current provider. Validation errors include a `fields` map keyed by request path.
 - Event: kind, provider, monitor label/route snapshot, journey/offering, state (`reservable` only for availability events), occurredAt, bookingUrl optional, delivery statuses.
 - Settings: `pollIntervalSeconds`, `telegramConfigured`, `telegramLastTest`, `pushEnabled`, `vapidPublicKey` (only via push config), `version`.
 - Never include token, key, endpoint, p256dh, auth, session token, or raw provider body.
