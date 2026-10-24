@@ -3,7 +3,9 @@
 .env
 .env.*
 !.env.example
+secrets/
 data/
+.worktrees/
 *.db
 *.db-shm
 *.db-wal

@@ -3,8 +3,12 @@
 
 const FALLBACK_PATH = "/events";
 
+function fallbackTarget() {
+  return new URL(FALLBACK_PATH, self.location.origin).href;
+}
+
 function safeTarget(raw) {
-  if (typeof raw !== "string" || raw.length === 0) return FALLBACK_PATH;
+  if (typeof raw !== "string" || raw.length === 0) return fallbackTarget();
   try {
     const target = new URL(raw, self.location.origin);
     if (target.origin === self.location.origin) return target.href;
@@ -18,7 +22,7 @@ function safeTarget(raw) {
   } catch {
     // Fall through to the safe same-origin event page.
   }
-  return FALLBACK_PATH;
+  return fallbackTarget();
 }
 
 self.addEventListener("install", (event) => {

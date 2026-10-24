@@ -1,6 +1,6 @@
 # Neda
 
-**Status: M1–M5 foundations, the private JSON API, the dashboard, and Web Push are implemented and locally tested. Production provider registration/live validation, retention cleanup, Docker/Compose, backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes live provider traffic, real Telegram/Push credentials, or deployment.
+**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, and Docker/Compose packaging are implemented and locally/CI tested. Production provider registration/live validation, real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 
 Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
@@ -226,11 +226,11 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, enable/pause/test/remove browser Push devices, and change the password. Telegram status exposes only a masked chat label and sanitized test result; Push status exposes only the public VAPID key and device metadata. No secret or subscription endpoint is rendered.
 - The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
 - `web/dist/.gitkeep` keeps `go build ./...` valid before a frontend build. The checked-in `.gitkeep` is restored after builds; generated assets are ignored.
-- `npm run lint`, `npm run typecheck`, `npm test` (84 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
+- `npm run lint`, `npm run typecheck`, `npm test` (90 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
 
 ## Not implemented yet
 
-Retention/cleanup (`NTF-005`), backup/restore (`SEC-003`/`OPS-009`), Docker/Compose and operational documentation (`OPS-*`), production MrBilit registration and live validation (`PRV-006`/`PRV-007`/`PRV-009`), and deployment. Real browser/Telegram delivery acceptance and manual browser Push validation remain unrun. The MrBilit adapter foundation remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram/Push credentials, or deployment.
+Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, production MrBilit registration and live validation (`PRV-006`/`PRV-007`/`PRV-009`), and deployment. The MrBilit adapter foundation remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 ## Local development
 
@@ -314,12 +314,155 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_VAPID_SUBJECT` | — | `mailto:` address or HTTPS contact required for Web Push. VAPID keys are generated once when an encryption key is configured; the public key is available only through the authenticated Push config endpoint. |
 | `NEDA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
+| `NEDA_TRUST_PROXY` | `false` | Honor `X-Forwarded-For` only behind a trusted local reverse proxy. Keep false for direct exposure. |
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
-| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and ignored in production. |
+
+Compose-only variables: `NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID` select the non-root
+runtime user and must match the owner of `./data` and the key-secret target. They
+are not read by the Go service.
 
 The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader. Private auth, monitor, provider/health, event/delivery, overview, settings/Telegram, and Push routes are implemented. Web Push requires HTTPS in production (localhost is allowed for development) and an external browser Push service. Do not commit real secrets.
+
+## Docker deployment (design + CI smoke)
+
+The repository includes a multi-stage `Dockerfile` and a single-replica
+`compose.yaml`. The runtime image is distroless, non-root, CGO-free, DNS/IP
+validated outbound, with a read-only root filesystem under Compose, a writable
+`/data` volume, and a long-form key secret mounted `0400`. Docker is not
+installed on the local development machine; the `docker` CI workflow builds the
+image and runs it read-only with a fresh volume, checks `/healthz`, restarts it,
+verifies the VAPID key is stable, and confirms a wrong key mode fails closed.
+
+```sh
+# On the reviewed deployment host, with owner-approved values:
+cd /opt/neda
+cp .env.example .env
+# Edit NEDA_PUBLIC_URL, NEDA_VAPID_SUBJECT, NEDA_RUNTIME_UID/GID.
+# Install a base64 32-byte key at ./secrets/encryption_key with mode 0400.
+mkdir -p data
+sudo chown -R "$NEDA_RUNTIME_UID:$NEDA_RUNTIME_GID" data
+docker compose config >/dev/null
+docker compose run --rm -it --entrypoint /neda neda set-password
+docker compose up -d
+curl -fsS https://neda.example.com/healthz
+```
+
+The app listens on `127.0.0.1:8080`; place a TLS reverse proxy in front of it.
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full preflight, proxy,
+backup/restore, rollback, and approval checklist. No deployment is authorized by
+the presence of these files.
+
+## Operational setup
+
+### Initial password
+
+There is no web bootstrap. Set the owner password offline with a TTY; the
+command reads it twice without echo, rejects piped input, and revokes existing
+sessions:
+
+```bash
+NEDA_DB_PATH=./data/neda.db go run ./cmd/neda set-password
+# Docker:
+docker compose run --rm -it --entrypoint /neda neda set-password
+```
+
+Use at least 12 characters. Do not pass the password as an argument or commit a
+database containing a real hash.
+
+### Telegram
+
+1. Create/obtain a bot token from Telegram and the destination chat ID or
+   `@channel`.
+2. Sign in to Neda → Settings → Telegram.
+3. Enter the token and chat ID, save, then use **Send test message**.
+4. The token/chat ID are encrypted at rest and never returned; only a masked
+   chat label and sanitized test category are shown.
+5. Use **Clear credentials** to remove them. Delivery history is retained.
+
+A real test sends a real Telegram message. Do not do this without owner
+authorization. Transient failures retry with bounds; 400/401/403 are permanent
+configuration errors.
+
+### Browser Web Push
+
+Prerequisites: a production HTTPS origin, a configured encryption key, and
+`NEDA_VAPID_SUBJECT` (a `mailto:` contact or HTTPS URL). On first startup the
+service generates one VAPID pair; the private key is encrypted and the public key
+is available only through the authenticated Push config endpoint. Restarting does
+not change the pair.
+
+1. Sign in → Settings → Browser Push.
+2. Choose a device label and click **Enable this browser**. Permission is
+   requested only by that click.
+3. Allow notifications when the browser prompts.
+4. Use **Test** for that device or **Send test to all devices**.
+5. **Pause delivery** stops all Push sends without deleting devices. **Remove**
+   disables one server row. **Unsubscribe this browser** removes the browser
+   subscription locally; the server row is disabled on the next 404/410.
+6. The service worker displays notifications while the dashboard is closed, and
+   opens the validated booking URL or event detail page on click.
+
+The browser must support service workers/Push; iOS requires an installed PWA and
+platform support. Push is unavailable on plain HTTP except localhost. Never put
+subscription endpoints, keys, or VAPID private material in logs, tickets, or
+source control.
+
+### Backups and restore
+
+A backup is only usable with both the SQLite database and the encryption key.
+Stop the service before a simple copy, or use SQLite `.backup` while running:
+
+```bash
+docker compose stop neda
+sqlite3 data/neda.db 'PRAGMA wal_checkpoint(TRUNCATE);'
+tar -C /opt -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz neda/data neda/secrets/encryption_key
+docker compose start neda
+```
+
+Keep the key owner-only (`0400`/`0600`), encrypt backups at rest, and test restore
+on a fresh volume. A database without its key fails closed; Telegram/VAPID/Push
+material must then be reset. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and
+[`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md).
+
+### Reverse proxy, TLS, and exposure
+
+Run Neda bound to loopback and terminate TLS at a reviewed reverse proxy. Preserve
+the public `Host` header; Host mismatch returns 421. Set `NEDA_TRUST_PROXY=true`
+only when the proxy is trusted/local. Do not add CORS, expose SQLite/admin routes
+directly, or expose port 8080 publicly. HSTS is emitted in production; the proxy
+must redirect HTTP to HTTPS. Android/iOS clients and Push require a trusted
+certificate.
+
+### Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| 421 misdirected request | `NEDA_PUBLIC_URL` host/port exactly match the browser Host; proxy preserves Host |
+| 401 everywhere | Session expired/cleared; sign in again; check cookie `Secure`/HTTPS |
+| 403 on a save | CSRF cookie/header lost, or wrong Origin; reload the dashboard and use the same origin |
+| 429 login | Wait for `Retry-After`; limiter is per-process and resets on restart |
+| 503 setup/auth | No owner password (`set-password`) or missing encryption key in production |
+| Telegram 409 | Credentials missing/unreadable; re-enter them after checking the key |
+| Push unavailable | `NEDA_VAPID_SUBJECT`/key/encryption key missing, or HTTPS/browser unsupported |
+| Push test fails | Sanitized category in the UI; 404/410 disables, 429/5xx retries, 400/403 is permanent |
+| Timezone/date wrong | Host clock/NTP; binary embeds IANA zones and uses `Asia/Tehran` |
+| Disk growth | Check `data/neda.db`, `-wal`, backups; retention runs daily; logs are capped in Compose |
+
+### Validation
+
+```bash
+make check
+make race
+cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build
+cd .. && npx --yes @redocly/cli@1.34.5 lint docs/openapi.yaml
+```
+
+Ordinary tests and CI use fake providers, fake Telegram/Push endpoints, and
+temporary SQLite. They do not make live MrBilit, Telegram, or Push calls. Real
+delivery and deployment require separate owner authorization.
 
 ## Repository layout
 
@@ -336,6 +479,7 @@ internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider
 internal/push/        VAPID, subscription validation/storage, guarded transport, sender
+internal/retention/   bounded daily cleanup of diagnostic/notification history
 internal/jalali/      maintained Persian-calendar conversion wrapper
 internal/httpapi/     HTTP server, middleware, health/readiness, private API
 internal/webui/       embedded SPA handler, SPA fallback, static caching
@@ -353,6 +497,11 @@ docs/                 approved planning documents and frontend acceptance checkl
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture, schema, scheduler/state design, security, testing, and deployment design.
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — single source of truth for tasks, gates, dependencies, and verification evidence.
 - [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
+- [`docs/BROWSER_PUSH_VALIDATION.md`](docs/BROWSER_PUSH_VALIDATION.md) — real Chrome service-worker/Push simulation and permission-denial evidence.
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, rollback, and approval checklist.
+- [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence and limitations.
+- [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — Definition-of-done audit, blockers, and next milestone.
+- [`docs/RESOURCE_MEASUREMENT.md`](docs/RESOURCE_MEASUREMENT.md) — 1-hour synthetic RSS/CPU/DB/WAL evidence and limitations.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and unresolved security risks.
 - [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability-scan evidence.
 - [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) — encryption-key lifecycle and recovery constraints.

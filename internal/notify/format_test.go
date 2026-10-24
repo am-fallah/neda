@@ -77,10 +77,20 @@ func TestFormatTelegramOmitsUnvalidatedBookingURLs(t *testing.T) {
 		t.Fatalf("unsafe booking URL rendered:\n%s", text)
 	}
 
-	event.BookingURL = "https://evil.example/trains/x"
-	text, _ = notify.FormatTelegram(event)
-	if strings.Contains(text, "evil.example") {
-		t.Fatalf("untrusted host rendered:\n%s", text)
+	for _, unsafe := range []string{
+		"https://evil.example/trains/x",
+		"https://mrbilit.com.evil.example/trains/x",
+		"https://user:pass@mrbilit.com/trains/x",
+		"https://mrbilit.com/trains/x#fragment",
+		"http://mrbilit.com/trains/x",
+		"javascript:alert(1)",
+		"https://mrbilit.com/" + strings.Repeat("a", 2049),
+	} {
+		event.BookingURL = unsafe
+		text, _ = notify.FormatTelegram(event)
+		if strings.Contains(text, "Open booking") {
+			t.Fatalf("unsafe URL rendered: %s", unsafe)
+		}
 	}
 }
 
