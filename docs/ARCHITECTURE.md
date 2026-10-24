@@ -1151,8 +1151,8 @@ If any step fails, roll back; no event without its outbox rows, no episode witho
 ## 12. Provider health
 
 - Global per provider, separate from ticket state.
-- After the §10.2 post-I/O validity gate, every applicable committed check updates target diagnostics. Provider diagnostics update for applicable completed success/error outcomes; provider-health counters/episodes update only for applicable outcomes under the selected A-21 rule. `SCH-010` owns the outcome transaction; `SCH-006` applies the health transition inside it and must not begin/commit independently. Discarded and abandoned outcomes update neither target scheduling nor provider health and never create health events.
-- The table below documents **Option A**, the current provisional planning default. It is not approved until A-21 is explicitly accepted; `SCH-006` cannot be marked `DONE` before then.
+- After the §10.2 post-I/O validity gate, every applicable committed check updates target diagnostics. Provider diagnostics update for applicable completed success/error outcomes; provider-health counters/episodes update only for applicable outcomes under the approved A-21 Option A rule. `SCH-010` owns the outcome transaction; `SCH-006` applies the health transition inside it and must not begin/commit independently. Discarded and abandoned outcomes update neither target scheduling nor provider health and never create health events.
+- The table below is the **approved A-21 Option A** rule (owner decision 2026-10-24, `GATE-014`).
 
 | Result class | Provider `consecutive_failures` | Provider episode/event | Provider diagnostics | Target `consecutive_failures` | Target diagnostics/scheduling | Availability |
 |---|---|---|---|---|---|---|
@@ -1163,13 +1163,16 @@ If any step fails, roll back; no event without its outbox rows, no episode witho
 | Abandoned (caller cancellation/shutdown) | unchanged | none | unchanged | unchanged | no target update; running row → `abandoned` | unchanged |
 
 - Under Option A, “consecutive” means consecutive applicable infrastructure failures since the last applicable success. Config/route/ordinary 4xx, discarded, and abandoned outcomes do not increment and do not reset the provider counter; only applicable success/empty resets it. This makes the counter a filtered count, not a count of consecutive checks.
-- A-21 is unresolved. Option B would count every failed check, including config/route/ordinary 4xx, and would make one bad route able to degrade a healthy provider. Option C would break/reset the sequence on any non-success, reducing false alerts but delaying real outage detection. The owner must choose; `SCH-006` cannot be `DONE` until the selected option is recorded.
+- A-21 was resolved by the owner on 2026-10-24 to **Option A (infrastructure-only)**. Option B would count every failed check, including config/route/ordinary 4xx, and could degrade a healthy provider because of one bad route; it is not selected. Option C would break/reset the sequence on any non-success, reducing false alerts but delaying real outage detection; it is not selected. Business outcomes such as NotReservable and ordinary availability results are not provider failures.
+- **Persistence ownership:** `SCH-003` `ApplyTargetSchedule` remains the sole writer of target `consecutive_failures`, `next_due_at`, and `updated_at`. `SCH-006` writes provider health and target diagnostics (`last_attempt_at`, `last_success_at`, `last_outcome`, `last_error_*`) only. `SCH-010` composes both inside one outcome transaction.
 - Caller cancellation/shutdown maps to abandoned; `context.DeadlineExceeded`, adapter `ErrTimeout`, and overall deadline expiry map to an infrastructure timeout failure, never abandoned. Provider-side cancellation without caller cancellation is `ErrInvalidResponse`/provider failure, not abandoned.
 - `provider_health_episodes` stores open/closed episodes; partial unique index enforces one open per provider. `provider_health.open_episode_id` is application-maintained and must be cleared or reconciled when an episode closes. `provider_health.last_duration_ms` records the last applicable check duration; discarded/abandoned do not update it.
 - Event dedupe keys: `health:<provider>:<episode>:degraded` and `...:recovered`.
 - Stale status is derived for the API: last success older than a threshold (proposal: max(3×poll interval, 15m)) or an open degraded episode.
 - Notifications are labeled `Provider issue`/`Provider recovered`; they must not imply tickets are sold out.
-- Tests: Option A 1/2/3 failures with non-counting outcomes interleaved; dedupe at 4+; recovery; re-degradation; config/route/ordinary 4xx excluded from counters but updating diagnostics; cancellation/abandoned excluded; discarded excluded; provider/target `last_attempt_at`/`last_duration_ms`; restart persistence; and a deterministic fault-injection/rollback test proving health counter+episode+event+outbox commit atomically. A-21 Option B/C must be testable if selected.
+- Tests: Option A 1/2/3 failures with non-counting outcomes interleaved; dedupe at 4+; recovery; re-degradation; config/route/ordinary 4xx excluded from counters but updating diagnostics; cancellation/abandoned excluded; discarded excluded; provider/target `last_attempt_at`/`last_duration_ms`; restart persistence; and a deterministic fault-injection/rollback test proving health counter+episode+event+outbox commit atomically. Options B/C are not implemented.
+
+**SCH-006 implementation (2026-10-24).** `health.ApplySuccess` and `health.ApplyFailure` are caller-transaction-scoped and never begin/commit/rollback. `ApplySuccess` resets the provider counter, closes an open degraded episode, emits one recovery event through `notify.Enqueue`, and updates provider/target diagnostics. `ApplyFailure` counts only `IsInfrastructure && CountsTowardOutage` outcomes; config/route/ordinary 4xx update diagnostics without incrementing, resetting, opening, or closing episodes. Three eligible infrastructure failures open one episode and emit one degraded event/outbox; further failures do not repeat it. `health.IsStale` derives the API stale threshold as `max(3×poll interval, 15m)` or an open episode. Availability state, target scheduling/backoff, check-run finalization, and delivery workers remain outside SCH-006.
 
 ---
 
@@ -1709,7 +1712,7 @@ Scheduler/state:
 - Pause/resume/expiry; expired resume rejected; Tehran day end independent of host TZ; expiry sweep includes paused/disabled monitors; expired → edit future date clears `expired_at` and allows resume; paused across expiry behaves consistently.
 - Initial Reservable event; Not→Res; continuous no dup; Res→Not closes; later Res new; Unknown/error/empty no close.
 - Config-version reset; no event on close; initial event may recur after material edit; booking-slug-only edit during an in-flight request discards that attempt and produces no obsolete URL.
-- Provider health 3 failures/one alert/recovery/re-degrade; config/route/4xx excluded or included according to the selected A-21 option; interleaved non-counting outcomes follow the documented counter rule; provider/target last-attempt and duration fields update only as specified.
+- Provider health 3 failures/one alert/recovery/re-degrade; config/route/4xx excluded under approved A-21 Option A; interleaved non-counting outcomes follow the documented counter rule; provider/target last-attempt and duration fields update only as specified.
 - Health/event/outbox fault injection: a rolled-back transaction leaves no partial availability state, health episode, event, or outbox rows; retry/replay is idempotent.
 - Combined path: one successful check commits availability state + provider-health success + event/outbox together; failure during either applier rolls all of them back.
 - Provider error/timeout does not invoke the availability applier, create an availability event, or close an episode; a discarded or abandoned check creates no availability or provider-health transition/event and transitions only the running `check_runs` row.
@@ -1847,7 +1850,7 @@ After `GATE-002` and the first meaningful approved Go source exists (frontend Ty
 | D-11 | No TanStack Query initially | PROVISIONAL | Minimal dependencies; simple polling. |
 | D-12 | No full E2E automation in v1 | PROVISIONAL | Manual browser Push/Telegram checklist; add only if justified. |
 | D-13 | Per-provider `config_version` resets affected state | PROPOSED | Correct edits without deleting history. |
-| D-14 | Provider health counting rule (A-21) | **REQUIRES OWNER INPUT** | Option A (infrastructure-only) is the provisional default; Options B/C are documented alternatives. `SCH-006` cannot be `DONE` until the owner chooses. |
+| D-14 | Provider health counting rule (A-21) | **RESOLVED — Option A** | Owner decision 2026-10-24 (`GATE-014`): only applicable infrastructure failures count; business/availability outcomes, config/route/ordinary 4xx, discarded, and abandoned do not increment or reset; success/empty resets. Options B/C are not implemented. |
 | D-15 | CodeGraph index deferred until source exists | VERIFIED (policy) | No meaningful graph yet; keep `.codegraph/` ignored. |
 
 Any status change to `ACCEPTED` requires owner approval of this plan. `GATE-001` and `GATE-002` are recorded as approved; `PROVISIONAL` and `PROPOSED` items must be resolved/documented during the relevant task.
