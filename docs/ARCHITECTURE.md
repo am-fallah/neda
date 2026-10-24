@@ -1386,7 +1386,7 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 - Pagination: cursor-based for events/deliveries (`limit` max 100, opaque `cursor`); simple list for small resources.
 - All private routes require a session; authenticated POST/PATCH/DELETE requests require the session CSRF header and origin validation. Login is public and uses Origin/Referer + rate limiting instead.
 - No secrets in DTOs; settings return booleans/labels/status only.
-- OpenAPI optional P2; a hand-written `docs/openapi.yaml` may be added without codegen.
+- OpenAPI: `docs/openapi.yaml` is a hand-written OpenAPI 3.0.3 description of the implemented public/private routes, session+CSRF security, cursor/filter parameters, common errors, and response schemas. It is validated with Redocly CLI; no code generation is used.
 
 ### 15.2 Endpoints
 
