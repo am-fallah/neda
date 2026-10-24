@@ -129,7 +129,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/crypto` loads and validates the external key file, encrypts setting values with versioned AES-256-GCM and setting-key-bound associated data, and fails closed on wrong keys/tampering. `internal/config` now uses the same key-file validation at startup.
 - `internal/notify` provides a bounded, redirect-free Telegram Bot API client with HTML escaping, safe permanent/transient/rate-limit/canceled classification, `Retry-After`, and redacted errors. `internal/notify/telegramsettings` stores the token and chat ID encrypted and returns only a masked status/test view.
 - Delivery orchestration and the authenticated settings/test API remain `NTF-001`/`API-004` (P3); the manual backup/restore drill and `/data` permission proof remain `SEC-003`/`GATE-004`. No real credentials, live Telegram calls, or production key generation are included.
-- PR: [#15](https://github.com/am-fallah/neda/pull/15); rebased onto `bb514c3` to resolve the tracker/documentation conflict. CI status is recorded in the PR.
+- PR: [#15](https://github.com/am-fallah/neda/pull/15); code-head CI [40110863756](https://github.com/am-fallah/neda/actions/runs/40110863756) passed on `778a803`; rebased onto `bb514c3` for conflict resolution. Open, not merged.
 
 ## Not implemented yet
 
