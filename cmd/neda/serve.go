@@ -25,6 +25,8 @@ import (
 	"github.com/am-fallah/neda/internal/scheduler"
 	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
+	"github.com/am-fallah/neda/internal/webui"
+	webassets "github.com/am-fallah/neda/web"
 )
 
 func runServe(stdout, stderr io.Writer) int {
@@ -215,6 +217,7 @@ func runServe(stdout, stderr io.Writer) int {
 		"mode", "runner-composed",
 	)
 
+	webHandler := webui.New(webassets.Dist())
 	server := httpapi.New(httpapi.Config{
 		Addr:       cfg.HTTPAddr,
 		Production: cfg.IsProduction(),
@@ -225,7 +228,11 @@ func runServe(stdout, stderr io.Writer) int {
 		Settings:   settingsService,
 		Store:      appStore,
 		Providers:  providerRegistry,
+		WebUI:      webHandler,
 	}, logger, database, applied)
+	if !webHandler.Built() {
+		logger.Warn("frontend assets are not embedded; serving API only (run npm run build in web/)")
+	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()

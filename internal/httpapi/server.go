@@ -58,7 +58,10 @@ type Config struct {
 	Settings   *appsettings.Service
 	Store      *store.Store
 	Providers  *provider.Registry
-	Now        func() time.Time
+	// WebUI serves the embedded SPA for non-API routes. It is optional so
+	// health-only tests and API-only deployments remain valid.
+	WebUI http.Handler
+	Now   func() time.Time
 }
 
 // ReadinessChecker verifies that the database and migrations are usable.
@@ -79,6 +82,7 @@ type Server struct {
 	settings           *appsettings.Service
 	store              *store.Store
 	providers          *provider.Registry
+	webUI              http.Handler
 	now                func() time.Time
 }
 
@@ -120,6 +124,7 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		settings:           cfg.Settings,
 		store:              cfg.Store,
 		providers:          cfg.Providers,
+		webUI:              cfg.WebUI,
 		now:                cfg.Now,
 	}
 	s.handler = s.buildHandler()
@@ -232,8 +237,25 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	case "/api/v1/auth/password":
 		s.privateAuth(http.HandlerFunc(s.password)).ServeHTTP(w, r)
 	default:
+		if isReservedBackendPath(r.URL.Path) {
+			writeError(w, r, http.StatusNotFound, "not_found", "not found")
+			return
+		}
+		if s.webUI != nil {
+			s.webUI.ServeHTTP(w, r)
+			return
+		}
 		writeError(w, r, http.StatusNotFound, "not_found", "not found")
 	}
+}
+
+// isReservedBackendPath keeps unknown API and health routes JSON and prevents
+// the SPA fallback from swallowing backend paths.
+func isReservedBackendPath(requestPath string) bool {
+	return requestPath == "/api" ||
+		strings.HasPrefix(requestPath, "/api/") ||
+		strings.HasPrefix(requestPath, "/healthz/") ||
+		strings.HasPrefix(requestPath, "/readyz/")
 }
 
 func (s *Server) ready(w http.ResponseWriter, r *http.Request) {

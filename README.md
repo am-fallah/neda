@@ -1,8 +1,9 @@
 # Neda
 
-**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001 through SCH-010, and M4 NTF-000 are implemented and tested, including the SCH-008 multi-provider isolation matrix and the SCH-009 end-to-end scheduler/state integration suite.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, provider spacing/target-backoff policy with a transaction-scoped persistence helper, the provider-check stage, the transactional notification-outbox schema and enqueue boundary, the availability state/episode/dedupe applier, the provider-health counter/episode/diagnostics applier, the Tehran-expiry sweep with next-expiry wake, and the SCH-010 outcome orchestrator with pre- and in-transaction validity gates, check-run finalization, and atomic composition. The P1a foundation adds an unregistered MrBilit request/transport/parser/identity adapter with synthetic fixtures. The P2 encryption foundation adds safe key-file loading, versioned AES-256-GCM setting values, encrypted Telegram token/chat-ID settings, and a bounded/redacted Telegram Bot API client. P3 adds the notification delivery worker, retry/lease handling, and Telegram sender; the production scheduler now composes the check stage, outcome runner, and delivery worker, but the production provider registry is intentionally empty, so no provider checks or new delivery rows are created yet. P4 adds session/CSRF-protected auth endpoints for login, session probing, logout, and password change. API-002 adds private monitor list/create/detail/edit/delete and pause/resume endpoints with validation-field errors and expired-resume handling. NTF-006 adds the read-only notification/event/delivery repository. API-008 extends monitor detail with bounded current observations and recent check diagnostics. API-004 adds non-secret settings plus encrypted Telegram set/clear/test endpoints. API-003 adds provider health, event/delivery history with cursor pagination, and the overview aggregate. API-007 adds an end-to-end private API lifecycle test. API-006 adds hand-written OpenAPI documentation for the implemented routes. Production provider checks, production MrBilit registration/live validation, Web Push delivery, and the dashboard are not implemented yet.
+**Status: M1–M4 backend foundations and the M5 private API + dashboard are implemented and tested. Web Push delivery, production provider registration/live validation, retention cleanup, Docker packaging, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox and Telegram delivery worker, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes live provider traffic, real Telegram credentials, or deployment.
 
-Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
+
+Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
 ## Implemented so far
 
@@ -29,7 +30,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/provider`: normalized provider IDs, availability states, capabilities, metadata, request/result types, `Provider` interface, and an explicit immutable registry that rejects nil, duplicate, empty-ID, and empty-display-name entries.
 - Shared error taxonomy and `Classify` contract for scheduler/health: success, infrastructure, configuration, route, request, and abandoned categories; timeout/network/429/5xx/invalid-response and provider-side cancellation are infrastructure failures, while 4xx/route/config are not.
 - `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
-- Fake-provider UI labeling and the MrBilit adapter remain for later milestones.
+- Fake-provider metadata is surfaced as a test-only source in the dashboard; the MrBilit adapter remains unregistered pending its validation gate.
 
 **M3 SCH-001 monitor foundation (approved slice complete)**
 
@@ -206,13 +207,27 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - Validated with `npx --yes @redocly/cli@1.34.5 lint docs/openapi.yaml` (valid, no warnings). No code generation or runtime changes.
 - PR: [#29](https://github.com/am-fallah/neda/pull/29); CI run [40125174668](https://github.com/am-fallah/neda/actions/runs/40125174668); merged as `4ed7a52`; merged-main CI [40125322348](https://github.com/am-fallah/neda/actions/runs/40125322348).
 
+**M5 dashboard and frontend (WEB-001–WEB-009, FND-013)**
+
+- `web/` is a React 19 + TypeScript + Vite + Tailwind CSS 4 + shadcn/ui single-page app. Routes: `/login`, `/` (overview), `/monitors`, `/monitors/new`, `/monitors/:id`, `/monitors/:id/edit`, `/events`, `/events/:id`, and `/settings`. A protected layout redirects unauthenticated visitors to `/login`; any private API 401 with `unauthenticated` also clears the client session and redirects.
+- The typed API client uses same-origin credentials and an in-memory CSRF token from the login/session response. The token is never written to localStorage or sessionStorage. Server field errors are mapped into forms, while server validation remains authoritative.
+- The dashboard shows monitor counts, provider health (degraded/stale), recent events, and per-channel delivery status. The UI never treats a provider error, timeout, malformed response, missing offering, or stale observation as confirmed unavailability. "Not reservable" is never labeled "sold out"; `Unknown` and missing observations are shown as unknown with a reason category. Historical events and observations are explicitly labeled as historical, not current availability.
+- Monitor create/edit uses a Jalali date picker backed by the maintained `jalaali-js` library and stores/sends Gregorian `YYYY-MM-DD`. Validation is mirrored on the client for usability; the server remains authoritative. Create/edit supports per-provider route IDs, optional booking slugs/gender codes only when the provider advertises support, and the test-only provider is clearly labeled and never presented as a real ticket source.
+- Detail pages show last observed inventory, recent checks, per-provider diagnostics, pause/resume, edit, and confirmed delete. Observation rows expose validated booking links only; missing/unknown offerings never imply "sold out". History supports event/delivery filters and cursor pagination.
+- Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, and change the password. Telegram status exposes only a masked chat label and sanitized test result. Browser Push setup is intentionally not exposed because the server-side Push implementation (`PSH-*`) is still pending.
+- The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
+- `web/dist/.gitkeep` keeps `go build ./...` valid before a frontend build. The checked-in `.gitkeep` is restored after builds; generated assets are ignored.
+- `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, and delivery labels. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
+
 ## Not implemented yet
 
-NTF-002 full notification presentation (including Jalali display), Web Push senders and subscription encryption, provider destination/health-alert channel resolution, production MrBilit registration and live validation, the dashboard, Docker packaging, and deployment. The MrBilit adapter foundation remains unregistered; the P2/P3 Telegram delivery foundation is wired but has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram credentials, or deployment.
+Web Push (VAPID keys, subscription API/encryption, service worker, sender), NTF-002 full notification presentation (including Jalali display), provider-health notification channel resolution, production MrBilit registration and live validation, retention cleanup, Docker packaging, and deployment. The MrBilit adapter foundation remains unregistered; the P2/P3 Telegram delivery foundation is wired but has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram credentials, or deployment.
 
 ## Local development
 
-Prerequisites: Go `1.27.3` and `make`.
+Prerequisites: Go `1.27.3`, Node.js `22.12+` with npm, and `make`.
+
+Backend checks:
 
 ```bash
 make check          # formatting, vet, tests, build
@@ -227,13 +242,13 @@ NEDA_ENV=development NEDA_DB_PATH=./data/neda.db go run ./cmd/neda set-password
 
 The command rejects non-TTY stdin and does not accept a password argument. The password is read twice without echo.
 
-Run the service locally:
+Run the backend:
 
 ```bash
-make run
+NEDA_FAKE_PROVIDER_ENABLED=true make run
 ```
 
-In another terminal:
+`make run` sets `NEDA_ENV=development` and `NEDA_DB_PATH=./data/neda.db`. The fake provider is test-only and disabled by default; enable it only for local workflows. In another terminal:
 
 ```bash
 curl -i http://127.0.0.1:8080/healthz
@@ -241,7 +256,40 @@ curl -i http://127.0.0.1:8080/readyz
 NEDA_ENV=development go run ./cmd/neda healthcheck
 ```
 
-`make run` sets `NEDA_ENV=development` and `NEDA_DB_PATH=./data/neda.db`, then starts the server on `:8080`. The `data/` directory is ignored by Git.
+Run the dashboard development server in a separate terminal:
+
+```bash
+cd web
+npm ci
+npm run dev
+```
+
+Vite serves `http://localhost:5173` and proxies `/api`, `/healthz`, and `/readyz` to `http://127.0.0.1:8080`. Open the Vite URL, sign in with the password set above, and enable the fake provider on the backend only if you want local test data. The browser never sees the test provider as a real ticket source; it is labeled in the UI.
+
+Production-style single-binary build:
+
+```bash
+cd web
+npm ci
+npm run build        # writes web/dist and restores web/dist/.gitkeep
+cd ..
+go build -o neda ./cmd/neda
+NEDA_ENV=development NEDA_DB_PATH=./data/neda.db ./neda serve
+```
+
+The frontend must be built before the Go binary because assets are compiled in with `go:embed`. `go build ./...` remains valid without a frontend build (the SPA returns a clear 503 while API/health routes still work).
+
+Frontend checks:
+
+```bash
+cd web
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+The dashboard test suite uses Vitest and Testing Library with mocked `fetch`; it does not require a running backend, live provider, Telegram, or Push credentials. See [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) for the manual browser checklist.
 
 ## Configuration
 
@@ -261,7 +309,7 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
 
-The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. Auth and monitor CRUD endpoints are implemented; monitor detail/overview and settings endpoints remain pending later API tasks. Do not commit real secrets.
+The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. Private auth, monitor, provider/health, event/delivery, overview, and settings/Telegram routes are implemented. Browser Push endpoints are not implemented. Do not commit real secrets.
 
 ## Repository layout
 
@@ -277,9 +325,13 @@ internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, expir
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider
-internal/httpapi/     HTTP server, middleware, health/readiness
-docs/                 approved planning documents
-.github/workflows/    backend CI
+internal/httpapi/     HTTP server, middleware, health/readiness, private API
+internal/webui/       embedded SPA handler, SPA fallback, static caching
+web/                  React/TypeScript dashboard and `go:embed` assets
+web/src/              routes, pages, components, typed API client, tests
+web/embed.go          embeds web/dist into the Go binary
+docs/                 approved planning documents and frontend acceptance checklist
+.github/workflows/    backend and frontend CI
 ```
 
 ## Documentation
@@ -288,6 +340,7 @@ docs/                 approved planning documents
 - [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — product behavior, assumptions, and acceptance criteria.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture, schema, scheduler/state design, security, testing, and deployment design.
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — single source of truth for tasks, gates, dependencies, and verification evidence.
+- [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
 - [`docs/CODEGRAPH_WORKFLOW.md`](docs/CODEGRAPH_WORKFLOW.md) — CodeGraph usage policy.
 - [`AGENTS.md`](AGENTS.md) — operating rules for agents working in this repository.
 
@@ -296,6 +349,7 @@ docs/                 approved planning documents
 - No live MrBilit, Telegram, or Web Push calls are made by ordinary tests or CI.
 - No production server access or deployment is authorized by this repository state.
 - Runtime secrets must be supplied outside the repository.
-- The auth foundation stores only session/CSRF hashes; raw tokens live in HttpOnly cookies. HTTP auth endpoints are not implemented yet.
-- The fake provider is test-only, disabled by default, and must never be presented as a real ticket source.
+- The auth layer stores only session/CSRF hashes; raw tokens live in HttpOnly cookies. The dashboard keeps its CSRF token in memory only and does not store credentials, tokens, or Telegram secrets in browser storage.
+- The dashboard never displays Telegram tokens, raw chat IDs, ciphertext, Push subscription material, or raw provider errors.
+- The fake provider is test-only, disabled by default, and is labeled as a test source in the UI.
 - Do not commit passwords, tokens, cookies, private keys, encryption keys, Push subscription material, production environment files, or private runtime data.
