@@ -14,6 +14,7 @@ performed.
 |---|---|
 | Repository `am-fallah/neda` is private; default branch `main` | `gh repo view`; see tracker |
 | Baseline `origin/main` at task start | `f361c309709f9f743d0c5ee04b861d360e7ee755` |
+| Final merged `origin/main` for this batch | `ac7a38c` (PR #35 merge); merged-main Go/frontend/Docker CI passed (runs 40137201767/40137201756/40137201807) |
 | M1–M5 backend/frontend, private API, and Web Push implemented | merged PRs #33/#34; tracker |
 | Retention worker implemented with rollback/FK tests | `internal/retention`; `go test ./internal/retention/...` |
 | Go checks pass locally (including race) | `make check`; `make race`; command log in tracker |
