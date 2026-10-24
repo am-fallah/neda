@@ -85,6 +85,29 @@ jobs:
           fi
           docker rm -f neda-ci
 
+          # Restore the database and key to a fresh volume and verify the
+          # restored instance starts, decrypts VAPID material, and stays healthy.
+          cp -a "$RUNNER_TEMP/neda-data" "$RUNNER_TEMP/neda-restore"
+          cp -a "$RUNNER_TEMP/neda-key" "$RUNNER_TEMP/neda-restore-key"
+          test "$(stat -c '%a' "$RUNNER_TEMP/neda-restore-key/encryption_key")" = "400"
+          python3 - "$RUNNER_TEMP/neda-restore/neda.db" <<'PYEOF'
+          import sqlite3, sys
+          database = sqlite3.connect(sys.argv[1])
+          result = database.execute('PRAGMA integrity_check').fetchone()[0]
+          if result != 'ok':
+              raise SystemExit('restored database integrity check failed')
+          PYEOF
+          docker run -d --name neda-restored             --read-only             --tmpfs /tmp:size=16m,noexec,nosuid             --user "$(id -u):$(id -g)"             -p 127.0.0.1:18081:8080             -v "$RUNNER_TEMP/neda-restore:/data"             -v "$RUNNER_TEMP/neda-restore-key/encryption_key:/run/secrets/encryption_key:ro"             -e NEDA_ENV=production             -e NEDA_HTTP_ADDR=:8080             -e NEDA_DB_PATH=/data/neda.db             -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key             -e NEDA_PUBLIC_URL=https://neda.example.com             -e NEDA_VAPID_SUBJECT=mailto:ci@example.com             neda:ci
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18081/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18081/healthz
+          RESTORED_PUBLIC_2="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$RUNNER_TEMP/neda-restore/neda.db")"
+          test "$ORIGINAL_PUBLIC" = "$RESTORED_PUBLIC_2"
+          test "$(stat -c '%u' "$RUNNER_TEMP/neda-restore/neda.db")" = "$(id -u)"
+          docker rm -f neda-restored
+
       - name: Wrong key permissions fail closed
         run: |
           mkdir -p "$RUNNER_TEMP/neda-bad" "$RUNNER_TEMP/neda-bad-key"
