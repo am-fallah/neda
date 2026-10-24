@@ -198,6 +198,11 @@ func TestOutcomeRunnerMultipleAvailabilityEventsUseUniqueDeliveryIDs(t *testing.
 	if !result.Settled {
 		t.Fatal("multiple-event success was not settled")
 	}
+	outcome, _, _, _, journeys, offerings, reservable, notReservable, unknown, warnings := checkRunSnapshot(t, harness.sqlDB)
+	if outcome != "success" || journeys != 1 || offerings != 2 || reservable != 2 ||
+		notReservable != 0 || unknown != 0 || warnings != 0 {
+		t.Fatalf("check counts = %q/%d/%d/%d/%d/%d/%d", outcome, journeys, offerings, reservable, notReservable, unknown, warnings)
+	}
 	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM events WHERE kind = 'availability'`); count != 2 {
 		t.Fatalf("availability events = %d, want 2", count)
 	}
