@@ -154,6 +154,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - Requests use camelCase monitor/provider DTOs. `PATCH` is partial: omitted fields/providers are preserved; supplying a provider list replaces the active set and inherits omitted optional fields from matching providers. Responses expose monitor status, expiry, scheduling/diagnostics, and provider rows without internal secrets. Validation failures return a `validation_error` with path-keyed fields; expired resume returns 409; delete returns 204.
 - `cmd/neda/serve.go` composes the monitor service with the scheduler waker and current-interval near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider is involved. Development may explicitly register the fake provider with `NEDA_FAKE_PROVIDER_ENABLED=true`; production keeps the provider registry empty until P1b/`PRV-009`, so production monitor create/edit rejects provider selections and no checks dispatch.
 - Remaining: monitor detail observations/diagnostics (`API-008`), overview/events/providers (`API-003`), and settings/Telegram (`API-004`).
+- PR: [#22](https://github.com/am-fallah/neda/pull/22); merged to `main` as `f33dd8a`. CI run [40119615680](https://github.com/am-fallah/neda/actions/runs/40119615680) passed on the code head; merged-main CI [40119753601](https://github.com/am-fallah/neda/actions/runs/40119753601) passed.
 
 ## Not implemented yet
 
