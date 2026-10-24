@@ -1,12 +1,12 @@
-// Package scheduler implements Neda's single-process, due-time scheduler and
-// the unwired SCH-004 provider-check stage.
+// Package scheduler implements Neda's single-process, due-time scheduler, the
+// SCH-004 provider-check stage, and the SCH-010 outcome runner.
 //
-// The scheduler owns due selection, monitor-wide serialization, the bounded
-// worker pool, startup recovery/stagger, and the timer-plus-wake loop. The
-// CheckStage owns one attempt-start row plus provider I/O, but it is not
-// registered as the production Runner. The package does not write
-// availability/health state, finalize check outcomes, or deliver
-// notifications; those responsibilities belong to SCH-010 and later work.
+// The scheduler loop owns due selection, monitor-wide serialization, the
+// bounded worker pool, startup recovery/stagger, and the timer-plus-wake loop.
+// The CheckStage owns one attempt-start row plus provider I/O. The
+// OutcomeRunner composes the check stage with the caller-owned outcome
+// transaction, availability, provider health, target scheduling, and outbox
+// enqueue. The loop itself never interprets provider results or writes state.
 package scheduler
 
 import (
@@ -71,8 +71,8 @@ type Result struct {
 	Settled bool
 }
 
-// Runner executes exactly one check lifecycle for a target. SCH-010 will
-// compose the SCH-004 CheckStage into the production implementation.
+// Runner executes exactly one check lifecycle for a target. SCH-010's
+// OutcomeRunner wraps the SCH-004 CheckStage for the production path.
 //
 // The runner owns any target scheduling update produced by the check and
 // reports whether the due generation was consumed. Returned errors are
@@ -210,9 +210,9 @@ func New(cfg Config) (*Scheduler, error) {
 // Run performs startup recovery, optionally staggers due targets, and then
 // serves the due-time loop until ctx is cancelled. It returns nil for a
 // graceful cancellation. A nil Runner performs recovery only and then remains
-// safely idle, so production can start the scheduler before SCH-010 composes
-// the SCH-004 check stage into a runner without dispatching no-op jobs or
-// busy-looping.
+// safely idle, so callers can start the scheduler without a runner without
+// dispatching no-op jobs or busy-looping. Production composes the SCH-010
+// outcome runner.
 func (s *Scheduler) Run(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("scheduler: nil context")

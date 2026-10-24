@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -802,6 +803,9 @@ func TestOutcomeRunnerOutcomeTransactionFailureSettlesAndLeavesRunningRow(t *tes
 	}
 	if !result.Settled {
 		t.Fatal("outcome transaction failure did not settle")
+	}
+	if strings.Contains(err.Error(), "injected") {
+		t.Fatalf("outcome failure leaked raw error detail: %q", err.Error())
 	}
 	outcome, errorKind, finished, _, _, _, _, _, _, _ := checkRunSnapshot(t, harness.sqlDB)
 	if outcome != "running" || finished.Valid {

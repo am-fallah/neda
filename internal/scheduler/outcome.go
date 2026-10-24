@@ -57,6 +57,20 @@ var (
 	ErrNilOutcomeStore = errors.New("scheduler: nil outcome store")
 )
 
+// outcomeFailure keeps scheduler/operator logs sanitized while preserving the
+// underlying error for local inspection through errors.Is/As.
+type outcomeFailure struct {
+	code string
+	err  error
+}
+
+func (e *outcomeFailure) Error() string { return "scheduler: " + e.code }
+func (e *outcomeFailure) Unwrap() error { return e.err }
+
+func newOutcomeFailure(code string, err error) error {
+	return &outcomeFailure{code: code, err: err}
+}
+
 // NewOutcomeRunner validates dependencies and applies safe defaults.
 func NewOutcomeRunner(cfg OutcomeRunnerConfig) (*OutcomeRunner, error) {
 	if cfg.Stage == nil {
@@ -123,7 +137,7 @@ func (r *OutcomeRunner) Run(ctx context.Context, target Target) (Result, error) 
 	cancel()
 	if err != nil {
 		r.logOutcomeError("outcome validity gate failed", attempt, "validity_gate_failed")
-		return Result{Settled: true}, err
+		return Result{Settled: true}, newOutcomeFailure("validity_gate_failed", err)
 	}
 	if !gate.valid {
 		return r.finalizeDiscarded(ctx, attempt, gate.reason, now)
@@ -231,7 +245,7 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	})
 	if err != nil {
 		r.logOutcomeError("check outcome transaction failed", attempt, "outcome_transaction_failed")
-		return Result{Settled: true}, err
+		return Result{Settled: true}, newOutcomeFailure("outcome_transaction_failed", err)
 	}
 	if discarded {
 		return Result{Settled: false}, nil
@@ -303,7 +317,7 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	})
 	if err != nil {
 		r.logOutcomeError("check outcome transaction failed", attempt, "outcome_transaction_failed")
-		return Result{Settled: true}, err
+		return Result{Settled: true}, newOutcomeFailure("outcome_transaction_failed", err)
 	}
 	if discarded {
 		return Result{Settled: false}, nil
@@ -340,7 +354,7 @@ func (r *OutcomeRunner) finalizeCancellation(ctx context.Context, attempt CheckA
 		}
 		r.logOutcomeError("check cancellation finalization failed", attempt, "finalization_failed")
 		if discarded {
-			return Result{Settled: true}, err
+			return Result{Settled: true}, newOutcomeFailure("finalization_failed", err)
 		}
 		return Result{Settled: true}, nil
 	}
@@ -363,7 +377,7 @@ func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAtte
 			return Result{Settled: false}, nil
 		}
 		r.logOutcomeError("check finalization failed", attempt, "finalization_failed")
-		return Result{Settled: true}, err
+		return Result{Settled: true}, newOutcomeFailure("finalization_failed", err)
 	}
 	return Result{Settled: false}, nil
 }

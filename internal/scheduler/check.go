@@ -28,8 +28,8 @@ type CheckRepository interface {
 	StartCheckRun(ctx context.Context, targetID, configVersion int64, startedAt time.Time) (int64, error)
 }
 
-// CheckStageConfig controls the unwired SCH-004 provider-check stage. Timeout
-// exists so deterministic tests can use a shorter deadline; production uses
+// CheckStageConfig controls the SCH-004 provider-check stage. Timeout exists so
+// deterministic tests can use a shorter deadline; production uses
 // DefaultCheckTimeout when it is zero.
 type CheckStageConfig struct {
 	Repository CheckRepository
@@ -40,9 +40,8 @@ type CheckStageConfig struct {
 }
 
 // CheckStage executes the provider-I/O half of one check attempt. It is not a
-// Runner and is not wired into the production scheduler: SCH-010 will compose
-// it into the outcome orchestrator, which owns finalization and the post-I/O
-// validity gate.
+// Runner itself: SCH-010's OutcomeRunner wraps it and owns finalization and the
+// post-I/O validity gate.
 type CheckStage struct {
 	repo      CheckRepository
 	providers ProviderLookup
