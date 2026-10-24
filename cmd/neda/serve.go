@@ -63,17 +63,19 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// PRV-009 (production provider configuration) remains deferred. The
-	// scheduler is intentionally idle until SCH-004 supplies a check runner, so
-	// this empty registry is never consulted for dispatch in this slice.
+	// PRV-009 (production provider configuration) remains deferred. SCH-010
+	// will compose the unwired SCH-004 check stage into a production runner;
+	// until then the scheduler is intentionally idle, so this empty registry is
+	// never consulted for dispatch in this slice.
 	providerRegistry, err := provider.NewRegistry()
 	if err != nil {
 		logger.Error("provider registry initialization failed", "error", err)
 		return 1
 	}
 	// The waker is the scheduler's wake source and the intended post-commit
-	// hook for MonitorService when the API layer composes it. The scheduler is
-	// idle in this slice because no check runner exists yet.
+	// hook for MonitorService when the API layer composes it. SCH-004 provides
+	// the unwired check stage; SCH-010 will compose it into the production
+	// runner, so the scheduler remains idle in this slice.
 	waker := scheduler.NewWaker()
 	sched, err := scheduler.New(scheduler.Config{
 		Repository: appStore,
