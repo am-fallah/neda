@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001, SCH-002, and SCH-003 are complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, and provider spacing/target-backoff policy with a transaction-scoped persistence helper. The scheduler runs idle in production until the SCH-004 check runner exists; target-backoff persistence is applied by the future outcome transaction (SCH-010). Provider-check execution, the MrBilit adapter, HTTP authentication endpoints, notifications, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1, the approved M2 initial slice, and M3 SCH-001, SCH-002, SCH-003, and SCH-004 are complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, provider spacing/target-backoff policy with a transaction-scoped persistence helper, and an unwired provider-check stage that starts one running check row and performs a single bounded provider call. The scheduler runs idle in production until SCH-010 composes that stage into a runner and owns check finalization; target-backoff persistence is also applied by the future outcome transaction (SCH-010). Production provider-check execution, the MrBilit adapter, HTTP authentication endpoints, notifications, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -37,11 +37,11 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/store`: real-SQLite monitor and provider-target repository with active/inactive target rows retained for history, atomic material-edit transactions, old-episode closure with `config_changed`, and near-term scheduling after commit.
 - Material edits bump affected `config_version`s; label-only and booking-slug-only edits do not reset scheduling. Provider removal deactivates without deleting history; re-adding reactivates and bumps again.
 - Expired monitors cannot resume until a future departure-date edit recomputes expiry and clears `expired_at`; paused monitors remain paused.
-- A scheduler wake callback is invoked after committed monitor changes; `SCH-002` supplies the wake channel, jitter, and scheduler loop, and production remains idle until `SCH-004` composes a check runner.
+- A scheduler wake callback is invoked after committed monitor changes; `SCH-002` supplies the wake channel, jitter, and scheduler loop, and production remains idle until `SCH-010` composes the SCH-004 check stage into a runner.
 
 **M3 SCH-002 scheduler foundation (approved slice complete)**
 
-- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers for `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and an explicit `Runner`/`Result` contract for `SCH-004`.
+- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers for `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and an explicit `Runner`/`Result` contract for the future `SCH-010` runner.
 - `internal/store`: schedule projection, startup recovery/stagger, and the SQLite `poll_interval_seconds` setting seeded to 300s and validated against 60–3600s.
 - `MonitorService` near-term scheduling is injectable and deterministic; a material edit's post-commit wake is covered by a scheduler integration test.
 - `cmd/neda` starts and gracefully stops the scheduler. With no runner it performs recovery only and stays idle, so it cannot dispatch no-op jobs or busy-loop.
@@ -54,9 +54,16 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/store`: transaction-scoped `ApplyTargetSchedule` updates only `consecutive_failures`, `next_due_at`, and `updated_at`. It never begins/commits a transaction. Production invocation belongs to SCH-010; no migration is required.
 - No provider HTTP retries, redirects, timeouts, availability/health transitions, notifications, API, or frontend work is included.
 
+**M3 SCH-004 provider-check stage (approved slice complete, unwired)**
+
+- `internal/scheduler/check.go`: `CheckStage` loads the persisted monitor/target, builds the normalized `provider.CheckRequest`, commits exactly one `check_runs(outcome='running')` row before I/O, validates provider configuration, and calls `Provider.Check` with one overall 20-second context. A `CheckAttempt` retains the check-run ID, target ID, request config version, booking slug, result/error, PRV-010 classification, and timing for SCH-010.
+- `internal/store/checks.go`: `StartCheckRun` performs the attempt-start transaction, verifies the target row still exists, and writes only `check_runs`.
+- The stage is deliberately not registered as the production scheduler `Runner`. SCH-010 will compose it, own the post-I/O validity gate, and finalize the running row.
+- No target scheduling, availability/health/outbox writes, HTTP retries, live provider requests, or scheduler runner wiring are included.
+
 ## Not implemented yet
 
-Provider-check execution, availability/health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. The scheduler is wired but idle until the SCH-004 check runner exists; target-backoff persistence is ready for the SCH-010 outcome transaction but is not invoked in production yet. Nothing in this repository authorizes live provider traffic or deployment.
+Production provider-check execution (the SCH-004 stage exists but is not wired into the scheduler), availability/health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. The scheduler is wired but idle until SCH-010 composes the SCH-004 check stage into a runner; target-backoff persistence is ready for the SCH-010 outcome transaction but is not invoked in production yet. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 
