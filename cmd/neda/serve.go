@@ -23,6 +23,7 @@ import (
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
 	"github.com/am-fallah/neda/internal/scheduler"
+	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
 )
 
@@ -64,6 +65,10 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("poll interval initialization failed", "error", err)
 		return 1
 	}
+	if err := appStore.EnsurePushEnabled(ctx, time.Now().UTC()); err != nil {
+		logger.Error("push setting initialization failed", "error", err)
+		return 1
+	}
 	pollInterval, err := appStore.PollInterval(ctx)
 	if err != nil {
 		logger.Error("poll interval configuration is invalid", "error", err)
@@ -95,6 +100,7 @@ func runServe(stdout, stderr io.Writer) int {
 	// P2/P3: load the external key only when configured. Development startup
 	// without a key remains usable; Telegram delivery is simply unavailable.
 	var telegramSettings *telegramsettings.Settings
+	var telegramClient *notify.TelegramClient
 	var deliverySource scheduler.DeliverySource
 	if cfg.EncryptionKeyFile != "" {
 		key, err := crypto.LoadKeyFile(cfg.EncryptionKeyFile)
@@ -108,7 +114,17 @@ func runServe(stdout, stderr io.Writer) int {
 			logger.Error("telegram settings initialization failed", "error", err)
 			return 1
 		}
+		telegramClient, err = notify.NewTelegramClient(notify.TelegramClientConfig{})
+		if err != nil {
+			logger.Error("telegram client initialization failed", "error", err)
+			return 1
+		}
 		deliverySource = telegramSettings.DeliveryDestinations
+	}
+	settingsService, err := appsettings.New(appStore, telegramSettings, telegramClient, time.Now)
+	if err != nil {
+		logger.Error("settings service initialization failed", "error", err)
+		return 1
 	}
 
 	// PRV-009 (production provider configuration) remains deferred, so the
@@ -174,11 +190,6 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	var deliveryWorker *notifydelivery.Worker
 	if telegramSettings != nil {
-		telegramClient, err := notify.NewTelegramClient(notify.TelegramClientConfig{})
-		if err != nil {
-			logger.Error("telegram client initialization failed", "error", err)
-			return 1
-		}
 		telegramSender, err := notifydelivery.NewTelegramSender(telegramSettings, telegramClient)
 		if err != nil {
 			logger.Error("telegram sender initialization failed", "error", err)
@@ -211,6 +222,7 @@ func runServe(stdout, stderr io.Writer) int {
 		Auth:       authManager,
 		LoginGuard: loginGuard,
 		Monitors:   monitorService,
+		Settings:   settingsService,
 	}, logger, database, applied)
 
 	runCtx, cancel := context.WithCancel(ctx)

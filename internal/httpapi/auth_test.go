@@ -1,26 +1,31 @@
 package httpapi_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/am-fallah/neda/internal/auth"
+	"github.com/am-fallah/neda/internal/crypto"
 	"github.com/am-fallah/neda/internal/db"
 	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/httpapi"
 	"github.com/am-fallah/neda/internal/migrations"
+	"github.com/am-fallah/neda/internal/notify"
+	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
+	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
 )
 
@@ -52,14 +57,59 @@ func (p permissiveProvider) Check(context.Context, provider.CheckRequest) (provi
 }
 
 type authFixture struct {
-	server   *httpapi.Server
-	manager  *auth.Manager
-	monitors *domain.MonitorService
-	db       *sql.DB
-	clock    *authClock
+	server         *httpapi.Server
+	manager        *auth.Manager
+	monitors       *domain.MonitorService
+	settings       *appsettings.Service
+	telegramTester *fakeTelegramTester
+	db             *sql.DB
+	clock          *authClock
+	logs           *bytes.Buffer
+}
+
+type fakeTelegramTester struct {
+	mu         sync.Mutex
+	getMeErr   error
+	sendErr    error
+	getMeCalls int
+	sendCalls  int
+	lastText   string
+}
+
+func (f *fakeTelegramTester) GetMe(context.Context, notify.TelegramCredentials) (notify.TelegramBot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getMeCalls++
+	if f.getMeErr != nil {
+		return notify.TelegramBot{}, f.getMeErr
+	}
+	return notify.TelegramBot{ID: 1, Username: "neda_test_bot", FirstName: "Neda"}, nil
+}
+
+func (f *fakeTelegramTester) SendMessage(_ context.Context, _ notify.TelegramCredentials, text string) (notify.TelegramMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sendCalls++
+	f.lastText = text
+	if f.sendErr != nil {
+		return notify.TelegramMessage{}, f.sendErr
+	}
+	return notify.TelegramMessage{MessageID: 1, ChatID: 1, SentAt: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}, nil
+}
+
+func (f *fakeTelegramTester) setErrors(getMeErr, sendErr error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.getMeErr = getMeErr
+	f.sendErr = sendErr
 }
 
 func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword bool) *authFixture {
+	t.Helper()
+	return newAuthFixtureWithTelegram(t, limiterConfig, withPassword, true)
+}
+
+func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword, withTelegram bool) *authFixture {
 	t.Helper()
 	ctx := context.Background()
 	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "httpapi-auth.db"))
@@ -105,20 +155,46 @@ func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPasswo
 	if err != nil {
 		t.Fatalf("domain.NewMonitorService: %v", err)
 	}
+	var telegramSettings *telegramsettings.Settings
+	var telegramTester *fakeTelegramTester
+	if withTelegram {
+		material := make([]byte, crypto.KeySize)
+		for index := range material {
+			material[index] = 0x42
+		}
+		key, err := crypto.NewKey(material)
+		if err != nil {
+			t.Fatalf("crypto.NewKey: %v", err)
+		}
+		telegramSettings, err = telegramsettings.New(st, key, clock.Now)
+		if err != nil {
+			t.Fatalf("telegramsettings.New: %v", err)
+		}
+		telegramTester = &fakeTelegramTester{}
+	}
+	settingsService, err := appsettings.New(st, telegramSettings, telegramTester, clock.Now)
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	logs := &bytes.Buffer{}
 	server := httpapi.New(httpapi.Config{
 		Production: true,
 		PublicURL:  publicURL,
 		Auth:       manager,
 		LoginGuard: guard,
 		Monitors:   monitors,
+		Settings:   settingsService,
 		Now:        clock.Now,
-	}, slog.New(slog.NewJSONHandler(io.Discard, nil)), authReadiness{}, applied)
+	}, slog.New(slog.NewJSONHandler(logs, nil)), authReadiness{}, applied)
 	if withPassword {
 		if err := manager.SetPassword(ctx, authTestPass); err != nil {
 			t.Fatalf("SetPassword: %v", err)
 		}
 	}
-	return &authFixture{server: server, manager: manager, monitors: monitors, db: database.DB, clock: clock}
+	return &authFixture{
+		server: server, manager: manager, monitors: monitors, settings: settingsService,
+		telegramTester: telegramTester, db: database.DB, clock: clock, logs: logs,
+	}
 }
 
 func (f *authFixture) request(t *testing.T, method, path, body, sessionCookie, csrf, origin string) *httptest.ResponseRecorder {
