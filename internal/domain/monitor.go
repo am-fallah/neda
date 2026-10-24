@@ -131,6 +131,8 @@ type MonitorRepository interface {
 	PauseMonitor(ctx context.Context, id string, now time.Time) (Monitor, error)
 	ResumeMonitor(ctx context.Context, id string, now, scheduleAt time.Time) (Monitor, error)
 	DeleteMonitor(ctx context.Context, id string) error
+	ListInventoryObservations(ctx context.Context, targetID, configVersion int64, limit int) (InventoryObservationPage, error)
+	ListRecentCheckRuns(ctx context.Context, targetID int64, limit int) (CheckRunDiagnosticPage, error)
 }
 
 // ProviderResolver looks up explicitly registered provider adapters.

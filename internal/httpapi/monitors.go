@@ -90,6 +90,69 @@ type monitorListResponse struct {
 	Monitors []monitorResponse `json:"monitors"`
 }
 
+type monitorDetailResponse struct {
+	monitorResponse
+	Providers []monitorProviderDetailResponse `json:"providers"`
+}
+
+type monitorProviderDetailResponse struct {
+	monitorProviderResponse
+	Observations          []inventoryObservationResponse `json:"observations"`
+	ObservationsTruncated bool                           `json:"observationsTruncated"`
+	RecentChecks          []checkRunResponse             `json:"recentChecks"`
+	RecentChecksTruncated bool                           `json:"recentChecksTruncated"`
+}
+
+type inventoryObservationResponse struct {
+	JourneyKey  string `json:"journeyKey"`
+	OfferingKey string `json:"offeringKey"`
+
+	State      string    `json:"state"`
+	StateSince time.Time `json:"stateSince"`
+
+	LastObservedAt time.Time  `json:"lastObservedAt"`
+	LastDecisiveAt *time.Time `json:"lastDecisiveAt"`
+	LastMissingAt  *time.Time `json:"lastMissingAt"`
+	Missing        bool       `json:"missing"`
+
+	LastReason   string `json:"lastReason,omitempty"`
+	LastCapacity *int   `json:"lastCapacity,omitempty"`
+
+	TrainNumber     string     `json:"trainNumber,omitempty"`
+	Operator        string     `json:"operator,omitempty"`
+	OriginName      string     `json:"originName,omitempty"`
+	DestinationName string     `json:"destinationName,omitempty"`
+	DepartureAt     *time.Time `json:"departureAt,omitempty"`
+	ArrivalAt       *time.Time `json:"arrivalAt,omitempty"`
+	WagonName       string     `json:"wagonName,omitempty"`
+	ClassName       string     `json:"className,omitempty"`
+	PriceAmount     *int64     `json:"priceAmount,omitempty"`
+	PriceCurrency   string     `json:"priceCurrency,omitempty"`
+	BookingURL      string     `json:"bookingUrl,omitempty"`
+
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type checkRunResponse struct {
+	ID            int64      `json:"id"`
+	ConfigVersion int64      `json:"configVersion"`
+	StartedAt     time.Time  `json:"startedAt"`
+	FinishedAt    *time.Time `json:"finishedAt"`
+	Outcome       string     `json:"outcome"`
+	ErrorKind     string     `json:"errorKind,omitempty"`
+	HTTPStatus    *int       `json:"httpStatus,omitempty"`
+	DurationMS    *int64     `json:"durationMs,omitempty"`
+
+	JourneyCount       int `json:"journeyCount"`
+	OfferingCount      int `json:"offeringCount"`
+	ReservableCount    int `json:"reservableCount"`
+	NotReservableCount int `json:"notReservableCount"`
+	UnknownCount       int `json:"unknownCount"`
+	WarningCount       int `json:"warningCount"`
+
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 func (s *Server) handleMonitors(w http.ResponseWriter, r *http.Request) {
 	if s.monitors == nil {
 		writeError(w, r, http.StatusServiceUnavailable, "monitors_unavailable", "monitor service is not available")
@@ -172,12 +235,12 @@ func (s *Server) createMonitor(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getMonitor(w http.ResponseWriter, r *http.Request, id string) {
-	monitor, err := s.monitors.Get(r.Context(), id)
+	detail, err := s.monitors.Detail(r.Context(), id)
 	if err != nil {
 		s.writeMonitorError(w, r, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, monitorDTO(monitor, s.now().UTC()))
+	writeJSON(w, http.StatusOK, monitorDetailDTO(detail, s.now().UTC()))
 }
 
 func (s *Server) updateMonitor(w http.ResponseWriter, r *http.Request, id string) {
@@ -372,24 +435,7 @@ func monitorInputFromMonitor(monitor domain.Monitor) domain.MonitorInput {
 func monitorDTO(monitor domain.Monitor, now time.Time) monitorResponse {
 	providers := make([]monitorProviderResponse, 0, len(monitor.Providers))
 	for _, target := range monitor.Providers {
-		providers = append(providers, monitorProviderResponse{
-			ProviderID:          string(target.ProviderID),
-			Active:              target.Active,
-			OriginID:            target.OriginID,
-			DestinationID:       target.DestinationID,
-			BookingSlug:         target.BookingSlug,
-			GenderCode:          target.GenderCode,
-			ConfigVersion:       target.ConfigVersion,
-			NextDueAt:           utcOptional(target.NextDueAt),
-			LastAttemptAt:       utcOptional(target.LastAttemptAt),
-			LastSuccessAt:       utcOptional(target.LastSuccessAt),
-			LastOutcome:         target.LastOutcome,
-			LastErrorKind:       target.LastErrorKind,
-			LastErrorAt:         utcOptional(target.LastErrorAt),
-			ConsecutiveFailures: target.ConsecutiveFailures,
-			CreatedAt:           target.CreatedAt.UTC(),
-			UpdatedAt:           target.UpdatedAt.UTC(),
-		})
+		providers = append(providers, monitorProviderDTO(target))
 	}
 	return monitorResponse{
 		ID:              monitor.ID,
@@ -407,6 +453,103 @@ func monitorDTO(monitor domain.Monitor, now time.Time) monitorResponse {
 		CreatedAt:       monitor.CreatedAt.UTC(),
 		UpdatedAt:       monitor.UpdatedAt.UTC(),
 		Providers:       providers,
+	}
+}
+
+func monitorProviderDTO(target domain.MonitorProvider) monitorProviderResponse {
+	return monitorProviderResponse{
+		ProviderID:          string(target.ProviderID),
+		Active:              target.Active,
+		OriginID:            target.OriginID,
+		DestinationID:       target.DestinationID,
+		BookingSlug:         target.BookingSlug,
+		GenderCode:          target.GenderCode,
+		ConfigVersion:       target.ConfigVersion,
+		NextDueAt:           utcOptional(target.NextDueAt),
+		LastAttemptAt:       utcOptional(target.LastAttemptAt),
+		LastSuccessAt:       utcOptional(target.LastSuccessAt),
+		LastOutcome:         target.LastOutcome,
+		LastErrorKind:       target.LastErrorKind,
+		LastErrorAt:         utcOptional(target.LastErrorAt),
+		ConsecutiveFailures: target.ConsecutiveFailures,
+		CreatedAt:           target.CreatedAt.UTC(),
+		UpdatedAt:           target.UpdatedAt.UTC(),
+	}
+}
+
+func monitorDetailDTO(detail domain.MonitorDetail, now time.Time) monitorDetailResponse {
+	base := monitorDTO(detail.Monitor, now)
+	targets := make(map[int64]domain.MonitorTargetDetail, len(detail.Targets))
+	for _, target := range detail.Targets {
+		targets[target.MonitorProviderID] = target
+	}
+
+	providers := make([]monitorProviderDetailResponse, 0, len(detail.Monitor.Providers))
+	for _, target := range detail.Monitor.Providers {
+		diagnostics := targets[target.ID]
+		observations := make([]inventoryObservationResponse, 0, len(diagnostics.Observations))
+		for _, observation := range diagnostics.Observations {
+			observations = append(observations, inventoryObservationDTO(observation))
+		}
+		checks := make([]checkRunResponse, 0, len(diagnostics.RecentChecks))
+		for _, check := range diagnostics.RecentChecks {
+			checks = append(checks, checkRunDTO(check))
+		}
+		providers = append(providers, monitorProviderDetailResponse{
+			monitorProviderResponse: monitorProviderDTO(target),
+			Observations:            observations,
+			ObservationsTruncated:   diagnostics.ObservationsTruncated,
+			RecentChecks:            checks,
+			RecentChecksTruncated:   diagnostics.RecentChecksTruncated,
+		})
+	}
+	return monitorDetailResponse{monitorResponse: base, Providers: providers}
+}
+
+func inventoryObservationDTO(observation domain.InventoryObservation) inventoryObservationResponse {
+	return inventoryObservationResponse{
+		JourneyKey:      observation.JourneyKey,
+		OfferingKey:     observation.OfferingKey,
+		State:           string(observation.State),
+		StateSince:      observation.StateSince.UTC(),
+		LastObservedAt:  observation.LastObservedAt.UTC(),
+		LastDecisiveAt:  utcOptional(observation.LastDecisiveAt),
+		LastMissingAt:   utcOptional(observation.LastMissingAt),
+		Missing:         observation.Missing,
+		LastReason:      observation.LastReason,
+		LastCapacity:    observation.LastCapacity,
+		TrainNumber:     observation.TrainNumber,
+		Operator:        observation.Operator,
+		OriginName:      observation.OriginName,
+		DestinationName: observation.DestinationName,
+		DepartureAt:     utcOptional(observation.DepartureAt),
+		ArrivalAt:       utcOptional(observation.ArrivalAt),
+		WagonName:       observation.WagonName,
+		ClassName:       observation.ClassName,
+		PriceAmount:     observation.PriceAmount,
+		PriceCurrency:   observation.PriceCurrency,
+		BookingURL:      observation.BookingURL,
+		UpdatedAt:       observation.UpdatedAt.UTC(),
+	}
+}
+
+func checkRunDTO(check domain.CheckRunDiagnostic) checkRunResponse {
+	return checkRunResponse{
+		ID:                 check.ID,
+		ConfigVersion:      check.ConfigVersion,
+		StartedAt:          check.StartedAt.UTC(),
+		FinishedAt:         utcOptional(check.FinishedAt),
+		Outcome:            string(check.Outcome),
+		ErrorKind:          check.ErrorKind,
+		HTTPStatus:         check.HTTPStatus,
+		DurationMS:         check.DurationMS,
+		JourneyCount:       check.JourneyCount,
+		OfferingCount:      check.OfferingCount,
+		ReservableCount:    check.ReservableCount,
+		NotReservableCount: check.NotReservableCount,
+		UnknownCount:       check.UnknownCount,
+		WarningCount:       check.WarningCount,
+		CreatedAt:          check.CreatedAt.UTC(),
 	}
 }
 
