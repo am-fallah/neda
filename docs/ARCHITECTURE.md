@@ -943,6 +943,10 @@ No live request was made during planning. After `GATE-003` approval and a provid
 - Capture sanitized observations and update semantics in the docs/tracker only from evidence. If access is blocked or inappropriate, proceed with synthetic fixtures; live access is never a test/CI requirement.
 - Validate request parameters, envelope, time/price formats, capacity semantics, and booking URL/date format only to the extent the approved budget permits. Do not invent values for unknown enums.
 
+### 9.7 P1a implementation status (2026-10-24)
+
+`internal/provider/mrbilit` implements the documented/provisional request (`GET /api/GetAvailable/v2` with `from`, `to`, `date`, `adultCount`, `childCount`, and `infantCount`), a reusable per-attempt-timeout HTTP client with redirect rejection, bounded retries/`Retry-After`, a 2 MiB response cap, and normalized journey/offering identity per §9.3. The parser uses only a synthetic, explicitly labeled response contract because the real envelope and offering-container key are unverified; it rejects every other shape and enforces the 100/50/500 journey/offering caps before normalizing. The decision table in §9.4 is implemented with the known-negative sample and synthetic positive/shortfall/contradiction cases. A journey with insufficient fallback identity fails the whole response; an offering with no stable identity field is omitted with the `offering_identity_insufficient` warning rather than being assigned an index-based key. The adapter is deliberately **not registered** in production; `PRV-006`/`GATE-003` remains the only path to validating the real contract. Positive availability remains synthetic and unverified.
+
 ---
 
 ## 10. Scheduler and check pipeline
