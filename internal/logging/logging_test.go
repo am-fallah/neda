@@ -48,7 +48,7 @@ func TestLoggersRedactErrorValues(t *testing.T) {
 					t.Fatal("log output contains a value that should have been redacted")
 				}
 			}
-			for _, want := range []string{"provider check failed", "req-123", "[REDACTED]", "example.com/path"} {
+			for _, want := range []string{"provider check failed", "req-123", "[REDACTED]", "example.com"} {
 				if !strings.Contains(output, want) {
 					t.Fatalf("log output missing safe context %q", want)
 				}
@@ -97,8 +97,13 @@ func TestRedactString(t *testing.T) {
 	}{
 		{"Bearer abc123", "Bearer [REDACTED]"},
 		{"token=abc123&other=visible", "token=[REDACTED]&other=visible"},
-		{"https://example.com/path?token=abc123#frag", "https://example.com/path"},
-		{"prefix https://user:pass@example.com/path?x=1 suffix", "prefix https://example.com/path suffix"},
+		{"https://example.com/path?token=abc123#frag", "https://example.com"},
+		{"prefix https://user:pass@example.com/path?x=1 suffix", "prefix https://example.com suffix"},
+		{"https://api.telegram.org/bot123456:AAH-secret-token/getMe", "https://api.telegram.org"},
+		{"bot123456:AAH-secret-token failed", "bot[REDACTED] failed"},
+		{"endpoint=https://fcm.googleapis.com/wp/secret-path p256dh=secret-key auth=secret-auth", "endpoint=[REDACTED] p256dh=[REDACTED] auth=[REDACTED]"},
+		{"https://push.example.com/very-secret-device-token", "https://push.example.com"},
+		{"csrf=secret-csrf session=secret-session chat_id=12345", "csrf=[REDACTED] session=[REDACTED] chat_id=[REDACTED]"},
 	}
 	for _, tc := range cases {
 		if got := RedactString(tc.input); got != tc.want {

@@ -20,9 +20,10 @@ const redacted = "[REDACTED]"
 type requestIDKey struct{}
 
 var (
-	bearerPattern = regexp.MustCompile(`(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+`)
-	secretPattern = regexp.MustCompile(`(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie)=([^&\s]+)`)
-	urlPattern    = regexp.MustCompile(`https?://[^\s"']+`)
+	bearerPattern   = regexp.MustCompile(`(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+`)
+	botTokenPattern = regexp.MustCompile(`\bbot\d+:[A-Za-z0-9_-]{16,}`)
+	secretPattern   = regexp.MustCompile(`(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie|csrf|session|p256dh|auth|chat[_-]?id|endpoint)=([^&\s]+)`)
+	urlPattern      = regexp.MustCompile(`https?://[^\s"']+`)
 )
 
 // New returns a logger writing JSON in production and text in development.
@@ -92,18 +93,23 @@ func isSensitiveKey(key string) bool {
 // RedactString removes common credential forms and URL query data.
 func RedactString(value string) string {
 	value = bearerPattern.ReplaceAllString(value, `${1}`+redacted)
+	value = botTokenPattern.ReplaceAllString(value, "bot"+redacted)
 	value = secretPattern.ReplaceAllString(value, `${1}=`+redacted)
 	return urlPattern.ReplaceAllStringFunc(value, RedactURL)
 }
 
-// RedactURL removes userinfo, query, and fragment from an absolute URL while
-// retaining scheme, host, and path for useful diagnostics.
+// RedactURL removes userinfo, path, query, and fragment from an absolute URL.
+// Only scheme and host are retained. Credential-bearing services commonly put
+// secrets in a path segment (for example, a Telegram bot token), so retaining
+// the path would leak them into otherwise-safe error logs.
 func RedactURL(raw string) string {
 	parsed, err := url.Parse(raw)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return redacted
 	}
 	parsed.User = nil
+	parsed.Path = ""
+	parsed.RawPath = ""
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()

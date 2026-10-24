@@ -71,6 +71,10 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		headers.Set(headerContentTypeOption, "nosniff")
 		headers.Set("Referrer-Policy", "no-referrer")
 		headers.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+		headers.Set("X-Frame-Options", "DENY")
+		headers.Set("Cross-Origin-Opener-Policy", "same-origin")
+		headers.Set("Cross-Origin-Resource-Policy", "same-origin")
+		headers.Set("X-Permitted-Cross-Domain-Policies", "none")
 		headers.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		headers.Set(headerCacheControl, "no-store")
 		if s.cfg.Production {
