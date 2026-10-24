@@ -11,7 +11,7 @@ import (
 	"github.com/am-fallah/neda/internal/store"
 )
 
-func startOutcomeCheck(t *testing.T, st *store.Store, sqlDB *sql.DB, suffix string) (string, int64, int64) {
+func startOutcomeCheck(t *testing.T, st *store.Store, suffix string) (string, int64, int64) {
 	t.Helper()
 	providerID := provider.ID("p-" + suffix)
 	monitor := createScheduleMonitor(t, st, "outcome-"+suffix, true, testNow.Add(24*time.Hour), nil,
@@ -27,7 +27,7 @@ func startOutcomeCheck(t *testing.T, st *store.Store, sqlDB *sql.DB, suffix stri
 func TestFinalizeCheckRunSuccessAndConditionalConflict(t *testing.T) {
 	st, sqlDB := newTestStore(t)
 	ctx := context.Background()
-	monitorID, targetID, checkID := startOutcomeCheck(t, st, sqlDB, "success")
+	monitorID, targetID, checkID := startOutcomeCheck(t, st, "success")
 	httpStatus := 200
 	finished := testNow.Add(2 * time.Second)
 
@@ -115,7 +115,7 @@ func TestFinalizeCheckRunSuccessAndConditionalConflict(t *testing.T) {
 func TestFinalizeCheckRunRollbackLeavesRunningRow(t *testing.T) {
 	st, sqlDB := newTestStore(t)
 	ctx := context.Background()
-	_, _, checkID := startOutcomeCheck(t, st, sqlDB, "rollback")
+	_, _, checkID := startOutcomeCheck(t, st, "rollback")
 	boom := errors.New("boom")
 
 	err := st.WithSQLTx(ctx, func(tx *sql.Tx, _ *store.Store) error {
@@ -158,7 +158,7 @@ func TestFinalizeCheckRunOutcomesAndValidation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			st, sqlDB := newTestStore(t)
 			ctx := context.Background()
-			_, _, checkID := startOutcomeCheck(t, st, sqlDB, test.name)
+			_, _, checkID := startOutcomeCheck(t, st, test.name)
 			err := st.WithSQLTx(ctx, func(tx *sql.Tx, _ *store.Store) error {
 				return st.FinalizeCheckRun(ctx, tx, store.CheckFinalization{
 					CheckRunID: checkID,
