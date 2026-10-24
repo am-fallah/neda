@@ -99,6 +99,7 @@ type Repository interface {
 	ListScheduleTargets(ctx context.Context, now time.Time) ([]domain.ScheduleTarget, error)
 	RecoverRunningChecks(ctx context.Context, now time.Time) (int64, error)
 	StaggerDueTargets(ctx context.Context, now time.Time, planner func(domain.ScheduleTarget) time.Time) (int64, error)
+	ReconcileExpirations(ctx context.Context, now time.Time) (int64, *time.Time, error)
 }
 
 // Clock abstracts time and timers for deterministic tests.
@@ -233,6 +234,17 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		s.logger.Info("scheduler recovered interrupted checks", "count", recovered)
 	}
 
+	// Reconcile expiry before deciding whether the scheduler is idle. A
+	// nil-runner scheduler still reconciles already-expired monitors, but it
+	// does not create a recurring expiry timer because it never dispatches.
+	// Use a fresh clock sample so recovery time does not hide an expiry.
+	if _, _, err := s.reconcileExpirations(ctx, s.clock.Now().UTC()); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("scheduler: reconcile expirations: %w", err)
+	}
+
 	if s.runner == nil {
 		s.logger.Info("scheduler idle: no check runner configured")
 		<-ctx.Done()
@@ -353,13 +365,27 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 		}
 
 		now := s.clock.Now().UTC()
+		expiryAt, hasExpiry, expiryErr := s.reconcileExpirations(ctx, now)
+		if expiryErr != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			s.logger.Error("scheduler expiry reconciliation failed", "error", expiryErr)
+			expiryAt = now.Add(storeErrorRetry)
+			hasExpiry = true
+		}
+
 		targets, err := s.repo.ListScheduleTargets(ctx, now)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil
 			}
 			s.logger.Error("scheduler due selection failed", "error", err)
-			completed, got, ok := s.waitUntil(ctx, now.Add(storeErrorRetry), true, done)
+			retryAt := now.Add(storeErrorRetry)
+			if hasExpiry && expiryAt.Before(retryAt) {
+				retryAt = expiryAt
+			}
+			completed, got, ok := s.waitUntil(ctx, retryAt, true, done)
 			if !ok {
 				return nil
 			}
@@ -462,10 +488,19 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 		var ok bool
 		switch {
 		case running >= s.workers:
-			// Capacity is the only blocker; a completion frees a worker.
-			completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done)
-		case hasNext:
-			completed, got, ok = s.waitUntil(ctx, next, true, done)
+			// Capacity blocks dispatch, but expiry reconciliation must still
+			// run while every worker is busy.
+			if hasExpiry {
+				completed, got, ok = s.waitUntil(ctx, expiryAt, true, done)
+			} else {
+				completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done)
+			}
+		case hasNext || hasExpiry:
+			waitAt := next
+			if !hasNext || (hasExpiry && expiryAt.Before(waitAt)) {
+				waitAt = expiryAt
+			}
+			completed, got, ok = s.waitUntil(ctx, waitAt, true, done)
 		default:
 			completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done)
 		}
@@ -502,6 +537,28 @@ func (s *Scheduler) complete(completed completion, running *int, inflight map[st
 type generation struct {
 	configVersion int64
 	due           time.Time
+}
+
+// reconcileExpirations marks due monitors expired and returns the next expiry
+// deadline for the scheduler timer. The scheduler loop remains the only caller
+// in the steady state; the store performs the sweep and episode closure in one
+// transaction.
+func (s *Scheduler) reconcileExpirations(ctx context.Context, now time.Time) (time.Time, bool, error) {
+	expired, next, err := s.repo.ReconcileExpirations(ctx, now)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if expired > 0 {
+		s.logger.Info("scheduler expired monitors", "count", expired)
+	}
+	if next == nil {
+		return time.Time{}, false, nil
+	}
+	nextAt := next.UTC()
+	if !nextAt.After(now) {
+		return time.Time{}, false, fmt.Errorf("scheduler: next expiry %s is not after %s", nextAt, now)
+	}
+	return nextAt, true, nil
 }
 
 // waitUntil blocks until the next timer, a wake, a completion, or cancellation.
