@@ -262,6 +262,7 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	if len(events) > 0 && hasOutbox {
 		r.wake()
 	}
+	r.logOutcomeCommitted(attempt, string(outcome), len(events))
 	return Result{Settled: true}, nil
 }
 
@@ -342,6 +343,7 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	if len(events) > 0 && hasOutbox {
 		r.wake()
 	}
+	r.logOutcomeCommitted(attempt, string(store.CheckOutcomeError), len(events))
 	return Result{Settled: true}, nil
 }
 
@@ -376,8 +378,10 @@ func (r *OutcomeRunner) finalizeCancellation(ctx context.Context, attempt CheckA
 		return Result{Settled: true}, nil
 	}
 	if discarded {
+		r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 		return Result{Settled: false}, nil
 	}
+	r.logOutcomeCommitted(attempt, string(store.CheckOutcomeAbandoned), 0)
 	return Result{Settled: true}, nil
 }
 
@@ -404,6 +408,7 @@ func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAtte
 		r.logOutcomeError("check finalization failed", attempt, "finalization_failed")
 		return Result{Settled: true}, newOutcomeFailure("finalization_failed", err)
 	}
+	r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 	return Result{Settled: false}, nil
 }
 
@@ -446,6 +451,16 @@ func (r *OutcomeRunner) loadDeliveries(ctx context.Context, tx *sql.Tx) ([]notif
 		return nil, fmt.Errorf("scheduler: load delivery destinations: %w", err)
 	}
 	return deliveries, nil
+}
+
+func (r *OutcomeRunner) logOutcomeCommitted(attempt CheckAttempt, outcome string, events int) {
+	r.logger.Info("check outcome committed",
+		"monitor_id", attempt.MonitorID,
+		"target_id", attempt.TargetID,
+		"provider_id", string(attempt.ProviderID),
+		"outcome", outcome,
+		"events", events,
+	)
 }
 
 func (r *OutcomeRunner) logOutcomeError(message string, attempt CheckAttempt, code string) {
