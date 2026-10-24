@@ -232,6 +232,27 @@ func TestMonitorsPartialPatchPreservesProvidersAndOptionalFields(t *testing.T) {
 	if !foundAlt {
 		t.Fatal("alt provider was not preserved by partial patch")
 	}
+
+	recorder = fixture.request(t, http.MethodPatch, "/api/v1/monitors/"+created.ID,
+		`{"providers":[{"providerId":"fake"},{"providerId":"alt"}]}`, session, csrf, authOrigin)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("provider-inheritance patch status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	patched = monitorPayload{}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &patched); err != nil {
+		t.Fatalf("decode provider-inheritance patch: %v", err)
+	}
+	if len(patched.Providers) != 2 {
+		t.Fatalf("provider-inheritance providers = %+v", patched.Providers)
+	}
+	for _, target := range patched.Providers {
+		if target.ProviderID == "alt" {
+			if !target.Active || target.BookingSlug != "validated-slug" ||
+				target.GenderCode != "M" || target.ConfigVersion != 1 {
+				t.Fatalf("alt provider after inheritance patch = %+v", target)
+			}
+		}
+	}
 }
 
 func TestMonitorsValidationAndExpiredResume(t *testing.T) {
