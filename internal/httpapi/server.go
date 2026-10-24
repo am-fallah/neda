@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/logging"
 )
 
@@ -45,6 +46,10 @@ type Config struct {
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
 	ShutdownTimeout   time.Duration
+	// Auth and LoginGuard compose the authentication endpoints. They are
+	// optional for health-only tests; private routes fail closed when nil.
+	Auth       *auth.Manager
+	LoginGuard *auth.LoginGuard
 }
 
 // ReadinessChecker verifies that the database and migrations are usable.
@@ -59,6 +64,8 @@ type Server struct {
 	readiness          ReadinessChecker
 	expectedMigrations int
 	handler            http.Handler
+	auth               *auth.Manager
+	loginGuard         *auth.LoginGuard
 }
 
 // New constructs a Server. A nil logger falls back to slog.Default.
@@ -90,6 +97,8 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		logger:             logger,
 		readiness:          readiness,
 		expectedMigrations: expectedMigrations,
+		auth:               cfg.Auth,
+		loginGuard:         cfg.LoginGuard,
 	}
 	s.handler = s.buildHandler()
 	return s
@@ -168,6 +177,14 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.ready(w, r)
+	case "/api/v1/auth/login":
+		s.login(w, r)
+	case "/api/v1/auth/session":
+		s.session(w, r)
+	case "/api/v1/auth/logout":
+		s.privateAuth(http.HandlerFunc(s.logout)).ServeHTTP(w, r)
+	case "/api/v1/auth/password":
+		s.privateAuth(http.HandlerFunc(s.password)).ServeHTTP(w, r)
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found", "not found")
 	}
