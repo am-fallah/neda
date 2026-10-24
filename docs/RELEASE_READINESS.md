@@ -22,6 +22,7 @@ performed.
 | Local backup/restore drill passes | `docs/BACKUP_RESTORE_DRILL.md` |
 | Real Chrome service worker displays a synthetic Push and permission denial is handled | `docs/BROWSER_PUSH_VALIDATION.md` |
 | Dependency scans pass with documented exception | `docs/DEPENDENCIES.md` |
+| 1-hour synthetic resource measurement completed | `docs/RESOURCE_MEASUREMENT.md`: RSS avg 22.6 MiB, CPU avg 0.12%, WAL max 3.94 MiB, 482 checks |
 | Docker image/Compose runtime tested | Docker CI run `40133170885` passed build, Compose config, non-root/read-only runtime, healthcheck, restart, fresh-volume restore, wrong-key rejection; image 16,331,188 bytes uncompressed / 7,250,978 compressed |
 
 ## 2. Definition-of-done audit
@@ -58,7 +59,7 @@ performed.
 | Booking URL format (`PRV-007`) | Owner supplies a real example or approves live validation |
 | Production provider registration (`PRV-009`) | Scope expansion after validation |
 | Docker/Compose CI result and target-volume drill | CI result; owner-approved host for the drill |
-| Resource measurement final result | 1-hour synthetic run completion (in progress at this audit) |
+| Target-host resource/soak measurement | Owner-approved deployment/soak window (local synthetic result is complete) |
 | Deployment plan review (`OPS-005`/`GATE-004`) | Explicit owner approval |
 
 ## 4. Known limitations
@@ -74,8 +75,8 @@ performed.
   firewall, key ownership, and backup volume are not validated.
 - The local backup drill used a directory, not a Docker named volume; the Docker
   CI job exercises a fresh bind-mounted volume but not the owner's real host.
-- Retention defaults are design choices; the DB size target is provisional until
-  measured on the target host.
+- Retention defaults are design choices; the local 1-hour DB/WAL result passes,
+  but 14-day/180-day growth and target-host behavior remain unproven.
 
 ## 5. Next milestone
 

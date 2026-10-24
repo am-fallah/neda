@@ -279,3 +279,29 @@ func TestRunOnceOnEmptyDatabaseIsSafe(t *testing.T) {
 	}
 	assertForeignKeyCheck(t, env.db)
 }
+
+func TestRunStopsDuringInitialDelay(t *testing.T) {
+	ctx := context.Background()
+	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "retention-run.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := db.Migrate(ctx, database.DB, migrations.FS); err != nil {
+		t.Fatal(err)
+	}
+	worker, err := New(database.DB, Config{
+		InitialDelay: time.Hour,
+		Interval:     time.Hour,
+		Now:          func() time.Time { return testNow },
+		Logger:       testLogger(t),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := worker.Run(runCtx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+}

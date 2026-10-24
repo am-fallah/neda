@@ -501,6 +501,7 @@ docs/                 approved planning documents and frontend acceptance checkl
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, rollback, and approval checklist.
 - [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence and limitations.
 - [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — Definition-of-done audit, blockers, and next milestone.
+- [`docs/RESOURCE_MEASUREMENT.md`](docs/RESOURCE_MEASUREMENT.md) — 1-hour synthetic RSS/CPU/DB/WAL evidence and limitations.
 - [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and unresolved security risks.
 - [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability-scan evidence.
 - [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) — encryption-key lifecycle and recovery constraints.

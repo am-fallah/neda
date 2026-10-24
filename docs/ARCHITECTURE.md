@@ -1690,9 +1690,9 @@ No server access until approved.
 
 - No production server specifications were provided or inspected. Do not invent CPU/RAM/disk.
 - Local development host: 8 CPU, 16 GiB RAM, ~24 GiB free disk, macOS arm64. This is not the target server.
-- Go and Docker are not installed locally, so no binary/image measurement has been performed.
+- A 1-hour synthetic run on the local host (40 fake-provider targets, 300s interval) measured RSS, CPU, DB, and WAL; see below. Docker is absent locally, but CI built the image and measured its compressed size.
 - No live MrBilit response sizes are known.
-- No benchmark/test result exists yet. All numbers below are design targets, not promised measurements.
+- The target server's numbers remain unmeasured; the local results below are evidence, not a promise.
 
 ### 19.2 Design targets (PROVISIONAL, to be measured)
 
@@ -1706,6 +1706,15 @@ No server access until approved.
 | Logs | < 50 MiB retained | Compose rotation 10 MiB × 3 + host policy. |
 | Network | Bounded by checks; response cap 2 MiB | Actual provider payload size must be measured. |
 
+**Local synthetic measurement (2026-10-25).** 40 monitors with one fake-provider
+target each, 300s poll interval, 60 one-minute samples. RSS 17.7–23.5 MiB
+(average 22.6 MiB); CPU average 0.12% of one core (maximum 0.9%); SQLite main DB
+224–348 KiB; WAL 105 KiB–3.94 MiB; 482 completed check runs. This passes the
+idle/active RSS, CPU, WAL, and one-hour DB targets. The image is 7,250,978 bytes
+compressed (16,331,188 uncompressed) in Docker CI. The 14-day/180-day DB growth
+target and target-host behavior remain unproven. Full methodology and
+limitations: `docs/RESOURCE_MEASUREMENT.md`.
+
 ### 19.3 Growth estimate
 
 ```text
@@ -1716,6 +1725,7 @@ example: 20 monitors × 2 providers = 40 targets; 300s interval
          14-day retention ≈ 32 MiB + indexes/SQLite overhead
 ```
 
+- The local 1-hour run produced 482 checks for 40 targets (≈11,568/day), consistent with the estimate. The 14-day DB growth target still needs a target-host soak.
 - Events/deliveries are transition-driven and expected to be small; retries are bounded.
 - No per-poll per-offering history is stored; current states + episodes/events capture the durable history. This is deliberate for disk control.
 - WAL can grow to the configured 64 MiB cap; checkpoints normally keep it smaller.
