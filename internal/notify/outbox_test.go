@@ -10,6 +10,7 @@ import (
 	"github.com/am-fallah/neda/internal/db"
 	"github.com/am-fallah/neda/internal/migrations"
 	"github.com/am-fallah/neda/internal/notify"
+	"github.com/google/uuid"
 )
 
 var testNow = time.Date(2026, 10, 24, 10, 0, 0, 0, time.UTC)
@@ -156,8 +157,8 @@ func providerHealthEvent(kind notify.EventKind, dedupeKey string) notify.Event {
 
 func standardDeliveries() []notify.Delivery {
 	return []notify.Delivery{
-		{ID: "delivery-telegram", Channel: notify.ChannelTelegram, TargetKey: "telegram"},
-		{ID: "delivery-push", Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
+		{Channel: notify.ChannelTelegram, TargetKey: "telegram"},
+		{Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
 	}
 }
 
@@ -259,7 +260,7 @@ func TestEnqueueProviderHealthEvents(t *testing.T) {
 			database := newTestDB(t)
 			tx := begin(t, database)
 			result, err := notify.Enqueue(context.Background(), tx, providerHealthEvent(test.kind, test.key),
-				[]notify.Delivery{{ID: "delivery-telegram", Channel: notify.ChannelTelegram, TargetKey: "telegram"}})
+				[]notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}})
 			if err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
@@ -307,7 +308,7 @@ func TestEnqueueDuplicateEventReturnsExistingID(t *testing.T) {
 	duplicate := availabilityEvent(episodeID)
 	duplicate.ID = "event-duplicate"
 	secondResult, err := notify.Enqueue(context.Background(), second, duplicate,
-		[]notify.Delivery{{ID: "delivery-extra", Channel: notify.ChannelPush, TargetKey: "push:subscription-2"}})
+		[]notify.Delivery{{Channel: notify.ChannelPush, TargetKey: "push:subscription-2"}})
 	if err != nil {
 		t.Fatalf("second Enqueue: %v", err)
 	}
@@ -322,9 +323,6 @@ func TestEnqueueDuplicateEventReturnsExistingID(t *testing.T) {
 	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 2 {
 		t.Fatalf("delivery count = %d, want 2", count)
 	}
-	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries WHERE id = 'delivery-extra'`); count != 0 {
-		t.Fatalf("duplicate event inserted extra delivery")
-	}
 }
 
 func TestEnqueueDuplicateDeliveryTargetIsNoop(t *testing.T) {
@@ -332,8 +330,8 @@ func TestEnqueueDuplicateDeliveryTargetIsNoop(t *testing.T) {
 	tx := begin(t, database)
 	result, err := notify.Enqueue(context.Background(), tx, providerHealthEvent(notify.KindProviderDegraded, "health:fake:1:degraded"),
 		[]notify.Delivery{
-			{ID: "delivery-first", Channel: notify.ChannelTelegram, TargetKey: "telegram"},
-			{ID: "delivery-second", Channel: notify.ChannelTelegram, TargetKey: "telegram"},
+			{Channel: notify.ChannelTelegram, TargetKey: "telegram"},
+			{Channel: notify.ChannelTelegram, TargetKey: "telegram"},
 		})
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
@@ -342,9 +340,6 @@ func TestEnqueueDuplicateDeliveryTargetIsNoop(t *testing.T) {
 
 	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries WHERE event_id = ?`, result.EventID); count != 1 {
 		t.Fatalf("delivery count = %d, want 1", count)
-	}
-	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries WHERE id = 'delivery-first'`); count != 1 {
-		t.Fatalf("first delivery missing")
 	}
 }
 
@@ -372,14 +367,14 @@ func TestEnqueueDoesNotCommitCallerTransaction(t *testing.T) {
 	}
 }
 
-func TestEnqueueDeliveryFailureLeavesCallerRollback(t *testing.T) {
+func TestEnqueueDeterministicDeliveryIDsAcrossEvents(t *testing.T) {
 	database := newTestDB(t)
 
 	first := begin(t, database)
-	if _, err := notify.Enqueue(context.Background(), first,
-		providerHealthEvent(notify.KindProviderDegraded, "health:fake:1:degraded"),
-		[]notify.Delivery{{ID: "delivery-duplicate-id", Channel: notify.ChannelTelegram, TargetKey: "telegram"}},
-	); err != nil {
+	firstEvent := providerHealthEvent(notify.KindProviderDegraded, "health:fake:1:degraded")
+	firstResult, err := notify.Enqueue(context.Background(), first, firstEvent,
+		[]notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}})
+	if err != nil {
 		t.Fatalf("first Enqueue: %v", err)
 	}
 	commit(t, first)
@@ -387,22 +382,76 @@ func TestEnqueueDeliveryFailureLeavesCallerRollback(t *testing.T) {
 	second := begin(t, database)
 	secondEvent := providerHealthEvent(notify.KindProviderDegraded, "health:fake:2:degraded")
 	secondEvent.ID = "event-health-2"
-	_, err := notify.Enqueue(context.Background(), second, secondEvent,
-		[]notify.Delivery{{ID: "delivery-duplicate-id", Channel: notify.ChannelPush, TargetKey: "push:subscription-2"}},
-	)
-	if err == nil {
-		t.Fatal("Enqueue succeeded with duplicate delivery primary key")
+	secondResult, err := notify.Enqueue(context.Background(), second, secondEvent,
+		[]notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}})
+	if err != nil {
+		t.Fatalf("second Enqueue with same destination: %v", err)
 	}
-	if count := mustQueryInt(t, second, `SELECT COUNT(*) FROM events`); count != 2 {
-		t.Fatalf("event count inside failed tx = %d, want 2", count)
-	}
-	rollback(t, second)
+	commit(t, second)
 
-	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM events`); count != 1 {
-		t.Fatalf("event count after rollback = %d, want 1", count)
+	var firstID, secondID string
+	if err := database.QueryRow(`SELECT id FROM notification_deliveries WHERE event_id = ?`, firstResult.EventID).Scan(&firstID); err != nil {
+		t.Fatalf("query first delivery: %v", err)
 	}
-	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 1 {
-		t.Fatalf("delivery count after rollback = %d, want 1", count)
+	if err := database.QueryRow(`SELECT id FROM notification_deliveries WHERE event_id = ?`, secondResult.EventID).Scan(&secondID); err != nil {
+		t.Fatalf("query second delivery: %v", err)
+	}
+	if firstID == secondID {
+		t.Fatalf("delivery IDs collide across events: %q", firstID)
+	}
+	if _, err := uuid.Parse(firstID); err != nil {
+		t.Fatalf("first delivery ID is not a UUID: %v", err)
+	}
+	if _, err := uuid.Parse(secondID); err != nil {
+		t.Fatalf("second delivery ID is not a UUID: %v", err)
+	}
+
+	// Re-enqueueing the same event must preserve dedupe and not add rows.
+	third := begin(t, database)
+	duplicate := providerHealthEvent(notify.KindProviderDegraded, "health:fake:1:degraded")
+	duplicateResult, err := notify.Enqueue(context.Background(), third, duplicate,
+		[]notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "telegram"}})
+	if err != nil {
+		t.Fatalf("duplicate Enqueue: %v", err)
+	}
+	commit(t, third)
+	if duplicateResult.Created || duplicateResult.EventID != firstResult.EventID {
+		t.Fatalf("duplicate result = %+v, want existing %s", duplicateResult, firstResult.EventID)
+	}
+	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 2 {
+		t.Fatalf("delivery count after duplicate = %d, want 2", count)
+	}
+	var stableID string
+	if err := database.QueryRow(`SELECT id FROM notification_deliveries WHERE event_id = ?`, firstResult.EventID).Scan(&stableID); err != nil {
+		t.Fatalf("query stable delivery id: %v", err)
+	}
+	if stableID != firstID {
+		t.Fatalf("delivery id changed across dedupe: %q -> %q", firstID, stableID)
+	}
+}
+
+func TestEnqueueDeliveryInsertFailureRollsBack(t *testing.T) {
+	database := newTestDB(t)
+	mustExec(t, database, `CREATE TRIGGER fail_delivery_insert
+		BEFORE INSERT ON notification_deliveries
+		BEGIN
+			SELECT RAISE(ABORT, 'injected delivery failure');
+		END`)
+
+	tx := begin(t, database)
+	if _, err := notify.Enqueue(context.Background(), tx,
+		providerHealthEvent(notify.KindProviderDegraded, "health:fake:1:degraded"),
+		standardDeliveries(),
+	); err == nil {
+		t.Fatal("Enqueue succeeded despite injected delivery failure")
+	}
+	rollback(t, tx)
+
+	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM events`); count != 0 {
+		t.Fatalf("event count after rollback = %d, want 0", count)
+	}
+	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 0 {
+		t.Fatalf("delivery count after rollback = %d, want 0", count)
 	}
 }
 
@@ -507,15 +556,10 @@ func TestEnqueueRejectsInvalidDeliveries(t *testing.T) {
 		name       string
 		deliveries []notify.Delivery
 	}{
-		{"empty id", []notify.Delivery{{ID: "", Channel: notify.ChannelTelegram, TargetKey: "telegram"}}},
-		{"invalid channel", []notify.Delivery{{ID: "d1", Channel: "sms", TargetKey: "telegram"}}},
-		{"telegram target", []notify.Delivery{{ID: "d1", Channel: notify.ChannelTelegram, TargetKey: "chat-1"}}},
-		{"push target", []notify.Delivery{{ID: "d1", Channel: notify.ChannelPush, TargetKey: "subscription-1"}}},
-		{"empty push target", []notify.Delivery{{ID: "d1", Channel: notify.ChannelPush, TargetKey: "push:"}}},
-		{"duplicate ids", []notify.Delivery{
-			{ID: "d1", Channel: notify.ChannelTelegram, TargetKey: "telegram"},
-			{ID: "d1", Channel: notify.ChannelPush, TargetKey: "push:subscription-1"},
-		}},
+		{"invalid channel", []notify.Delivery{{Channel: "sms", TargetKey: "telegram"}}},
+		{"telegram target", []notify.Delivery{{Channel: notify.ChannelTelegram, TargetKey: "chat-1"}}},
+		{"push target", []notify.Delivery{{Channel: notify.ChannelPush, TargetKey: "subscription-1"}}},
+		{"empty push target", []notify.Delivery{{Channel: notify.ChannelPush, TargetKey: "push:"}}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

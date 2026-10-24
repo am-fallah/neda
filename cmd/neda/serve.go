@@ -63,25 +63,45 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// PRV-009 (production provider configuration) remains deferred. SCH-010
-	// will compose the unwired SCH-004 check stage into a production runner;
-	// until then the scheduler is intentionally idle, so this empty registry is
-	// never consulted for dispatch in this slice.
+	// PRV-009 (production provider configuration) remains deferred, so this
+	// registry is empty and no target can be dispatched until provider
+	// integration is authorized. SCH-010 still composes the production check
+	// stage and outcome runner so the scheduler path is complete and tested;
+	// the empty registry keeps it inert.
 	providerRegistry, err := provider.NewRegistry()
 	if err != nil {
 		logger.Error("provider registry initialization failed", "error", err)
 		return 1
 	}
+	checkStage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
+		Repository: appStore,
+		Providers:  providerRegistry,
+		Logger:     logger,
+	})
+	if err != nil {
+		logger.Error("check stage initialization failed", "error", err)
+		return 1
+	}
+	// Delivery destinations remain empty until NTF-001/NTF-003/PSH-002 define
+	// channel resolution. The runner still commits events atomically without
+	// delivery rows; the outbox wake is a no-op until a delivery worker exists.
+	outcomeRunner, err := scheduler.NewOutcomeRunner(scheduler.OutcomeRunnerConfig{
+		Stage:  checkStage,
+		Store:  appStore,
+		Logger: logger,
+	})
+	if err != nil {
+		logger.Error("outcome runner initialization failed", "error", err)
+		return 1
+	}
 	// The waker is the scheduler's wake source and the intended post-commit
-	// hook for MonitorService when the API layer composes it. SCH-004 provides
-	// the unwired check stage; SCH-010 will compose it into the production
-	// runner, so the scheduler remains idle in this slice.
+	// hook for MonitorService when the API layer composes it.
 	waker := scheduler.NewWaker()
 	sched, err := scheduler.New(scheduler.Config{
 		Repository: appStore,
 		Providers:  providerRegistry,
 		Interval:   appStore,
-		Runner:     nil,
+		Runner:     outcomeRunner,
 		Workers:    cfg.Workers,
 		Wake:       waker.C(),
 		Logger:     logger,
@@ -94,7 +114,7 @@ func runServe(stdout, stderr io.Writer) int {
 		"workers", cfg.Workers,
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
-		"mode", "idle-until-check-runner",
+		"mode", "runner-composed-empty-provider-registry",
 	)
 
 	server := httpapi.New(httpapi.Config{

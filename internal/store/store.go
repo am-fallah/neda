@@ -81,6 +81,45 @@ func (s *Store) WithTx(ctx context.Context, fn func(*Store) error) error {
 	return nil
 }
 
+// WithSQLTx is the caller-owned transaction boundary used by multi-component
+// operations that need both a raw *sql.Tx (for transaction-scoped appliers)
+// and a Store view on the same transaction. It commits only when fn returns
+// nil; an error or panic rolls back. Nested calls are rejected.
+func (s *Store) WithSQLTx(ctx context.Context, fn func(*sql.Tx, *Store) error) error {
+	if s == nil || s.db == nil {
+		return ErrNilDB
+	}
+	db, ok := s.db.(*sql.DB)
+	if !ok {
+		return ErrNestedTx
+	}
+	if fn == nil {
+		return errors.New("store: nil transaction callback")
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: begin transaction: %w", err)
+	}
+
+	txStore := &Store{db: tx}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := fn(tx, txStore); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: commit transaction: %w", err)
+	}
+	committed = true
+	return nil
+}
+
 func (s *Store) executor() (dbtx, error) {
 	if s == nil || s.db == nil {
 		return nil, ErrNilDB

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // EventKind is a durable event category.
@@ -49,8 +51,9 @@ func (c Channel) valid() bool {
 	}
 }
 
-// Event is one durable availability or provider-health event. IDs and dedupe
-// keys are supplied by the caller; this package does not own identity policy.
+// Event is one durable availability or provider-health event. Event IDs and
+// dedupe keys are supplied by the caller. Delivery IDs are outbox-owned and
+// derived deterministically from the event and destination identity.
 type Event struct {
 	ID        string
 	Kind      EventKind
@@ -81,9 +84,11 @@ type Event struct {
 	CreatedAt time.Time
 }
 
-// Delivery is one initial outbox target for an event.
+// Delivery is one initial outbox target for an event. The outbox owns the
+// stored delivery ID: it is derived deterministically from the event ID and
+// this destination identity so callers cannot collide the global primary key
+// when one transaction produces multiple events.
 type Delivery struct {
-	ID        string
 	Channel   Channel
 	TargetKey string
 }
@@ -146,9 +151,6 @@ func (e Event) Validate() error {
 
 // Validate checks the delivery channel and target-key shape before any insert.
 func (d Delivery) Validate() error {
-	if strings.TrimSpace(d.ID) == "" {
-		return errors.New("notify: delivery id is required")
-	}
 	switch d.Channel {
 	case ChannelTelegram:
 		if d.TargetKey != "telegram" {
@@ -217,15 +219,31 @@ func Enqueue(ctx context.Context, tx *sql.Tx, event Event, deliveries []Delivery
 		return EnqueueResult{EventID: existingID, Created: false}, nil
 	}
 
+	seen := make(map[string]struct{}, len(deliveries))
 	for _, delivery := range deliveries {
+		key := string(delivery.Channel) + "\x00" + delivery.TargetKey
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+
+		deliveryID := deterministicDeliveryID(event.ID, delivery.Channel, delivery.TargetKey)
 		if _, err := tx.ExecContext(ctx, insertDeliveryQuery,
-			delivery.ID, event.ID, string(delivery.Channel), delivery.TargetKey,
+			deliveryID, event.ID, string(delivery.Channel), delivery.TargetKey,
 			formatTime(event.CreatedAt), formatTime(event.CreatedAt), formatTime(event.CreatedAt),
 		); err != nil {
-			return EnqueueResult{}, fmt.Errorf("notify: insert delivery %q: %w", delivery.ID, err)
+			return EnqueueResult{}, fmt.Errorf("notify: insert delivery: %w", err)
 		}
 	}
 	return EnqueueResult{EventID: event.ID, Created: true}, nil
+}
+
+// deterministicDeliveryID derives a stable UUID from the event and destination
+// identity. The same event/destination always produces the same row ID, while
+// different events with the same destination produce different IDs.
+func deterministicDeliveryID(eventID string, channel Channel, targetKey string) string {
+	name := eventID + "\x00" + string(channel) + "\x00" + targetKey
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(name)).String()
 }
 
 // FindEventIDByDedupeKey returns the existing event ID for a dedupe key. It is
@@ -248,15 +266,10 @@ func FindEventIDByDedupeKey(ctx context.Context, tx *sql.Tx, key string) (string
 }
 
 func validateDeliveries(deliveries []Delivery) error {
-	ids := make(map[string]struct{}, len(deliveries))
 	for _, delivery := range deliveries {
 		if err := delivery.Validate(); err != nil {
 			return err
 		}
-		if _, exists := ids[delivery.ID]; exists {
-			return fmt.Errorf("notify: duplicate delivery id %q", delivery.ID)
-		}
-		ids[delivery.ID] = struct{}{}
 	}
 	return nil
 }
