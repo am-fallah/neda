@@ -3,7 +3,9 @@ module github.com/am-fallah/neda
 go 1.27.3
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/google/uuid v1.6.0
+	github.com/yaa110/go-persian-calendar v1.3.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/term v0.47.0
 	golang.org/x/text v0.43.0
@@ -12,6 +14,7 @@ require (
 
 require (
 	github.com/dustin/go-humanize v1.1.0 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

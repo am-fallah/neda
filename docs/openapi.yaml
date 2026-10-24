@@ -577,6 +577,114 @@ paths:
           $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/push/config:
+    get:
+      tags: [Push]
+      summary: Authenticated Web Push configuration and device list
+      operationId: getPushConfig
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Push availability, public VAPID key, and active devices. No private key, endpoint, or subscription key material is returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushConfigResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/push/subscriptions:
+    post:
+      tags: [Push]
+      summary: Register or refresh a browser Push subscription
+      operationId: registerPushSubscription
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PushSubscriptionRequest"
+      responses:
+        "201":
+          description: Stored subscription metadata; endpoint and keys are never returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushSubscription"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/push/subscriptions/{id}:
+    delete:
+      tags: [Push]
+      summary: Disable a Push subscription
+      operationId: deletePushSubscription
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Subscription disabled (idempotent for an existing row)
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/push/test:
+    post:
+      tags: [Push]
+      summary: Send a real test Push to one device or all active devices
+      operationId: testPush
+      security:
+        - sessionCookie: []
+          csrfCookie: []
+          csrfHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                subscriptionId:
+                  type: string
+                  description: Optional device ID; omitted means all active devices (bounded).
+      responses:
+        "200":
+          description: Sanitized per-attempt result. Error categories never include endpoint/key material.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PushTestResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 components:
   securitySchemes:
     sessionCookie:
@@ -1409,6 +1517,77 @@ components:
           type: boolean
           default: false
           description: When true, token/chatId must be empty and stored credentials are removed.
+    PushSubscription:
+      type: object
+      required: [id, createdAt, failureCount]
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        failureCount:
+          type: integer
+          minimum: 0
+    PushConfigResponse:
+      type: object
+      required: [enabled, available, subjectConfigured, subscriptions]
+      properties:
+        enabled:
+          type: boolean
+        available:
+          type: boolean
+        subjectConfigured:
+          type: boolean
+        publicKey:
+          type: string
+          description: VAPID public key; safe for the authenticated browser. Omitted when unavailable.
+        subscriptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PushSubscription"
+    PushSubscriptionRequest:
+      type: object
+      required: [endpoint, keys]
+      properties:
+        endpoint:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: HTTPS Push service endpoint. Validated against a code-reviewed host allowlist and private/loopback/link-local/metadata address rules; stored encrypted.
+        keys:
+          type: object
+          required: [p256dh, auth]
+          properties:
+            p256dh:
+              type: string
+              description: base64url uncompressed P-256 public key (65 bytes).
+            auth:
+              type: string
+              description: base64url 16-byte auth secret.
+        label:
+          type: string
+          maxLength: 100
+    PushTestResult:
+      type: object
+      required: [attempted, sent, failed]
+      properties:
+        attempted:
+          type: integer
+        sent:
+          type: integer
+        failed:
+          type: integer
+        errorKinds:
+          type: array
+          items:
+            type: string
     OverviewResponse:
       type: object
       required: [generatedAt, monitors, providers, deliveries, recentEvents, recentDeliveries]

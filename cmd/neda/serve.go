@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,6 +24,7 @@ import (
 	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
+	pushservice "github.com/am-fallah/neda/internal/push"
 	"github.com/am-fallah/neda/internal/scheduler"
 	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
@@ -99,10 +102,13 @@ func runServe(stdout, stderr io.Writer) int {
 		Production: cfg.IsProduction(),
 	}, loginLimiter, cfg.TrustProxy)
 
-	// P2/P3: load the external key only when configured. Development startup
-	// without a key remains usable; Telegram delivery is simply unavailable.
+	// P2/P3/PSH: load the external key only when configured. Development
+	// startup without a key remains usable; encrypted channels are simply
+	// unavailable.
 	var telegramSettings *telegramsettings.Settings
 	var telegramClient *notify.TelegramClient
+	var pushService *pushservice.Service
+	var pushSender *pushservice.Sender
 	var deliverySource scheduler.DeliverySource
 	if cfg.EncryptionKeyFile != "" {
 		key, err := crypto.LoadKeyFile(cfg.EncryptionKeyFile)
@@ -121,7 +127,30 @@ func runServe(stdout, stderr io.Writer) int {
 			logger.Error("telegram client initialization failed", "error", err)
 			return 1
 		}
-		deliverySource = telegramSettings.DeliveryDestinations
+		pushService, err = pushservice.New(appStore, database.DB, key, cfg.VAPIDSubject, time.Now)
+		if err != nil {
+			logger.Error("web push initialization failed", "error", err)
+			return 1
+		}
+		if err := pushService.Ensure(ctx); err != nil {
+			logger.Error("VAPID key initialization failed", "error", err)
+			return 1
+		}
+		pushSender, err = pushservice.NewSender(pushService, pushservice.SenderConfig{
+			PublicURL: publicURLString(cfg.PublicURL),
+			Now:       time.Now,
+		})
+		if err != nil {
+			logger.Error("web push sender initialization failed", "error", err)
+			return 1
+		}
+		deliverySource = composeDeliverySources(
+			telegramSettings.DeliveryDestinations,
+			pushService.DeliveryDestinations,
+		)
+	}
+	if pushService != nil && !pushService.Available() {
+		logger.Warn("web push keys exist but NEDA_VAPID_SUBJECT is not configured; push stays unavailable")
 	}
 	settingsService, err := appsettings.New(appStore, telegramSettings, telegramClient, time.Now)
 	if err != nil {
@@ -191,15 +220,22 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 	var deliveryWorker *notifydelivery.Worker
+	senders := map[notify.Channel]notifydelivery.Sender{}
 	if telegramSettings != nil {
 		telegramSender, err := notifydelivery.NewTelegramSender(telegramSettings, telegramClient)
 		if err != nil {
 			logger.Error("telegram sender initialization failed", "error", err)
 			return 1
 		}
+		senders[notify.ChannelTelegram] = telegramSender
+	}
+	if pushSender != nil {
+		senders[notify.ChannelPush] = pushSender
+	}
+	if len(senders) > 0 {
 		deliveryWorker, err = notifydelivery.New(notifydelivery.Config{
 			DB:      database.DB,
-			Senders: map[notify.Channel]notifydelivery.Sender{notify.ChannelTelegram: telegramSender},
+			Senders: senders,
 			Logger:  logger,
 		})
 		if err != nil {
@@ -228,6 +264,8 @@ func runServe(stdout, stderr io.Writer) int {
 		Settings:   settingsService,
 		Store:      appStore,
 		Providers:  providerRegistry,
+		Push:       pushService,
+		PushTester: pushSender,
 		WebUI:      webHandler,
 	}, logger, database, applied)
 	if !webHandler.Built() {
@@ -277,6 +315,39 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	logger.Info("service stopped")
 	return 0
+}
+
+// composeDeliverySources runs every configured channel source in the caller's
+// outcome transaction. An error from any source fails the transaction so an
+// event is never committed with a partially resolved outbox.
+func composeDeliverySources(sources ...scheduler.DeliverySource) scheduler.DeliverySource {
+	active := make([]scheduler.DeliverySource, 0, len(sources))
+	for _, source := range sources {
+		if source != nil {
+			active = append(active, source)
+		}
+	}
+	if len(active) == 0 {
+		return nil
+	}
+	return func(ctx context.Context, tx *sql.Tx) ([]notify.Delivery, error) {
+		deliveries := make([]notify.Delivery, 0)
+		for _, source := range active {
+			next, err := source(ctx, tx)
+			if err != nil {
+				return nil, err
+			}
+			deliveries = append(deliveries, next...)
+		}
+		return deliveries, nil
+	}
+}
+
+func publicURLString(publicURL *url.URL) string {
+	if publicURL == nil {
+		return ""
+	}
+	return publicURL.String()
 }
 
 func providerRegistryForConfig(cfg config.Config) (*provider.Registry, bool, error) {

@@ -55,6 +55,11 @@ func TestFormatTelegramAvailabilityEscapesAndValidates(t *testing.T) {
 	if !strings.Contains(text, "(Tehran)") {
 		t.Fatalf("message lacks Tehran timestamp:\n%s", text)
 	}
+	for _, want := range []string{"1405-09-29 08:00 (Tehran)", "1405-08-02 15:30 (Tehran)"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("message lacks Jalali timestamp %q:\n%s", want, text)
+		}
+	}
 }
 
 func TestFormatTelegramOmitsUnvalidatedBookingURLs(t *testing.T) {

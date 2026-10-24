@@ -362,3 +362,35 @@ export interface DeliveryListParams {
   limit?: number;
   cursor?: string;
 }
+
+export interface PushSubscriptionRecord {
+  id: string;
+  label?: string;
+  createdAt: string;
+  lastSuccessAt?: string | null;
+  failureCount: number;
+}
+
+export interface PushConfig {
+  enabled: boolean;
+  available: boolean;
+  subjectConfigured: boolean;
+  publicKey?: string;
+  subscriptions: PushSubscriptionRecord[];
+}
+
+export interface PushRegistrationRequest {
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  label?: string;
+}
+
+export interface PushTestResult {
+  attempted: number;
+  sent: number;
+  failed: number;
+  errorKinds?: string[];
+}

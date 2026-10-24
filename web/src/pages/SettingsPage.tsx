@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
-  BellOff,
+  BellRing,
   CheckCircle2,
   KeyRound,
   Loader2,
@@ -32,6 +32,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { PushSettings } from "@/components/push/PushSettings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -669,24 +670,17 @@ export function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <BellOff className="size-4" aria-hidden="true" />
+            <BellRing className="size-4" aria-hidden="true" />
             Browser Push
           </CardTitle>
           <CardDescription>
-            Web Push is not available in this build.
+            Real server-side Web Push through a service worker. Permission is
+            requested only when you enable this browser explicitly. Telegram and
+            Push are independent channels.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Alert variant="info">
-            <BellOff aria-hidden="true" />
-            <AlertTitle>Push setup is not implemented yet</AlertTitle>
-            <AlertDescription>
-              Server-side Web Push, VAPID keys, subscription management, and the
-              service worker are tracked separately. This page does not expose a
-              Push enable control that would imply working delivery. Telegram
-              notifications are independent.
-            </AlertDescription>
-          </Alert>
+          <PushSettings settings={settings} onUpdated={setSettings} />
         </CardContent>
       </Card>
 
@@ -726,8 +720,8 @@ export function SettingsPage() {
         <span className="font-medium text-foreground">
           {settings.pollIntervalSeconds} seconds
         </span>
-        . Telegram Push state is owned by separate backend tasks; no secret or
-        ciphertext is included in this page.
+        . No secret, subscription endpoint, or ciphertext is included in this
+        page.
       </p>
     </div>
   );
