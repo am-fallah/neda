@@ -31,6 +31,7 @@ type clientConfig struct {
 	AttemptTimeout   time.Duration
 	MaxResponseBytes int64
 	MaxRetries       int
+	NoRetries        bool
 	RetryBackoff     []time.Duration
 	Jitter           func(time.Duration) time.Duration
 	Sleep            func(context.Context, time.Duration) error
@@ -73,7 +74,9 @@ func newHTTPClient(cfg clientConfig) (*httpClient, error) {
 	if cfg.MaxResponseBytes < 0 || cfg.MaxResponseBytes > 8<<20 {
 		return nil, configurationError("response limit", errors.New("must be between 0 and 8 MiB"))
 	}
-	if cfg.MaxRetries == 0 {
+	if cfg.NoRetries {
+		cfg.MaxRetries = 0
+	} else if cfg.MaxRetries == 0 {
 		cfg.MaxRetries = defaultMaxRetries
 	}
 	if cfg.MaxRetries < 0 || cfg.MaxRetries > 2 {

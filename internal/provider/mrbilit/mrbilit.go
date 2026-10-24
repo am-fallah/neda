@@ -28,6 +28,7 @@ type Config struct {
 	AttemptTimeout   time.Duration
 	MaxResponseBytes int64
 	MaxRetries       int
+	NoRetries        bool
 	RetryBackoff     []time.Duration
 	Jitter           func(time.Duration) time.Duration
 	Sleep            func(context.Context, time.Duration) error
@@ -49,6 +50,7 @@ func New(cfg Config) (*Provider, error) {
 		AttemptTimeout:   cfg.AttemptTimeout,
 		MaxResponseBytes: cfg.MaxResponseBytes,
 		MaxRetries:       cfg.MaxRetries,
+		NoRetries:        cfg.NoRetries,
 		RetryBackoff:     cfg.RetryBackoff,
 		Jitter:           cfg.Jitter,
 		Sleep:            cfg.Sleep,
@@ -73,7 +75,7 @@ func (p *Provider) Metadata() provider.Metadata {
 		Capabilities: provider.Capabilities{
 			RequiresOriginID:      true,
 			RequiresDestinationID: true,
-			SupportsBookingURL:    false,
+			SupportsBookingURL:    true,
 			SupportsGender:        false,
 			MaxPassengers:         maxPassengers,
 		},
@@ -109,7 +111,7 @@ func (p *Provider) Check(ctx context.Context, req provider.CheckRequest) (provid
 	if err != nil {
 		return provider.Result{}, err
 	}
-	result, err := parseSyntheticResponse(body, req, p.now().UTC())
+	result, err := parseResponse(body, req, p.now().UTC())
 	if err != nil {
 		return provider.Result{}, err
 	}

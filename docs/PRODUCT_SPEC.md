@@ -422,13 +422,13 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-09 | Local host timezone is `Asia/Tehran` (+0330). | VERIFIED | Tests must force UTC/other zones to avoid masking timezone bugs. |
 | A-10 | The brief is the authoritative product/engineering source. | VERIFIED | Conflicts must be reported. |
 | A-11 | MrBilit endpoint and parameter names in the brief are accurate enough to plan against. | PROVISIONAL | Independent validation is required; do not treat examples as defaults. |
-| A-12 | MrBilit response envelope, field types, time formats, price units, and positive-inventory shape are unconfirmed. | REQUIRES OWNER INPUT / live validation | Parser must fail closed; no fabricated positive fixture. |
+| A-12 | MrBilit response envelope, field types, time formats, price units, and positive-inventory shape are unconfirmed. | **PARTIALLY VERIFIED 2026-10-25** | Live validation observed `trains[]`, `prices[].classes[]`, numeric IDs, local Tehran timestamps, and positive/zero-capacity classes. Price units (Rial vs Toman), child/infant inventory semantics, and empty/route-not-found live cases remain unverified; parser stays conservative. |
 | A-13 | `capacity` means remaining bookable seats for the offering, and passenger-count semantics are as the UI implies. | REQUIRES OWNER INPUT | Conservative classification until validated. |
 | A-14 | Infants consume inventory. | PROVISIONAL (conservative) | Count infants toward required capacity until told otherwise. |
 | A-15 | `genderCode` is required and its allowed values are known. | REQUIRES OWNER INPUT | Omit by default; do not invent enums. |
 | A-16 | `availableStatus`/`exclusive` are optional and their values are known. | REQUIRES OWNER INPUT | Omit by default; validate later. |
 | A-17 | The illustrative booking URL pattern/slug/date format is valid. | REQUIRES OWNER INPUT / validation | Do not generate a link without a validated slug and date format. |
-| A-18 | A real positive MrBilit sample exists and can be captured safely. | NOT VERIFIED | If no positive sample, classify positive behavior as unverified and use synthetic tests only, clearly labeled. |
+| A-18 | A real positive MrBilit sample exists and can be captured safely. | **VERIFIED 2026-10-25** | One live response contained two positive classes (capacity 2/3, both flags true) and four known-negative zero-capacity classes. Sanitized fixture and evidence recorded; no raw response or auth data committed. |
 | A-19 | Initial `Reservable` observations should notify. | VERIFIED (brief) | Implement one initial event. |
 | A-20 | Empty lists must not close open episodes. | PROVISIONAL (derived from brief safety rule) | Document the re-notification limitation. |
 | A-21 | Provider-health counting rule. Option A (approved 2026-10-24): only infrastructure failures count; non-counting outcomes neither increment nor reset the provider counter; only success/empty resets. Business/availability outcomes are not provider failures. Option B (brief-literal): every failed check counts, including config/route/ordinary 4xx. Option C (strict consecutive): any non-success breaks/resets the sequence. | **RESOLVED — Option A** (`GATE-014`, 2026-10-24) | Provider health counts only applicable infrastructure failures; route/config/ordinary 4xx and business outcomes do not count. Options B/C are not implemented. |
@@ -438,7 +438,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-25 | Production server OS/CPU/RAM/disk/proxy/domain/ports are known. | REQUIRES OWNER INPUT | No server access in planning; provide minimum facts later. |
 | A-26 | VAPID subject, public domain, and HTTPS setup are available. | REQUIRES OWNER INPUT | Push cannot be production-tested without them. The implementation is complete and locally tested; no real Push send was authorized. |
 | A-27 | Telegram bot token/chat ID will be supplied later via the dashboard, not chat. | REQUIRES OWNER INPUT | Never ask for the token in chat or commit it. |
-| A-28 | Live MrBilit validation target route/date and permission will be supplied. | REQUIRES OWNER INPUT | Bounded read-only validation only. |
+| A-28 | Live MrBilit validation target route/date and permission will be supplied. | **VERIFIED 2026-10-25** | Owner supplied Yazd→Mashhad, 2026-11-05, and authorized bounded reads; two unauthenticated GETs executed within budget. See `docs/MRBILIT_LIVE_VALIDATION.md`. |
 | A-29 | V1 has no custom train/time/class/price filters. | VERIFIED (brief) | Do not add filter UI/API. |
 | A-30 | Single-user, password-protected dashboard; no registration. | VERIFIED (brief) | No multi-tenant design. |
 | A-31 | Polling default/bounds (300s; 60–3600s). | VERIFIED (brief) | Enforce server-side. |

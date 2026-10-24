@@ -44,6 +44,9 @@ func ValidateConfig(cfg provider.MonitorProviderConfig) error {
 	if strings.TrimSpace(cfg.GenderCode) != "" {
 		return configurationError("gender code", errors.New("is not validated for MrBilit and must be omitted"))
 	}
+	if err := validateBookingSlug(cfg.BookingSlug); err != nil {
+		return configurationError("booking slug", err)
+	}
 	return nil
 }
 
