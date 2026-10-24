@@ -230,7 +230,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 
 ## Not implemented yet
 
-Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore, production MrBilit registration and live validation (`PRV-006`/`PRV-007`/`PRV-009`), the final operational/resource audit (`OPS-006`–`OPS-008`), and deployment. The MrBilit adapter foundation remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram/Push credentials, or deployment.
+Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, production MrBilit registration and live validation (`PRV-006`/`PRV-007`/`PRV-009`), and deployment. The MrBilit adapter foundation remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 ## Local development
 
