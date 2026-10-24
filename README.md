@@ -204,6 +204,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `docs/openapi.yaml` is a hand-written OpenAPI 3.0.3 description of the implemented health, auth/session, monitor, provider/health, event/delivery, overview, and settings/Telegram routes.
 - It documents session/CSRF cookie/header security, cursor/filter parameters, common error/status responses, and response schemas; write-only Telegram secrets are never described as returned.
 - Validated with `npx --yes @redocly/cli@1.34.5 lint docs/openapi.yaml` (valid, no warnings). No code generation or runtime changes.
+- PR: [#29](https://github.com/am-fallah/neda/pull/29); CI run [40125174668](https://github.com/am-fallah/neda/actions/runs/40125174668); merged as `4ed7a52`; merged-main CI [40125322348](https://github.com/am-fallah/neda/actions/runs/40125322348).
 
 ## Not implemented yet
 
