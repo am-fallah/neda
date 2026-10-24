@@ -146,7 +146,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `GET /api/v1/auth/session` returns authenticated state, CSRF token, setup-required signal, and expiry without secrets. `POST /api/v1/auth/logout` and `POST /api/v1/auth/password` require a session plus CSRF header/cookie and same-origin validation; password change revokes other sessions.
 - The API preserves the existing Host validation, body limits, security headers, no-CORS policy, request IDs, sanitized errors, and no-store caching. `cmd/neda/serve.go` composes the auth manager and login guard.
 - Tests cover login success/failure/setup-required, Origin rejection, rate limiting with `Retry-After`, cookie flags, session probes, private-route 401/403 behavior, logout, and password change. No real credentials are used.
-- PR: [#20](https://github.com/am-fallah/neda/pull/20); CI recorded in the PR.
+- PR: [#20](https://github.com/am-fallah/neda/pull/20); CI [40116569664](https://github.com/am-fallah/neda/actions/runs/40116569664) passed on `9f50adc`.
 
 ## Not implemented yet
 
