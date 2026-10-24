@@ -154,8 +154,9 @@ neda/
 │   ├── auth/                         # Argon2id, sessions, CSRF, rate limits
 │   ├── httpapi/                      # router, middleware, handlers, DTOs
 │   ├── retention/
-│   └── webui/                        # embed web/dist; SPA fallback
+│   └── webui/                        # serve embedded web/dist; SPA fallback
 ├── web/
+│   ├── embed.go                      # go:embed all:dist (package webassets)
 │   ├── index.html
 │   ├── package.json
 │   ├── package-lock.json
@@ -1332,7 +1333,7 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 
 ### 14.5 HTTP/web security headers
 
-- `Content-Security-Policy`: `default-src 'self'`; scripts self; styles self plus whatever Tailwind/shadcn requires (avoid unsafe-inline if possible; document if required); images self/data; connect-src self; frame-ancestors none; base-uri self; form-action self; worker-src self.
+- `Content-Security-Policy`: API/auth responses use `default-src 'none'`; the SPA HTML shell uses `default-src 'self'`, scripts self only, styles self plus `'unsafe-inline'` because Radix/shadcn positioning uses style attributes, images self/data, fonts self, connect-src self, worker-src self, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, and `form-action 'self'`. Inline scripts are not allowed; the theme bootstrap is an external same-origin file. Document any future relaxation.
 - `Strict-Transport-Security` in production (behind HTTPS).
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` minimal.
 - `Cache-Control: no-store` for API/auth; hashed static assets long cache; `index.html`/service worker no-cache.
@@ -1493,8 +1494,8 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 - Tailwind + shadcn/ui; CSS variables for light/dark; system theme default with manual toggle.
 - Responsive sidebar/topbar; tables become cards on mobile.
 - Accessibility: semantic landmarks, labels, keyboard navigation, focus rings, error summaries, aria-live for async feedback, color not sole indicator, reduced-motion respect.
-- Vite dev proxy `/api` to `127.0.0.1:8080`; production build to `web/dist`; Go embeds and serves with SPA fallback for non-API routes.
-- Bundle discipline: no chart library, no heavy state library; icons via lucide-react; toasts via shadcn sonner.
+- Vite dev proxy `/api` to `127.0.0.1:8080`; production build to `web/dist`; `web/embed.go` embeds the build into the Go binary, and `internal/webui` serves it with SPA fallback for non-API routes. Missing hashed assets return 404 rather than the SPA shell; API and health paths never fall back. HTML is `no-store`, hashed assets are immutable, and the service-worker bootstrap file is no-cache when that feature is added.
+- Bundle discipline: no chart library, no heavy state library; icons via lucide-react; toasts via shadcn sonner. Pages are route-level lazy-loaded to keep the initial bundle bounded.
 - Tests: Vitest + Testing Library for login, monitor form/date conversion, pause/resume, status distinction, settings secret display, Push permission mocks. Manual acceptance checklist for real browser Push/Telegram/booking links.
 
 ---

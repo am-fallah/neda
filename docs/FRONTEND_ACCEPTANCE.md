@@ -1,0 +1,137 @@
+# Neda Dashboard — Manual Acceptance Checklist
+
+**Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
+
+## Preconditions
+
+- [ ] Repository is clean and the latest `main` is checked out.
+- [ ] Go and Node prerequisites from the README are installed.
+- [ ] Local password is set with `neda set-password`.
+- [ ] Backend runs in development with `NEDA_FAKE_PROVIDER_ENABLED=true` (test-only data).
+- [ ] Frontend runs with `cd web && npm run dev`, or a production-style build is embedded in the Go binary.
+- [ ] Browser uses `http://localhost:5173` (Vite) or the configured local origin, not a mismatched Host.
+- [ ] No real Telegram token/chat ID is used for this checklist.
+
+## Executed automated browser audit (2026-10-24)
+
+Environment: production-style embedded frontend served by the Go binary on `127.0.0.1`, temporary SQLite, development mode, `NEDA_FAKE_PROVIDER_ENABLED=true`, system Chrome via Playwright 1.64.1. No live provider, real Telegram, Push, or production server was used. Local test credentials were temporary and are not recorded in the repository.
+
+| Flow | Result | Evidence |
+|---|---|---|
+| Unauthenticated `/` redirect | PASS | Redirected to `/login`. |
+| Wrong password | PASS | Generic "Incorrect password." field error; browser logged the expected 401 resource status only. |
+| Correct login | PASS | Overview rendered with no console/page errors. |
+| Overview empty state and provider warning | PASS | Empty counters, no-events/no-deliveries states, and test-provider labeling shown. |
+| Theme toggle and persistence | PASS | Dark class applied; survived reload; returned to light. |
+| Create monitor through the UI | PASS | Jalali "Today" selection, fake-provider route IDs, submit, redirect to detail. |
+| Initial availability observation | PASS | Scheduler completed a fake-provider check; `Reservable` and the historical/last-observed wording appeared. |
+| Pause and resume | PASS | Status changed to Paused and back to Active. |
+| History | PASS | Availability event rendered; availability filter fetched and displayed the event. |
+| Settings secret handling | PASS | Bot token/chat fields empty; no temporary password in rendered text; interval 300 shown. |
+| Mobile 390 px | PASS | Sidebar collapsed, mobile navigation worked, Monitors list rendered, no horizontal overflow. |
+| Logout | PASS | Signed out and returned to the password form. |
+| Keyboard focus | PASS | First Tab focused "Skip to main content"; Enter moved focus to `main-content`. |
+| Dialog keyboard dismissal | PASS | Escape closed the delete confirmation without submitting. |
+| Axe WCAG 2 A/AA + 2.1 A/AA | PASS | 0 violations on overview, monitor create, monitor detail, history, settings, and mobile monitors. |
+| Console/page/network errors on successful flows | PASS | None recorded. |
+
+**Not covered by the automated audit:** real Telegram save/test delivery, Web Push, production provider data, long-running polling, human screen-reader/zoom/contrast review, and the remaining error/empty permutations listed below. The automated audit does not replace human accessibility review.
+
+## Authentication
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Open `/` without a session | Redirect to `/login` | Page-level auth context; no browser redirect test | NOT RUN — manual |
+| Submit a wrong password | Generic "Incorrect password." message; no field/value leak | `LoginPage.test.tsx` | NOT RUN — manual |
+| Submit repeatedly to trigger rate limiting | "Too many sign-in attempts" and disabled retry countdown; `Retry-After` honored | `LoginPage.test.tsx`; API tests | NOT RUN — manual |
+| Sign in with the owner password | Dashboard loads; session and CSRF cookies are HttpOnly; CSRF token exists only in memory | API/auth Go tests; client tests | NOT RUN — manual |
+| Reload after sign-in | Session probe restores the authenticated layout | Go auth tests; no browser test | NOT RUN — manual |
+| Delete/expire the session cookie, then load data | Private 401 returns the user to `/login`; no stale dashboard data shown | `client.test.ts`; Go auth tests | NOT RUN — manual |
+| Sign out | Session revoked; login page shown | Go auth tests; client tests | NOT RUN — manual |
+| Open when no password is configured | Setup guidance shows `neda set-password`; no web bootstrap form | `LoginPage.test.tsx` | NOT RUN — manual |
+| Change the password in Settings | Other sessions revoked; current session remains; fields clear | `SettingsPage.test.tsx`; Go auth tests | NOT RUN — manual |
+
+## Overview
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Loading state | Skeleton/status region, no fabricated counts | Component structure | NOT RUN — manual |
+| Empty installation | Clear empty states and provider warning; no fake monitors | `OverviewPage.test.tsx` | NOT RUN — manual |
+| Counts | Active/paused/expired monitors, provider health, delivery statuses match the API | `OverviewPage.test.tsx` | NOT RUN — manual |
+| Degraded provider | Separate warning says provider health is not ticket availability | `OverviewPage.test.tsx` | NOT RUN — manual |
+| Failed/queued delivery | Failed/queued is not presented as delivered | `OverviewPage.test.tsx`; `status.test.tsx` | NOT RUN — manual |
+| API error | Sanitized error with retry, no raw internals | `OverviewPage.test.tsx`; `ErrorState` | NOT RUN — manual |
+| Auto-refresh | Refreshes while visible, pauses while hidden | Hook implementation; no timer browser test | NOT RUN — manual |
+
+## Monitors
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| List | Label, route, Jalali/Gregorian date, providers, passengers, status, last attempt/next check | Component code; no full list test | NOT RUN — manual |
+| Status distinction | Failed check says availability unknown; not-reservable says not reservable, never sold out; unknown stays unknown | `monitorSummary.test.ts`; `MonitorDetailPage.test.tsx` | NOT RUN — manual |
+| Create with valid form | Gregorian date accepted; providers and route IDs saved; redirect to detail | `monitorForm.test.ts`; no end-to-end browser test | NOT RUN — manual |
+| Create with missing fields | Field-level messages; focus moves to the first error; server remains authoritative | `monitorForm.test.ts`; form implementation | NOT RUN — manual |
+| Identical origin/destination | Rejected client-side and by server | `monitorForm.test.ts`; Go monitor tests | NOT RUN — manual |
+| Past Jalali date | Disabled in picker; rejected by client and server | Date/form tests; Go monitor tests | NOT RUN — manual |
+| Provider route IDs | Required per provider; test provider prefixes and unsupported slug/gender are explained | `monitorForm.test.ts`; Go provider tests | NOT RUN — manual |
+| Pause/resume | Pause stops scheduling; resume re-enables; expired resume is blocked with edit guidance | `MonitorDetailPage.test.tsx`; Go scheduler tests | NOT RUN — manual |
+| Edit | Material changes reset availability; label-only changes do not | Go monitor tests; form code | NOT RUN — manual |
+| Delete | Confirmation dialog; cancel does nothing; confirm deletes and navigates | `MonitorDetailPage.test.tsx` | NOT RUN — manual |
+| Observation display | Last observed timestamp and "not a live guarantee"; missing/unknown never treated as unavailable | `MonitorDetailPage.test.tsx` | NOT RUN — manual |
+| Booking link | Renders only for a valid `https` URL; unavailable links are omitted | `BookingLink`; Go provider/event tests | NOT RUN — manual |
+
+## History and delivery status
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Event filters | Kind, monitor, provider apply and reset correctly | `HistoryPage.test.tsx` | NOT RUN — manual |
+| Event pagination | Cursor "Load more" appends without duplicates | `HistoryPage.test.tsx` | NOT RUN — manual |
+| Delivery filters | Channel, status, event kind apply correctly | `HistoryPage.test.tsx` | NOT RUN — manual |
+| Event detail | Historical label, journey/ticket, provider, booking link, per-channel delivery status | Event detail code; no page test | NOT RUN — manual |
+| Delivery language | Pending/sending/retry/failed/skipped are clearly not sent | `status.test.tsx`; `HistoryPage.test.tsx` | NOT RUN — manual |
+| Empty/error states | Clear messaging and retry | Component structure | NOT RUN — manual |
+
+## Settings and Telegram
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Polling interval bounds | Values outside 60–3600 rejected client-side; server remains authoritative | `SettingsPage.test.tsx`; Go settings tests | NOT RUN — manual |
+| Telegram status | Configured/unreadable/unavailable states explained; masked chat label only | `SettingsPage.test.tsx`; Go API tests | NOT RUN — manual |
+| Secret display | Token/chat fields are empty; no token, raw chat ID, or ciphertext is prefilled or rendered | `SettingsPage.test.tsx`; Go response/log scans | NOT RUN — manual |
+| Save credentials | Write-only fields; encrypted at rest; success feedback; fields clear | `SettingsPage.test.tsx`; Go tests | NOT RUN — manual |
+| Clear credentials | Confirmation required; stored config removed | `SettingsPage.test.tsx`; Go tests | NOT RUN — manual |
+| Telegram test | Explicit button only; successful/failed result is sanitized | `SettingsPage.test.tsx`; fake-server Go tests | NOT RUN — manual |
+| Real Telegram send | Requires owner credentials and sends a real message; **not authorized in this session** | Not applicable | NOT RUN — requires authorization |
+| Browser Push | Clearly marked unavailable; no control implying working Push | Settings page copy | NOT RUN — manual |
+
+## Responsive, theme, and accessibility
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Mobile width (360–430 px) | Sidebar collapses; tables scroll; forms stack; actions remain reachable | CSS review | NOT RUN — manual |
+| Desktop width | Sidebar layout and max-width content | CSS review | NOT RUN — manual |
+| Light/dark/system themes | Toggle and persisted preference; no first-paint flash | Theme implementation | NOT RUN — manual |
+| Keyboard only | Skip link, focus rings, tab order, dialog focus trapping, date picker operation | Radix primitives; manual review | NOT RUN — manual |
+| Screen reader labels | Landmarks, labels, table headers, error descriptions, live regions | Semantic review | NOT RUN — manual |
+| Color contrast | Status is conveyed by text/icon, not color alone | Component review | NOT RUN — manual |
+| Reduced motion | Animations reduced when preferred | CSS review | NOT RUN — manual |
+| 200% zoom | No clipped content or lost actions | Manual review | NOT RUN — manual |
+
+## Automated verification reference
+
+Run from the repository root:
+
+```bash
+cd web
+npm run lint
+npm run typecheck
+npm test
+npm run build
+cd ..
+go test -count=1 ./...
+go test -race -count=1 ./...
+go vet ./...
+go build ./...
+```
+
+Optional accessibility automation (axe) is not included. A full browser E2E framework is not part of v1; this checklist is the manual companion to the Vitest/Testing Library suite.
