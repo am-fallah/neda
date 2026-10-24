@@ -211,6 +211,117 @@ func TestFinalizeErrorReevaluatesGateInsideTransaction(t *testing.T) {
 	}
 }
 
+func TestFinalizeErrorDoesNotDetachNonTimeoutShutdown(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	st, sqlDB := newInternalOutcomeStore(t)
+	monitor := createInternalOutcomeMonitor(t, st, "error-shutdown")
+	target := monitor.Providers[0]
+	checkID, err := st.StartCheckRun(context.Background(), target.ID, target.ConfigVersion, now)
+	if err != nil {
+		t.Fatalf("StartCheckRun: %v", err)
+	}
+	attempt := CheckAttempt{
+		CheckRunID:    checkID,
+		TargetID:      target.ID,
+		MonitorID:     monitor.ID,
+		ProviderID:    target.ProviderID,
+		ConfigVersion: target.ConfigVersion,
+		BookingSlug:   target.BookingSlug,
+		StartedAt:     now,
+		FinishedAt:    now,
+		Duration:      time.Second,
+		Err:           &provider.Error{Kind: provider.ErrNetwork, Op: "test"},
+		Classification: provider.Classification{
+			Category:           provider.CategoryInfrastructure,
+			Kind:               provider.ErrNetwork,
+			CountsTowardOutage: true,
+			TargetBackoff:      true,
+		},
+	}
+	runner, err := NewOutcomeRunner(OutcomeRunnerConfig{
+		Stage:  &CheckStage{},
+		Store:  st,
+		Now:    func() time.Time { return now },
+		Random: defaultRandom{},
+	})
+	if err != nil {
+		t.Fatalf("NewOutcomeRunner: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := runner.finalizeError(ctx, attempt)
+	if err == nil {
+		t.Fatal("finalizeError succeeded with canceled non-timeout context")
+	}
+	if !result.Settled {
+		t.Fatal("canceled finalizeError did not settle")
+	}
+	var outcome string
+	if err := sqlDB.QueryRow(`SELECT outcome FROM check_runs WHERE id = ?`, checkID).Scan(&outcome); err != nil {
+		t.Fatalf("query check run: %v", err)
+	}
+	if outcome != "running" {
+		t.Fatalf("check outcome = %q, want running", outcome)
+	}
+}
+
+func TestFinalizeErrorTimeoutDetachesShutdown(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	st, sqlDB := newInternalOutcomeStore(t)
+	if err := st.EnsurePollInterval(context.Background(), now); err != nil {
+		t.Fatalf("EnsurePollInterval: %v", err)
+	}
+	monitor := createInternalOutcomeMonitor(t, st, "timeout-shutdown")
+	target := monitor.Providers[0]
+	checkID, err := st.StartCheckRun(context.Background(), target.ID, target.ConfigVersion, now)
+	if err != nil {
+		t.Fatalf("StartCheckRun: %v", err)
+	}
+	attempt := CheckAttempt{
+		CheckRunID:    checkID,
+		TargetID:      target.ID,
+		MonitorID:     monitor.ID,
+		ProviderID:    target.ProviderID,
+		ConfigVersion: target.ConfigVersion,
+		BookingSlug:   target.BookingSlug,
+		StartedAt:     now,
+		FinishedAt:    now,
+		Duration:      time.Second,
+		Err:           &provider.Error{Kind: provider.ErrTimeout, Op: "test"},
+		Classification: provider.Classification{
+			Category:           provider.CategoryInfrastructure,
+			Kind:               provider.ErrTimeout,
+			CountsTowardOutage: true,
+			TargetBackoff:      true,
+		},
+	}
+	runner, err := NewOutcomeRunner(OutcomeRunnerConfig{
+		Stage:  &CheckStage{},
+		Store:  st,
+		Now:    func() time.Time { return now },
+		Random: defaultRandom{},
+	})
+	if err != nil {
+		t.Fatalf("NewOutcomeRunner: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := runner.finalizeError(ctx, attempt)
+	if err != nil {
+		t.Fatalf("finalizeError timeout: %v", err)
+	}
+	if !result.Settled {
+		t.Fatal("timeout finalization was not settled")
+	}
+	var outcome, errorKind string
+	if err := sqlDB.QueryRow(`SELECT outcome, error_kind FROM check_runs WHERE id = ?`, checkID).Scan(&outcome, &errorKind); err != nil {
+		t.Fatalf("query check run: %v", err)
+	}
+	if outcome != "error" || errorKind != "timeout" {
+		t.Fatalf("check outcome = %q/%q, want error/timeout", outcome, errorKind)
+	}
+}
+
 func TestFinalizeCancellationRechecksGate(t *testing.T) {
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	st, sqlDB := newInternalOutcomeStore(t)

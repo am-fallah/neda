@@ -461,6 +461,15 @@ func TestOutcomeRunnerHTTP500RecordsStatusAndBackoff(t *testing.T) {
 	if failures != 1 {
 		t.Fatalf("provider failures = %d, want 1", failures)
 	}
+	monitor, err := harness.st.GetMonitor(context.Background(), harness.target.MonitorID)
+	if err != nil {
+		t.Fatalf("GetMonitor: %v", err)
+	}
+	target := monitor.Providers[0]
+	if target.ConsecutiveFailures != 1 || target.NextDueAt == nil ||
+		!target.NextDueAt.Equal(schedulerNow.Add(10*time.Minute)) {
+		t.Fatalf("target after HTTP 500 = %+v", target)
+	}
 }
 
 func TestOutcomeRunnerNonCountingErrorUpdatesDiagnosticsOnly(t *testing.T) {

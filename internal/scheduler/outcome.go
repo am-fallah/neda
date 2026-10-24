@@ -266,8 +266,16 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 }
 
 func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt) (Result, error) {
-	txCtx, cancel := outcomeContext(ctx)
-	defer cancel()
+	// Only an already-classified timeout may detach from a canceled caller
+	// context. Non-timeout provider errors during shutdown must roll back and
+	// leave the running row for startup abandonment rather than committing an
+	// error outcome after cancellation.
+	txCtx := ctx
+	if attempt.Classification.Kind == provider.ErrTimeout {
+		var cancel context.CancelFunc
+		txCtx, cancel = outcomeContext(ctx)
+		defer cancel()
+	}
 
 	var discarded bool
 	var discardReason string
