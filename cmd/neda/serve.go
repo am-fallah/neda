@@ -10,10 +10,14 @@ import (
 	"time"
 
 	"github.com/am-fallah/neda/internal/config"
+	"github.com/am-fallah/neda/internal/crypto"
 	"github.com/am-fallah/neda/internal/db"
 	"github.com/am-fallah/neda/internal/httpapi"
 	"github.com/am-fallah/neda/internal/logging"
 	"github.com/am-fallah/neda/internal/migrations"
+	"github.com/am-fallah/neda/internal/notify"
+	notifydelivery "github.com/am-fallah/neda/internal/notify/delivery"
+	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/scheduler"
 	"github.com/am-fallah/neda/internal/store"
@@ -63,6 +67,25 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 
+	// P2/P3: load the external key only when configured. Development startup
+	// without a key remains usable; Telegram delivery is simply unavailable.
+	var telegramSettings *telegramsettings.Settings
+	var deliverySource scheduler.DeliverySource
+	if cfg.EncryptionKeyFile != "" {
+		key, err := crypto.LoadKeyFile(cfg.EncryptionKeyFile)
+		if err != nil {
+			logger.Error("encryption key load failed", "error", err)
+			return 1
+		}
+		defer key.Zero()
+		telegramSettings, err = telegramsettings.New(appStore, key, time.Now)
+		if err != nil {
+			logger.Error("telegram settings initialization failed", "error", err)
+			return 1
+		}
+		deliverySource = telegramSettings.DeliveryDestinations
+	}
+
 	// PRV-009 (production provider configuration) remains deferred, so this
 	// registry is empty and no target can be dispatched until provider
 	// integration is authorized. SCH-010 still composes the production check
@@ -82,13 +105,14 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("check stage initialization failed", "error", err)
 		return 1
 	}
-	// Delivery destinations remain empty until NTF-001/NTF-003/PSH-002 define
-	// channel resolution. The runner still commits events atomically without
-	// delivery rows; the outbox wake is a no-op until a delivery worker exists.
+	// P3 supplies the Telegram destination when encrypted settings exist; Push
+	// destinations remain owned by PSH-002/PSH-004. The runner still commits
+	// events atomically even when no delivery destination is configured.
 	outcomeRunner, err := scheduler.NewOutcomeRunner(scheduler.OutcomeRunnerConfig{
-		Stage:  checkStage,
-		Store:  appStore,
-		Logger: logger,
+		Stage:      checkStage,
+		Store:      appStore,
+		Deliveries: deliverySource,
+		Logger:     logger,
 	})
 	if err != nil {
 		logger.Error("outcome runner initialization failed", "error", err)
@@ -110,10 +134,34 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("scheduler initialization failed", "error", err)
 		return 1
 	}
+	var deliveryWorker *notifydelivery.Worker
+	if telegramSettings != nil {
+		telegramClient, err := notify.NewTelegramClient(notify.TelegramClientConfig{})
+		if err != nil {
+			logger.Error("telegram client initialization failed", "error", err)
+			return 1
+		}
+		telegramSender, err := notifydelivery.NewTelegramSender(telegramSettings, telegramClient)
+		if err != nil {
+			logger.Error("telegram sender initialization failed", "error", err)
+			return 1
+		}
+		deliveryWorker, err = notifydelivery.New(notifydelivery.Config{
+			DB:      database.DB,
+			Senders: map[notify.Channel]notifydelivery.Sender{notify.ChannelTelegram: telegramSender},
+			Logger:  logger,
+		})
+		if err != nil {
+			logger.Error("delivery worker initialization failed", "error", err)
+			return 1
+		}
+	}
+
 	logger.Info("scheduler configured",
 		"workers", cfg.Workers,
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
+		"delivery_worker", deliveryWorker != nil,
 		"mode", "runner-composed-empty-provider-registry",
 	)
 
@@ -126,6 +174,13 @@ func runServe(stdout, stderr io.Writer) int {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	var deliveryErr <-chan error
+	if deliveryWorker != nil {
+		ch := make(chan error, 1)
+		deliveryErr = ch
+		go func() { ch <- deliveryWorker.Run(runCtx) }()
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
 		err := server.Run(runCtx)
@@ -137,6 +192,10 @@ func runServe(stdout, stderr io.Writer) int {
 	unexpectedStop := schedErr == nil && runCtx.Err() == nil
 	cancel()
 	serverRunErr := <-serverErr
+	var deliveryRunErr error
+	if deliveryErr != nil {
+		deliveryRunErr = <-deliveryErr
+	}
 
 	if schedErr != nil {
 		logger.Error("scheduler stopped with error", "error", schedErr)
@@ -147,7 +206,10 @@ func runServe(stdout, stderr io.Writer) int {
 	if serverRunErr != nil {
 		logger.Error("server stopped with error", "error", serverRunErr)
 	}
-	if schedErr != nil || unexpectedStop || serverRunErr != nil {
+	if deliveryRunErr != nil {
+		logger.Error("delivery worker stopped with error", "error", deliveryRunErr)
+	}
+	if schedErr != nil || unexpectedStop || serverRunErr != nil || deliveryRunErr != nil {
 		return 1
 	}
 	logger.Info("service stopped")
