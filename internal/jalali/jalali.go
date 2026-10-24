@@ -10,6 +10,7 @@ package jalali
 import (
 	"fmt"
 	"time"
+	_ "time/tzdata" // keep Asia/Tehran available in minimal containers
 
 	ptime "github.com/yaa110/go-persian-calendar"
 )

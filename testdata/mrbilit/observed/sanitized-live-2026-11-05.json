@@ -1,0 +1,132 @@
+{
+  "contentPath": "sanitized-observed-shape",
+  "fromLocation": {"title": "Yazd", "latitude": 0, "longitude": 0},
+  "toLocation": {"title": "Mashhad", "latitude": 0, "longitude": 0},
+  "filters": {},
+  "meta": {
+    "routeNotFound": false,
+    "alwaysHasTrain": false
+  },
+  "trains": [
+    {
+      "id": 9001,
+      "from": 219,
+      "to": 191,
+      "fromName": "Yazd",
+      "toName": "Mashhad",
+      "trainNumber": 682,
+      "provider": 1,
+      "providerName": "Raja",
+      "corporationID": 1,
+      "corporationName": "Raja",
+      "departureTime": "2026-11-05T14:50:00",
+      "arrivalTime": "2026-11-06T06:30:00",
+      "dateString": "14 Aban",
+      "arrivalDateString": "15 Aban",
+      "weekday": "Thursday",
+      "cancellable": true,
+      "isForeign": false,
+      "prices": [
+        {
+          "sellType": 3,
+          "classes": [
+            {
+              "id": 9101,
+              "wagonID": 9201,
+              "wagonName": "Four-star Sepehr",
+              "shortTitle": "Sepehr",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 0,
+              "capacityString": "0",
+              "isAvailable": false,
+              "reservationAvailable": true,
+              "price": 0,
+              "minPersons": 1
+            },
+            {
+              "id": 9102,
+              "wagonID": 9202,
+              "wagonName": "Five-star Samen",
+              "shortTitle": "Samen",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 3,
+              "capacityString": "3",
+              "isAvailable": true,
+              "reservationAvailable": true,
+              "price": 45850000,
+              "minPersons": 1
+            }
+          ]
+        },
+        {
+          "sellType": 2,
+          "classes": [
+            {
+              "id": 9103,
+              "wagonID": 9201,
+              "wagonName": "Four-star Sepehr",
+              "shortTitle": "Sepehr",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 0,
+              "capacityString": "0",
+              "isAvailable": false,
+              "reservationAvailable": true,
+              "price": 0,
+              "minPersons": 1
+            },
+            {
+              "id": 9104,
+              "wagonID": 9202,
+              "wagonName": "Five-star Samen",
+              "shortTitle": "Samen",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 0,
+              "capacityString": "0",
+              "isAvailable": false,
+              "reservationAvailable": true,
+              "price": 0,
+              "minPersons": 1
+            }
+          ]
+        },
+        {
+          "sellType": 1,
+          "classes": [
+            {
+              "id": 9105,
+              "wagonID": 9201,
+              "wagonName": "Four-star Sepehr",
+              "shortTitle": "Sepehr",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 2,
+              "capacityString": "2",
+              "isAvailable": true,
+              "reservationAvailable": true,
+              "price": 19081000,
+              "minPersons": 1
+            },
+            {
+              "id": 9106,
+              "wagonID": 9202,
+              "wagonName": "Five-star Samen",
+              "shortTitle": "Samen",
+              "class": "Four star",
+              "compartmentType": "4-person compartment",
+              "capacity": 0,
+              "capacityString": "0",
+              "isAvailable": false,
+              "reservationAvailable": true,
+              "price": 0,
+              "minPersons": 1
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

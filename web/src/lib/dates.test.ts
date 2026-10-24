@@ -24,6 +24,16 @@ describe("Jalali/Gregorian conversion", () => {
     expect(jalaliToGregorian(1405, 7, 28)).toBe("2026-10-20");
   });
 
+  it("converts the observed MrBilit route/date pair", () => {
+    expect(gregorianToJalali("2026-11-05")).toEqual({
+      jy: 1405,
+      jm: 8,
+      jd: 14,
+    });
+    expect(formatJalaliNumeric("2026-11-05")).toBe("1405-08-14");
+    expect(jalaliToGregorian(1405, 8, 14)).toBe("2026-11-05");
+  });
+
   it("handles leap and non-leap Esfand lengths", () => {
     expect(jalaliMonthDays(1403, 12)).toBe(30);
     expect(jalaliMonthDays(1404, 12)).toBe(29);

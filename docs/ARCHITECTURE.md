@@ -923,7 +923,12 @@ Additional rules:
 https://mrbilit.com/trains/{validated-slug}?departureDate={validated-jalali-date}
 ```
 
-- The pattern is illustrative/PROVISIONAL.
+- **Verified 2026-10-25** against the owner reference
+  `https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14` for
+  `2026-11-05`. Implemented in `internal/provider/mrbilit/booking.go`.
+- The pattern was illustrative/PROVISIONAL before that reference; the shape is
+  now owner-verified for this route/date, while the slug remains manually
+  configured.
 - Slug comes only from an owner-supplied/validated per-provider value. Never derive it from city names.
 - Persian date comes from a maintained conversion library only after the query parameter format is confirmed.
 - Validate slug with a conservative pattern (letters/digits/hyphens, bounded length) and reject path/query injection.
@@ -946,9 +951,37 @@ No live request was made during planning. After `GATE-003` approval and a provid
 - Capture sanitized observations and update semantics in the docs/tracker only from evidence. If access is blocked or inappropriate, proceed with synthetic fixtures; live access is never a test/CI requirement.
 - Validate request parameters, envelope, time/price formats, capacity semantics, and booking URL/date format only to the extent the approved budget permits. Do not invent values for unknown enums.
 
-### 9.7 P1a implementation status (2026-10-24)
+**Executed 2026-10-24/25.** Two unauthenticated read-only GETs were made under this
+budget (HTTP 200, no redirect/retry, >3 minutes apart). See
+`docs/MRBILIT_LIVE_VALIDATION.md` for sanitized evidence. No booking request was
+made. The provider remains unregistered.
 
-`internal/provider/mrbilit` implements the documented/provisional request (`GET /api/GetAvailable/v2` with `from`, `to`, `date`, `adultCount`, `childCount`, and `infantCount`), a reusable per-attempt-timeout HTTP client with redirect rejection, bounded retries/`Retry-After`, a 2 MiB response cap, and normalized journey/offering identity per §9.3. The parser uses only a synthetic, explicitly labeled response contract because the real envelope and offering-container key are unverified; it rejects every other shape and enforces the 100/50/500 journey/offering caps before normalizing. The decision table in §9.4 is implemented with the known-negative sample and synthetic positive/shortfall/contradiction cases. A journey with insufficient fallback identity fails the whole response; an offering with no stable identity field is omitted with the `offering_identity_insufficient` warning rather than being assigned an index-based key. The adapter is deliberately **not registered** in production; `PRV-006`/`GATE-003` remains the only path to validating the real contract. Positive availability remains synthetic and unverified.
+### 9.7 MrBilit implementation and live validation status (2026-10-25)
+
+`internal/provider/mrbilit` implements the documented request (`GET
+/api/GetAvailable/v2` with `from`, `to`, `date`, `adultCount`, `childCount`, and
+`infantCount`), a reusable per-attempt-timeout HTTP client with redirect
+rejection, bounded retries/`Retry-After`, an opt-in `NoRetries` mode for the
+bounded validation protocol, a 2 MiB response cap, and normalized
+journey/offering identity per §9.3.
+
+The parser now accepts the **observed real envelope**: a top-level object with
+`trains[]`, nested `prices[].classes[]`, and `meta.routeNotFound`/
+`meta.alwaysHasTrain`. Missing/null `trains` is invalid; empty `trains[]` is a
+successful empty observation; `routeNotFound=true` is a typed route error.
+`alwaysHasTrain` is not used for availability state. The original top-level
+array remains supported only for the deterministic synthetic fixtures. The
+100/50/500 caps and duplicate/conflicting-key handling remain in force.
+
+The observed-shape tests cover one journey with six classes, two positive
+classes (capacity 2/3, both flags true) and four known-negative zero-capacity
+classes, plus shortfall, empty, route-not-found, malformed, and unexpected-type
+cases. Live validation on 2026-10-25 used two unauthenticated GETs (HTTP 200)
+and the adapter reported 1 journey, 6 offerings, 2 Reservable, 4 NotReservable,
+0 Unknown, no warnings, and 6 booking URLs. Times are local Tehran wall-clock in
+the observed payload; prices are not stored because Rial/Toman is unverified.
+The adapter is deliberately **not registered** in production; `PRV-009` remains
+a separate decision. Full evidence: `docs/MRBILIT_LIVE_VALIDATION.md`.
 
 ---
 
