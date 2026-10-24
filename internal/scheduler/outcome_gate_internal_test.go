@@ -47,6 +47,14 @@ func TestFinalizeSuccessReevaluatesGateInsideTransaction(t *testing.T) {
 			},
 		},
 		{
+			name:   "monitor expired marker",
+			reason: "monitor_expired",
+			mutate: func(t *testing.T, sqlDB *sql.DB, _ int64, monitorID string) {
+				mustExec(t, sqlDB, `UPDATE monitors SET expired_at = ? WHERE id = ?`,
+					now.Format(time.RFC3339Nano), monitorID)
+			},
+		},
+		{
 			name:   "config changed",
 			reason: "config_changed",
 			mutate: func(t *testing.T, sqlDB *sql.DB, targetID int64, _ string) {
@@ -134,6 +142,55 @@ func TestFinalizeSuccessReevaluatesGateInsideTransaction(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFinalizeCancellationRechecksGate(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	st, sqlDB := newInternalOutcomeStore(t)
+	monitor := createInternalOutcomeMonitor(t, st, "cancel-gate")
+	target := monitor.Providers[0]
+	checkID, err := st.StartCheckRun(context.Background(), target.ID, target.ConfigVersion, now)
+	if err != nil {
+		t.Fatalf("StartCheckRun: %v", err)
+	}
+	attempt := CheckAttempt{
+		CheckRunID:    checkID,
+		TargetID:      target.ID,
+		MonitorID:     monitor.ID,
+		ProviderID:    target.ProviderID,
+		ConfigVersion: target.ConfigVersion,
+		BookingSlug:   target.BookingSlug,
+		StartedAt:     now,
+		FinishedAt:    now,
+		Duration:      time.Second,
+	}
+	if _, err := sqlDB.Exec(`UPDATE monitor_providers SET active = 0 WHERE id = ?`, target.ID); err != nil {
+		t.Fatalf("deactivate target: %v", err)
+	}
+	runner, err := NewOutcomeRunner(OutcomeRunnerConfig{
+		Stage:  &CheckStage{},
+		Store:  st,
+		Now:    func() time.Time { return now },
+		Random: defaultRandom{},
+	})
+	if err != nil {
+		t.Fatalf("NewOutcomeRunner: %v", err)
+	}
+	result, err := runner.finalizeCancellation(context.Background(), attempt)
+	if err != nil {
+		t.Fatalf("finalizeCancellation: %v", err)
+	}
+	if result.Settled {
+		t.Fatal("cancellation with invalid target was settled")
+	}
+	var outcome string
+	var errorKind sql.NullString
+	if err := sqlDB.QueryRow(`SELECT outcome, error_kind FROM check_runs WHERE id = ?`, checkID).Scan(&outcome, &errorKind); err != nil {
+		t.Fatalf("query check run: %v", err)
+	}
+	if outcome != "discarded" || !errorKind.Valid || errorKind.String != "target_inactive" {
+		t.Fatalf("check outcome = %q/%+v, want discarded/target_inactive", outcome, errorKind)
 	}
 }
 

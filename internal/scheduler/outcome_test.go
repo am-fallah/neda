@@ -687,8 +687,14 @@ func TestOutcomeRunnerAbandonedOnCallerCancellation(t *testing.T) {
 	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM provider_health`); count != 0 {
 		t.Fatalf("provider health rows = %d, want 0", count)
 	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM availability_episodes`); count != 0 {
+		t.Fatalf("episodes = %d, want 0", count)
+	}
 	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM events`); count != 0 {
 		t.Fatalf("events = %d, want 0", count)
+	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM notification_deliveries`); count != 0 {
+		t.Fatalf("deliveries = %d, want 0", count)
 	}
 	monitor, err := harness.st.GetMonitor(context.Background(), harness.target.MonitorID)
 	if err != nil {
@@ -730,6 +736,29 @@ func TestOutcomeRunnerTargetInvalidityPrecedesCancellation(t *testing.T) {
 	}
 	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM provider_health`); count != 0 {
 		t.Fatalf("provider health rows = %d, want 0", count)
+	}
+}
+
+func TestOutcomeRunnerSuccessReturnedAfterDeadlineIsTimeout(t *testing.T) {
+	adapter := newRecordingProvider("late-success", nil)
+	adapter.metadata = provider.Metadata{ID: "late-success", DisplayName: "Late success", TestOnly: true}
+	adapter.checkFn = func(context.Context, provider.CheckRequest) (provider.Result, error) {
+		time.Sleep(50 * time.Millisecond)
+		return provider.Result{ObservedAt: schedulerNow}, nil
+	}
+	harness := newOutcomeHarness(t, "outcome-late-success", adapter, checkMonitorSpec{
+		providerID: "late-success",
+	}, 10*time.Millisecond, nil)
+	result := runOutcome(t, harness)
+	if !result.Settled {
+		t.Fatal("late success was not settled")
+	}
+	outcome, errorKind, _, _, _, _, _, _, _, _ := checkRunSnapshot(t, harness.sqlDB)
+	if outcome != "error" || !errorKind.Valid || errorKind.String != "timeout" {
+		t.Fatalf("check outcome = %q error_kind=%+v, want error/timeout", outcome, errorKind)
+	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM inventory_states`); count != 0 {
+		t.Fatalf("inventory states = %d, want 0", count)
 	}
 }
 

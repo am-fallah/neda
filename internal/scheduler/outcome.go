@@ -126,25 +126,31 @@ func (r *OutcomeRunner) Run(ctx context.Context, target Target) (Result, error) 
 		return Result{Settled: true}, err
 	}
 	if !gate.valid {
-		return r.finalizeOnly(ctx, attempt, store.CheckOutcomeDiscarded, gate.reason, now)
+		return r.finalizeDiscarded(ctx, attempt, gate.reason, now)
 	}
 
 	// Target invalidity takes precedence over cancellation. A deadline is
 	// classified as a timeout by CheckStage and is never abandoned here, even
 	// if shutdown cancellation is also observable.
 	if ctx.Err() == context.Canceled && attempt.Classification.Kind != provider.ErrTimeout {
-		return r.finalizeOnly(ctx, attempt, store.CheckOutcomeAbandoned, string(provider.ErrCanceled), now)
+		return r.finalizeCancellation(ctx, attempt)
 	}
 
 	if attempt.Classification.IsAbandoned() {
-		return r.finalizeOnly(ctx, attempt, store.CheckOutcomeAbandoned, string(provider.ErrCanceled), now)
-	}
-	if attempt.Err == nil {
-		return r.finalizeSuccess(ctx, attempt)
+		return r.finalizeCancellation(ctx, attempt)
 	}
 	if attempt.Classification.IsSuccess() {
-		r.logOutcomeError("outcome classification is inconsistent", attempt, "classification_inconsistent")
-		return Result{Settled: true}, errors.New("scheduler: outcome classification is inconsistent")
+		if attempt.Err != nil {
+			r.logOutcomeError("outcome classification is inconsistent", attempt, "classification_inconsistent")
+			return Result{Settled: true}, errors.New("scheduler: outcome classification is inconsistent")
+		}
+		return r.finalizeSuccess(ctx, attempt)
+	}
+	// A provider may return a result just as the overall deadline expires. The
+	// classification, not the nil error, determines that this is a timeout.
+	if attempt.Classification.Category == "" {
+		attempt.Classification = provider.Classify(context.Background(),
+			&provider.Error{Kind: provider.ErrInvalidResponse, Op: "Outcome"})
 	}
 	return r.finalizeError(ctx, attempt)
 }
@@ -308,26 +314,58 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	return Result{Settled: true}, nil
 }
 
-func (r *OutcomeRunner) finalizeOnly(ctx context.Context, attempt CheckAttempt, outcome store.CheckOutcome, reason string, now time.Time) (Result, error) {
-	settled := outcome == store.CheckOutcomeAbandoned
-	finalizeCtx, cancel := outcomeContext(ctx)
+func (r *OutcomeRunner) finalizeCancellation(ctx context.Context, attempt CheckAttempt) (Result, error) {
+	txCtx, cancel := outcomeContext(ctx)
 	defer cancel()
 
-	err := r.store.WithSQLTx(finalizeCtx, func(tx *sql.Tx, _ *store.Store) error {
-		return r.finalizeCheckTx(finalizeCtx, tx, attempt, outcome, reason, now, outcomeCounts{}, nil)
+	var discarded bool
+	var discardReason string
+	err := r.store.WithSQLTx(txCtx, func(tx *sql.Tx, txStore *store.Store) error {
+		txNow := r.now().UTC()
+		gate, err := loadOutcomeGate(txCtx, attempt, txStore, txNow)
+		if err != nil {
+			return err
+		}
+		if !gate.valid {
+			discarded = true
+			discardReason = gate.reason
+			return r.finalizeCheckTx(txCtx, tx, attempt, store.CheckOutcomeDiscarded, discardReason, txNow, outcomeCounts{}, nil)
+		}
+		return r.finalizeCheckTx(txCtx, tx, attempt, store.CheckOutcomeAbandoned, string(provider.ErrCanceled), txNow, outcomeCounts{}, nil)
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNoRunningCheck) {
 			r.logOutcomeError("check outcome skipped: no running row", attempt, "no_running_check")
-			return Result{Settled: settled}, nil
+			return Result{Settled: !discarded}, nil
+		}
+		r.logOutcomeError("check cancellation finalization failed", attempt, "finalization_failed")
+		if discarded {
+			return Result{Settled: true}, err
+		}
+		return Result{Settled: true}, nil
+	}
+	if discarded {
+		return Result{Settled: false}, nil
+	}
+	return Result{Settled: true}, nil
+}
+
+func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAttempt, reason string, now time.Time) (Result, error) {
+	finalizeCtx, cancel := outcomeContext(ctx)
+	defer cancel()
+
+	err := r.store.WithSQLTx(finalizeCtx, func(tx *sql.Tx, _ *store.Store) error {
+		return r.finalizeCheckTx(finalizeCtx, tx, attempt, store.CheckOutcomeDiscarded, reason, now, outcomeCounts{}, nil)
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNoRunningCheck) {
+			r.logOutcomeError("check outcome skipped: no running row", attempt, "no_running_check")
+			return Result{Settled: false}, nil
 		}
 		r.logOutcomeError("check finalization failed", attempt, "finalization_failed")
-		if outcome == store.CheckOutcomeAbandoned {
-			return Result{Settled: true}, nil
-		}
 		return Result{Settled: true}, err
 	}
-	return Result{Settled: settled}, nil
+	return Result{Settled: false}, nil
 }
 
 func (r *OutcomeRunner) finalizeCheckTx(
