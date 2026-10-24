@@ -421,6 +421,13 @@ func TestEnqueueDeterministicDeliveryIDsAcrossEvents(t *testing.T) {
 	if count := mustQueryInt(t, database, `SELECT COUNT(*) FROM notification_deliveries`); count != 2 {
 		t.Fatalf("delivery count after duplicate = %d, want 2", count)
 	}
+	var stableID string
+	if err := database.QueryRow(`SELECT id FROM notification_deliveries WHERE event_id = ?`, firstResult.EventID).Scan(&stableID); err != nil {
+		t.Fatalf("query stable delivery id: %v", err)
+	}
+	if stableID != firstID {
+		t.Fatalf("delivery id changed across dedupe: %q -> %q", firstID, stableID)
+	}
 }
 
 func TestEnqueueDeliveryInsertFailureRollsBack(t *testing.T) {

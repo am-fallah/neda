@@ -51,8 +51,9 @@ func (c Channel) valid() bool {
 	}
 }
 
-// Event is one durable availability or provider-health event. IDs and dedupe
-// keys are supplied by the caller; this package does not own identity policy.
+// Event is one durable availability or provider-health event. Event IDs and
+// dedupe keys are supplied by the caller. Delivery IDs are outbox-owned and
+// derived deterministically from the event and destination identity.
 type Event struct {
 	ID        string
 	Kind      EventKind
