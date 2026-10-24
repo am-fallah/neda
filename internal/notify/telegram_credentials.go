@@ -77,6 +77,18 @@ func (c TelegramCredentials) MarshalJSON() ([]byte, error) {
 	}{Configured: c.token != "" && c.chatID != "", ChatLabel: c.ChatLabel()})
 }
 
+// ValidateTelegramToken validates a bot token without retaining it. Callers can
+// use this to return field-specific settings errors before persistence.
+func ValidateTelegramToken(token string) error {
+	return validateTelegramToken(token)
+}
+
+// ValidateTelegramChatID validates a numeric or @username chat ID without
+// retaining it.
+func ValidateTelegramChatID(chatID string) error {
+	return validateTelegramChatID(chatID)
+}
+
 func validateTelegramToken(token string) error {
 	if token == "" {
 		return fmt.Errorf("notify: telegram bot token is required")

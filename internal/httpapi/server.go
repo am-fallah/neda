@@ -18,6 +18,7 @@ import (
 	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/logging"
+	appsettings "github.com/am-fallah/neda/internal/settings"
 )
 
 const (
@@ -52,6 +53,7 @@ type Config struct {
 	Auth       *auth.Manager
 	LoginGuard *auth.LoginGuard
 	Monitors   *domain.MonitorService
+	Settings   *appsettings.Service
 	Now        func() time.Time
 }
 
@@ -70,6 +72,7 @@ type Server struct {
 	auth               *auth.Manager
 	loginGuard         *auth.LoginGuard
 	monitors           *domain.MonitorService
+	settings           *appsettings.Service
 	now                func() time.Time
 }
 
@@ -108,6 +111,7 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		auth:               cfg.Auth,
 		loginGuard:         cfg.LoginGuard,
 		monitors:           cfg.Monitors,
+		settings:           cfg.Settings,
 		now:                cfg.Now,
 	}
 	s.handler = s.buildHandler()
@@ -178,6 +182,10 @@ func (s *Server) buildHandler() http.Handler {
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/v1/monitors" || strings.HasPrefix(r.URL.Path, "/api/v1/monitors/") {
 		s.privateAuth(http.HandlerFunc(s.handleMonitors)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/settings" || strings.HasPrefix(r.URL.Path, "/api/v1/settings/") {
+		s.privateAuth(http.HandlerFunc(s.handleSettings)).ServeHTTP(w, r)
 		return
 	}
 	switch r.URL.Path {
