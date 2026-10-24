@@ -110,12 +110,9 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	if s == nil || s.store == nil {
 		return View{}, errors.New("settings: not initialized")
 	}
-	interval, err := s.store.PollInterval(ctx)
+	interval, err := s.PollInterval(ctx)
 	if err != nil {
-		if !errors.Is(err, store.ErrNotFound) {
-			return View{}, err
-		}
-		interval = domain.DefaultPollInterval
+		return View{}, err
 	}
 	pushEnabled, err := s.store.PushEnabled(ctx)
 	if err != nil {
@@ -143,6 +140,22 @@ func (s *Service) View(ctx context.Context) (View, error) {
 		LastErrorKind:     status.LastErrorKind,
 	}
 	return view, nil
+}
+
+// PollInterval returns the persisted global interval, falling back to the
+// documented default only when the row has not been seeded yet.
+func (s *Service) PollInterval(ctx context.Context) (time.Duration, error) {
+	if s == nil || s.store == nil {
+		return 0, errors.New("settings: not initialized")
+	}
+	interval, err := s.store.PollInterval(ctx)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.DefaultPollInterval, nil
+		}
+		return 0, err
+	}
+	return interval, nil
 }
 
 // Update applies a partial settings edit atomically and returns the new view.
