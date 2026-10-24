@@ -122,7 +122,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - The parser accepts only an explicitly labeled synthetic response envelope (`testdata/mrbilit/synthetic`) because the real envelope, offering-container key, time/price formats, and capacity semantics are unverified. Other shapes fail closed as invalid responses. Caps are 100 journeys, 50 offerings per journey, and 500 offerings total.
 - Journey/offering keys follow Architecture §9.3: native IDs use `id:<native>`; fallback keys hash a versioned canonical string and exclude price, capacity, availability flags, and array index. The known-negative sample (`capacity=0`, `isAvailable=false`, `reservationAvailable=true`) is `NotReservable`; positive/shortfall/contradiction cases use synthetic fixtures only.
 - The adapter is deliberately not registered in `cmd/neda/serve.go`; production checks remain inert. Real-contract validation requires the owner-approved `PRV-006`/`GATE-003` protocol.
-- PR: [#14](https://github.com/am-fallah/neda/pull/14); CI run [40110863710](https://github.com/am-fallah/neda/actions/runs/40110863710) passed on code head `a477150`. Open, not merged.
+- PR: [#14](https://github.com/am-fallah/neda/pull/14); code-head CI [40110863710](https://github.com/am-fallah/neda/actions/runs/40110863710) (a477150) and final code-head CI [40111365080](https://github.com/am-fallah/neda/actions/runs/40111365080) (10ba711) passed. Open, not merged.
 
 ## Not implemented yet
 
