@@ -1299,7 +1299,7 @@ authorized HTTPS/live-service test.
 
 ### 13.5 Retention
 
-Proposal:
+Proposal (implemented 2026-10-25):
 
 - `check_runs`: 14 days.
 - `notification_attempts`: 30 days.
@@ -1311,6 +1311,20 @@ Proposal:
 
 Retention follows the deterministic order in §7.5. Events/deliveries are deleted before dependent episodes/states; open episodes are never pruned. `provider_health.open_episode_id` is reconciled/cleared. Tests assert no retention path deletes unconsumed events or leaves an orphaned open episode. Retention is bounded and documented; no raw provider responses are stored.
 
+**NTF-005 implementation (2026-10-25).** `internal/retention` executes the
+documented order inside one SQLite transaction: notification attempts, finalized
+check runs, events with no pending/sending/retry deliveries (dependent deliveries
+cascade), reconciliation of `provider_health.open_episode_id`, closed health
+episodes not referenced by an open episode, closed availability episodes with no
+event reference, inventory states with no remaining episodes, expired/old
+revoked sessions, and disabled Push subscriptions older than 30 days. Running
+checks, events with unconsumed deliveries, open episodes, states with any
+episode, and active sessions/subscriptions are never pruned. A
+`PRAGMA foreign_key_check` before commit fails the whole run closed; `PRAGMA
+optimize` runs after commit. The worker starts after a 30-second delay and runs
+daily; failures are logged as a sanitized category and retried. Tests cover the
+exact deletion counts, retained open/pending rows, idempotence, rollback on an
+injected foreign-key violation, and canceled contexts.
 ---
 
 ## 14. Security architecture

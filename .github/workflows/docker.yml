@@ -1,0 +1,112 @@
+name: docker
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: Docker image and runtime smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose file
+        run: |
+          mkdir -p data secrets
+          openssl rand -base64 32 > secrets/encryption_key
+          chmod 0400 secrets/encryption_key
+          NEDA_PUBLIC_URL=https://neda.example.com \
+          NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+          NEDA_RUNTIME_UID="$(id -u)" \
+          NEDA_RUNTIME_GID="$(id -g)" \
+          docker compose -f compose.yaml config >/dev/null
+
+      - name: Build image
+        run: |
+          docker build \
+            --build-arg VERSION=ci \
+            --build-arg COMMIT="${GITHUB_SHA}" \
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            -t neda:ci .
+
+      - name: Verify image defaults
+        run: |
+          test "$(docker inspect -f '{{.Config.User}}' neda:ci)" = "nonroot:nonroot"
+          docker run --rm --entrypoint /neda neda:ci version
+
+      - name: Run read-only container on a fresh volume
+        run: |
+          mkdir -p "$RUNNER_TEMP/neda-data" "$RUNNER_TEMP/neda-key"
+          openssl rand -base64 32 > "$RUNNER_TEMP/neda-key/encryption_key"
+          chmod 0400 "$RUNNER_TEMP/neda-key/encryption_key"
+          docker run -d --name neda-ci \
+            --read-only \
+            --tmpfs /tmp:size=16m,noexec,nosuid \
+            --user "$(id -u):$(id -g)" \
+            -p 127.0.0.1:18080:8080 \
+            -v "$RUNNER_TEMP/neda-data:/data" \
+            -v "$RUNNER_TEMP/neda-key/encryption_key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            neda:ci
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/healthz
+          test -s "$RUNNER_TEMP/neda-data/neda.db"
+          test "$(stat -c '%u' "$RUNNER_TEMP/neda-data/neda.db")" = "$(id -u)"
+          test "$(stat -c '%a' "$RUNNER_TEMP/neda-key/encryption_key")" = "400"
+          ORIGINAL_PUBLIC="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$RUNNER_TEMP/neda-data/neda.db")"
+          test -n "$ORIGINAL_PUBLIC"
+          docker restart neda-ci >/dev/null
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18080/healthz; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:18080/healthz
+          RESTORED_PUBLIC="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$RUNNER_TEMP/neda-data/neda.db")"
+          test "$ORIGINAL_PUBLIC" = "$RESTORED_PUBLIC"
+          if docker logs neda-ci 2>&1 | grep -qF -f "$RUNNER_TEMP/neda-key/encryption_key"; then
+            echo "encryption key leaked to container logs" >&2
+            exit 1
+          fi
+          docker rm -f neda-ci
+
+      - name: Wrong key permissions fail closed
+        run: |
+          mkdir -p "$RUNNER_TEMP/neda-bad" "$RUNNER_TEMP/neda-bad-key"
+          openssl rand -base64 32 > "$RUNNER_TEMP/neda-bad-key/encryption_key"
+          chmod 0644 "$RUNNER_TEMP/neda-bad-key/encryption_key"
+          set +e
+          timeout 20s docker run --rm --name neda-bad \
+            --read-only \
+            --user "$(id -u):$(id -g)" \
+            -v "$RUNNER_TEMP/neda-bad:/data" \
+            -v "$RUNNER_TEMP/neda-bad-key/encryption_key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            neda:ci >"$RUNNER_TEMP/bad-key.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q "NEDA_ENCRYPTION_KEY_FILE" "$RUNNER_TEMP/bad-key.log"
+
+      - name: Show image size
+        run: docker image inspect neda:ci --format '{{.Size}} bytes'

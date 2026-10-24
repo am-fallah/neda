@@ -25,6 +25,7 @@ import (
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
 	pushservice "github.com/am-fallah/neda/internal/push"
+	"github.com/am-fallah/neda/internal/retention"
 	"github.com/am-fallah/neda/internal/scheduler"
 	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
@@ -275,6 +276,17 @@ func runServe(stdout, stderr io.Writer) int {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	retentionWorker, err := retention.New(database.DB, retention.Config{Logger: logger})
+	if err != nil {
+		logger.Error("retention worker initialization failed", "error", err)
+		return 1
+	}
+	retentionDone := make(chan struct{})
+	go func() {
+		defer close(retentionDone)
+		_ = retentionWorker.Run(runCtx)
+	}()
+
 	var deliveryErr <-chan error
 	if deliveryWorker != nil {
 		ch := make(chan error, 1)
@@ -292,6 +304,7 @@ func runServe(stdout, stderr io.Writer) int {
 	schedErr := sched.Run(runCtx)
 	unexpectedStop := schedErr == nil && runCtx.Err() == nil
 	cancel()
+	<-retentionDone
 	serverRunErr := <-serverErr
 	var deliveryRunErr error
 	if deliveryErr != nil {
