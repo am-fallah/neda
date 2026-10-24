@@ -145,6 +145,72 @@ func TestFinalizeSuccessReevaluatesGateInsideTransaction(t *testing.T) {
 	}
 }
 
+func TestFinalizeErrorReevaluatesGateInsideTransaction(t *testing.T) {
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	st, sqlDB := newInternalOutcomeStore(t)
+	monitor := createInternalOutcomeMonitor(t, st, "error-gate")
+	target := monitor.Providers[0]
+	checkID, err := st.StartCheckRun(context.Background(), target.ID, target.ConfigVersion, now)
+	if err != nil {
+		t.Fatalf("StartCheckRun: %v", err)
+	}
+	attempt := CheckAttempt{
+		CheckRunID:    checkID,
+		TargetID:      target.ID,
+		MonitorID:     monitor.ID,
+		ProviderID:    target.ProviderID,
+		ConfigVersion: target.ConfigVersion,
+		BookingSlug:   target.BookingSlug,
+		StartedAt:     now,
+		FinishedAt:    now,
+		Duration:      time.Second,
+		Err:           &provider.Error{Kind: provider.ErrTimeout, Op: "test"},
+		Classification: provider.Classification{
+			Category:           provider.CategoryInfrastructure,
+			Kind:               provider.ErrTimeout,
+			CountsTowardOutage: true,
+			TargetBackoff:      true,
+		},
+	}
+	if _, err := sqlDB.Exec(`UPDATE monitor_providers SET config_version = config_version + 1 WHERE id = ?`, target.ID); err != nil {
+		t.Fatalf("change config version: %v", err)
+	}
+	runner, err := NewOutcomeRunner(OutcomeRunnerConfig{
+		Stage:  &CheckStage{},
+		Store:  st,
+		Now:    func() time.Time { return now },
+		Random: defaultRandom{},
+	})
+	if err != nil {
+		t.Fatalf("NewOutcomeRunner: %v", err)
+	}
+	result, err := runner.finalizeError(context.Background(), attempt)
+	if err != nil {
+		t.Fatalf("finalizeError: %v", err)
+	}
+	if result.Settled {
+		t.Fatal("error-path gate discard was settled")
+	}
+	var outcome string
+	var errorKind sql.NullString
+	if err := sqlDB.QueryRow(`SELECT outcome, error_kind FROM check_runs WHERE id = ?`, checkID).Scan(&outcome, &errorKind); err != nil {
+		t.Fatalf("query check run: %v", err)
+	}
+	if outcome != "discarded" || !errorKind.Valid || errorKind.String != "config_changed" {
+		t.Fatalf("check outcome = %q/%+v, want discarded/config_changed", outcome, errorKind)
+	}
+	for _, query := range []string{
+		`SELECT COUNT(*) FROM inventory_states`,
+		`SELECT COUNT(*) FROM provider_health`,
+		`SELECT COUNT(*) FROM events`,
+		`SELECT COUNT(*) FROM notification_deliveries`,
+	} {
+		if count := mustCount(t, sqlDB, query); count != 0 {
+			t.Fatalf("%s = %d, want 0", query, count)
+		}
+	}
+}
+
 func TestFinalizeCancellationRechecksGate(t *testing.T) {
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	st, sqlDB := newInternalOutcomeStore(t)

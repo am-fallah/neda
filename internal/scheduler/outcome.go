@@ -22,7 +22,8 @@ const outcomeFinalizeTimeout = 5 * time.Second
 // outcome. It runs inside the outcome transaction and must not perform network
 // or long-running work. A nil source means no configured channels; events are
 // still persisted without delivery rows until notification-channel tasks add a
-// source.
+// source. A non-nil source error fails the outcome transaction so a valid check
+// is never committed with a partially resolved outbox.
 type DeliverySource func(ctx context.Context, tx *sql.Tx) ([]notify.Delivery, error)
 
 // OutcomeRunnerConfig controls the SCH-010 per-check outcome orchestrator.
@@ -136,11 +137,15 @@ func (r *OutcomeRunner) Run(ctx context.Context, target Target) (Result, error) 
 	gate, err := loadOutcomeGate(gateCtx, attempt, r.store, now)
 	cancel()
 	if err != nil {
+		// A gate read failure is not an outcome-transaction failure. Leave the
+		// due generation unsettled so a transient read error does not stall the
+		// target until restart; the original running row remains diagnostic-only
+		// and startup recovery will abandon it.
 		r.logOutcomeError("outcome validity gate failed", attempt, "validity_gate_failed")
-		return Result{Settled: true}, newOutcomeFailure("validity_gate_failed", err)
+		return Result{Settled: false}, newOutcomeFailure("validity_gate_failed", err)
 	}
 	if !gate.valid {
-		return r.finalizeDiscarded(ctx, attempt, gate.reason, now)
+		return r.finalizeDiscarded(ctx, attempt, gate.reason)
 	}
 
 	// Target invalidity takes precedence over cancellation. A deadline is
@@ -170,6 +175,10 @@ func (r *OutcomeRunner) Run(ctx context.Context, target Target) (Result, error) 
 }
 
 func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttempt) (Result, error) {
+	// Success deliberately uses the caller context. If shutdown begins before
+	// this transaction commits, the running row is left for startup
+	// abandonment rather than committing a success during cancellation. The
+	// error branch may detach only to finalize an already-classified timeout.
 	outcome := store.CheckOutcomeSuccess
 	healthOutcome := health.OutcomeSuccess
 	if len(attempt.Result.Journeys) == 0 {
@@ -364,12 +373,20 @@ func (r *OutcomeRunner) finalizeCancellation(ctx context.Context, attempt CheckA
 	return Result{Settled: true}, nil
 }
 
-func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAttempt, reason string, now time.Time) (Result, error) {
+func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAttempt, reason string) (Result, error) {
 	finalizeCtx, cancel := outcomeContext(ctx)
 	defer cancel()
 
-	err := r.store.WithSQLTx(finalizeCtx, func(tx *sql.Tx, _ *store.Store) error {
-		return r.finalizeCheckTx(finalizeCtx, tx, attempt, store.CheckOutcomeDiscarded, reason, now, outcomeCounts{}, nil)
+	err := r.store.WithSQLTx(finalizeCtx, func(tx *sql.Tx, txStore *store.Store) error {
+		txNow := r.now().UTC()
+		// Re-evaluate the gate at the start of the outcome transaction even
+		// though a pre-gate invalidity decision is final: the check row is the
+		// only write, and a changed/expired target must not become applicable
+		// between the read and the conditional finalization.
+		if _, err := loadOutcomeGate(finalizeCtx, attempt, txStore, txNow); err != nil {
+			return err
+		}
+		return r.finalizeCheckTx(finalizeCtx, tx, attempt, store.CheckOutcomeDiscarded, reason, txNow, outcomeCounts{}, nil)
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrNoRunningCheck) {

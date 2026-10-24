@@ -281,6 +281,77 @@ func TestOutcomeRunnerJourneyWithoutOfferingsIsSuccess(t *testing.T) {
 	}
 }
 
+func TestOutcomeRunnerCheckCountsAndWarnings(t *testing.T) {
+	adapter := newRecordingProvider("counts", nil)
+	adapter.metadata = provider.Metadata{ID: "counts", DisplayName: "Counts", TestOnly: true}
+	adapter.checkFn = func(context.Context, provider.CheckRequest) (provider.Result, error) {
+		return provider.Result{
+			ObservedAt: schedulerNow,
+			Warnings:   []string{"warning_a", "warning_b"},
+			Journeys: []provider.JourneyObservation{{
+				Journey: provider.Journey{Key: "j1"},
+				Offerings: []provider.OfferingObservation{
+					{Offering: provider.Offering{Key: "o1"}, State: provider.StateReservable},
+					{Offering: provider.Offering{Key: "o2"}, State: provider.StateNotReservable},
+					{Offering: provider.Offering{Key: "o3"}, State: provider.StateUnknown},
+				},
+			}},
+		}, nil
+	}
+	harness := newOutcomeHarness(t, "outcome-counts", adapter, checkMonitorSpec{
+		providerID: "counts",
+	}, time.Second, nil)
+	result := runOutcome(t, harness)
+	if !result.Settled {
+		t.Fatal("counts outcome was not settled")
+	}
+	outcome, _, _, _, journeys, offerings, reservable, notReservable, unknown, warnings := checkRunSnapshot(t, harness.sqlDB)
+	if outcome != "success" || journeys != 1 || offerings != 3 || reservable != 1 ||
+		notReservable != 1 || unknown != 1 || warnings != 2 {
+		t.Fatalf("counts = %q/%d/%d/%d/%d/%d/%d", outcome, journeys, offerings, reservable, notReservable, unknown, warnings)
+	}
+}
+
+func TestOutcomeRunnerPreCanceledStageDoesNotStartCheck(t *testing.T) {
+	harness := newOutcomeHarness(t, "outcome-precancel", fake.NewWithClock(func() time.Time { return schedulerNow }), checkMonitorSpec{
+		providerID: "fake",
+		originID:   fake.OriginAvailable,
+	}, time.Second, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result, err := harness.runner.Run(ctx, harness.target)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Settled {
+		t.Fatal("pre-canceled stage was not settled")
+	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM check_runs`); count != 0 {
+		t.Fatalf("check runs = %d, want 0", count)
+	}
+}
+
+func TestOutcomeRunnerGateReadFailureIsUnsettled(t *testing.T) {
+	adapter := newRecordingProvider("gate-failure", nil)
+	adapter.metadata = provider.Metadata{ID: "gate-failure", DisplayName: "Gate failure", TestOnly: true}
+	harness := newOutcomeHarness(t, "outcome-gate-failure", adapter, checkMonitorSpec{
+		providerID: "gate-failure",
+	}, time.Second, nil)
+	adapter.checkFn = func(context.Context, provider.CheckRequest) (provider.Result, error) {
+		if err := harness.sqlDB.Close(); err != nil {
+			t.Fatalf("close database: %v", err)
+		}
+		return provider.Result{ObservedAt: schedulerNow}, nil
+	}
+	result, err := harness.runner.Run(context.Background(), harness.target)
+	if err == nil {
+		t.Fatal("Run succeeded despite gate read failure")
+	}
+	if result.Settled {
+		t.Fatal("gate read failure was settled")
+	}
+}
+
 func TestOutcomeRunnerValidEmpty(t *testing.T) {
 	harness := newOutcomeHarness(t, "outcome-empty", fake.NewWithClock(func() time.Time { return schedulerNow }), checkMonitorSpec{
 		providerID: "fake",
@@ -363,6 +434,35 @@ func TestOutcomeRunnerInfrastructureErrorAppliesBackoffAndHealth(t *testing.T) {
 	}
 }
 
+func TestOutcomeRunnerHTTP500RecordsStatusAndBackoff(t *testing.T) {
+	harness := newOutcomeHarness(t, "outcome-http-500", fake.NewWithClock(func() time.Time { return schedulerNow }), checkMonitorSpec{
+		providerID: "fake",
+		originID:   fake.OriginHTTP500,
+	}, time.Second, nil)
+	result := runOutcome(t, harness)
+	if !result.Settled {
+		t.Fatal("HTTP 500 outcome was not settled")
+	}
+	outcome, errorKind, _, _, _, _, _, _, _, _ := checkRunSnapshot(t, harness.sqlDB)
+	if outcome != "error" || !errorKind.Valid || errorKind.String != "http_status" {
+		t.Fatalf("check outcome = %q error_kind=%+v", outcome, errorKind)
+	}
+	var httpStatus sql.NullInt64
+	if err := harness.sqlDB.QueryRow(`SELECT http_status FROM check_runs ORDER BY id DESC LIMIT 1`).Scan(&httpStatus); err != nil {
+		t.Fatalf("query http status: %v", err)
+	}
+	if !httpStatus.Valid || httpStatus.Int64 != 500 {
+		t.Fatalf("http status = %+v, want 500", httpStatus)
+	}
+	var failures int
+	if err := harness.sqlDB.QueryRow(`SELECT consecutive_failures FROM provider_health WHERE provider_id = 'fake'`).Scan(&failures); err != nil {
+		t.Fatalf("provider health: %v", err)
+	}
+	if failures != 1 {
+		t.Fatalf("provider failures = %d, want 1", failures)
+	}
+}
+
 func TestOutcomeRunnerNonCountingErrorUpdatesDiagnosticsOnly(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -386,6 +486,17 @@ func TestOutcomeRunnerNonCountingErrorUpdatesDiagnosticsOnly(t *testing.T) {
 			outcome, errorKind, _, _, _, _, _, _, _, _ := checkRunSnapshot(t, harness.sqlDB)
 			if outcome != "error" || !errorKind.Valid || errorKind.String != test.errorKind {
 				t.Fatalf("check outcome = %q error_kind=%+v", outcome, errorKind)
+			}
+			var httpStatus sql.NullInt64
+			if err := harness.sqlDB.QueryRow(`SELECT http_status FROM check_runs ORDER BY id DESC LIMIT 1`).Scan(&httpStatus); err != nil {
+				t.Fatalf("query http status: %v", err)
+			}
+			if test.statusCode == 0 {
+				if httpStatus.Valid {
+					t.Fatalf("http status = %+v, want NULL", httpStatus)
+				}
+			} else if !httpStatus.Valid || int(httpStatus.Int64) != test.statusCode {
+				t.Fatalf("http status = %+v, want %d", httpStatus, test.statusCode)
 			}
 			var providerFailures int
 			var lastErrorKind sql.NullString
@@ -504,6 +615,30 @@ func TestOutcomeRunnerDeletedTargetLeavesNoDiagnosticRow(t *testing.T) {
 	}
 	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM events`); count != 0 {
 		t.Fatalf("events = %d, want 0", count)
+	}
+	if harness.wakes.Load() != 0 {
+		t.Fatalf("wake count = %d, want 0", harness.wakes.Load())
+	}
+}
+
+func TestOutcomeRunnerDeletedMonitorLeavesNoDiagnosticRow(t *testing.T) {
+	adapter := newRecordingProvider("deleted-monitor", nil)
+	adapter.metadata = provider.Metadata{ID: "deleted-monitor", DisplayName: "Deleted monitor", TestOnly: true}
+	harness := newOutcomeHarness(t, "outcome-deleted-monitor", adapter, checkMonitorSpec{
+		providerID: "deleted-monitor",
+	}, time.Second, nil)
+	adapter.checkFn = func(context.Context, provider.CheckRequest) (provider.Result, error) {
+		if _, err := harness.sqlDB.Exec(`DELETE FROM monitors WHERE id = ?`, harness.target.MonitorID); err != nil {
+			t.Fatalf("delete monitor: %v", err)
+		}
+		return provider.Result{ObservedAt: schedulerNow}, nil
+	}
+	result := runOutcome(t, harness)
+	if result.Settled {
+		t.Fatal("deleted monitor discard was settled")
+	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM check_runs`); count != 0 {
+		t.Fatalf("check runs = %d, want 0 after cascade", count)
 	}
 }
 
@@ -633,6 +768,13 @@ func TestOutcomeRunnerDiscardedMatrix(t *testing.T) {
 			if outcome != "discarded" || !errorKind.Valid || errorKind.String != test.reason {
 				t.Fatalf("check outcome = %q error_kind=%+v", outcome, errorKind)
 			}
+			var configVersion int64
+			if err := harness.sqlDB.QueryRow(`SELECT config_version FROM check_runs ORDER BY id DESC LIMIT 1`).Scan(&configVersion); err != nil {
+				t.Fatalf("query discarded config version: %v", err)
+			}
+			if configVersion != harness.target.ConfigVersion {
+				t.Fatalf("discarded config_version = %d, want request version %d", configVersion, harness.target.ConfigVersion)
+			}
 			if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM inventory_states`); count != 0 {
 				t.Fatalf("inventory states = %d, want 0", count)
 			}
@@ -712,6 +854,32 @@ func TestOutcomeRunnerAbandonedOnCallerCancellation(t *testing.T) {
 	}
 	if harness.wakes.Load() != 0 {
 		t.Fatalf("wake count = %d, want 0", harness.wakes.Load())
+	}
+}
+
+func TestOutcomeRunnerAbandonedLostRowSettlesCleanly(t *testing.T) {
+	adapter := newRecordingProvider("lost-row", nil)
+	adapter.metadata = provider.Metadata{ID: "lost-row", DisplayName: "Lost row", TestOnly: true}
+	harness := newOutcomeHarness(t, "outcome-lost-row", adapter, checkMonitorSpec{
+		providerID: "lost-row",
+	}, time.Second, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	adapter.checkFn = func(context.Context, provider.CheckRequest) (provider.Result, error) {
+		if _, err := harness.sqlDB.Exec(`DELETE FROM check_runs WHERE monitor_provider_id = ?`, harness.target.ID); err != nil {
+			t.Fatalf("delete running check: %v", err)
+		}
+		cancel()
+		return provider.Result{ObservedAt: schedulerNow}, nil
+	}
+	result, err := harness.runner.Run(ctx, harness.target)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Settled {
+		t.Fatal("lost-row abandonment was not settled")
+	}
+	if count := countRows(t, harness.sqlDB, `SELECT COUNT(*) FROM check_runs`); count != 0 {
+		t.Fatalf("check runs = %d, want 0", count)
 	}
 }
 
@@ -826,6 +994,9 @@ func TestOutcomeRunnerOutcomeTransactionFailureSettlesAndLeavesRunningRow(t *tes
 		t.Fatalf("events = %d, want 0", count)
 	}
 	assertNoTargetOutcomeWrites(t, harness.sqlDB, harness.target.ID)
+	if harness.wakes.Load() != 0 {
+		t.Fatalf("wake count = %d, want 0 after rollback", harness.wakes.Load())
+	}
 	recovered, err := harness.st.RecoverRunningChecks(context.Background(), schedulerNow.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("RecoverRunningChecks: %v", err)
@@ -875,6 +1046,9 @@ func TestOutcomeRunnerHealthFailureRollsBackAvailabilityAndOutbox(t *testing.T) 
 		}
 	}
 	assertNoTargetOutcomeWrites(t, harness.sqlDB, harness.target.ID)
+	if harness.wakes.Load() != 0 {
+		t.Fatalf("wake count = %d, want 0 after rollback", harness.wakes.Load())
+	}
 }
 
 func TestOutcomeRunnerMixedAvailabilityAndHealthRecoveryDeliveryIDs(t *testing.T) {
