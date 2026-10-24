@@ -223,6 +223,8 @@ func runServe(stdout, stderr io.Writer) int {
 		LoginGuard: loginGuard,
 		Monitors:   monitorService,
 		Settings:   settingsService,
+		Store:      appStore,
+		Providers:  providerRegistry,
 	}, logger, database, applied)
 
 	runCtx, cancel := context.WithCancel(ctx)

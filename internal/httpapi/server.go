@@ -18,7 +18,9 @@ import (
 	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/logging"
+	"github.com/am-fallah/neda/internal/provider"
 	appsettings "github.com/am-fallah/neda/internal/settings"
+	"github.com/am-fallah/neda/internal/store"
 )
 
 const (
@@ -54,6 +56,8 @@ type Config struct {
 	LoginGuard *auth.LoginGuard
 	Monitors   *domain.MonitorService
 	Settings   *appsettings.Service
+	Store      *store.Store
+	Providers  *provider.Registry
 	Now        func() time.Time
 }
 
@@ -73,6 +77,8 @@ type Server struct {
 	loginGuard         *auth.LoginGuard
 	monitors           *domain.MonitorService
 	settings           *appsettings.Service
+	store              *store.Store
+	providers          *provider.Registry
 	now                func() time.Time
 }
 
@@ -112,6 +118,8 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		loginGuard:         cfg.LoginGuard,
 		monitors:           cfg.Monitors,
 		settings:           cfg.Settings,
+		store:              cfg.Store,
+		providers:          cfg.Providers,
 		now:                cfg.Now,
 	}
 	s.handler = s.buildHandler()
@@ -186,6 +194,22 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/v1/settings" || strings.HasPrefix(r.URL.Path, "/api/v1/settings/") {
 		s.privateAuth(http.HandlerFunc(s.handleSettings)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/providers" {
+		s.privateAuth(http.HandlerFunc(s.handleProviders)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/events" || strings.HasPrefix(r.URL.Path, "/api/v1/events/") {
+		s.privateAuth(http.HandlerFunc(s.handleEvents)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/deliveries" {
+		s.privateAuth(http.HandlerFunc(s.handleDeliveries)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/overview" {
+		s.privateAuth(http.HandlerFunc(s.handleOverview)).ServeHTTP(w, r)
 		return
 	}
 	switch r.URL.Path {

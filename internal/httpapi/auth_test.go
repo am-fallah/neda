@@ -61,6 +61,8 @@ type authFixture struct {
 	manager        *auth.Manager
 	monitors       *domain.MonitorService
 	settings       *appsettings.Service
+	store          *store.Store
+	providers      *provider.Registry
 	telegramTester *fakeTelegramTester
 	db             *sql.DB
 	clock          *authClock
@@ -184,6 +186,8 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 		LoginGuard: guard,
 		Monitors:   monitors,
 		Settings:   settingsService,
+		Store:      st,
+		Providers:  registry,
 		Now:        clock.Now,
 	}, slog.New(slog.NewJSONHandler(logs, nil)), authReadiness{}, applied)
 	if withPassword {
@@ -193,7 +197,8 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 	}
 	return &authFixture{
 		server: server, manager: manager, monitors: monitors, settings: settingsService,
-		telegramTester: telegramTester, db: database.DB, clock: clock, logs: logs,
+		store: st, providers: registry, telegramTester: telegramTester,
+		db: database.DB, clock: clock, logs: logs,
 	}
 }
 
