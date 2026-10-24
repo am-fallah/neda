@@ -91,6 +91,7 @@ func runServe(stdout, stderr io.Writer) int {
 	logger.Info("scheduler configured",
 		"workers", cfg.Workers,
 		"poll_interval", pollInterval.String(),
+		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
 		"mode", "idle-until-check-runner",
 	)
 

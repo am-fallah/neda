@@ -259,6 +259,8 @@ func targetIDFor(t *testing.T, monitor domain.Monitor, providerID provider.ID) i
 
 func timePointer(value time.Time) *time.Time { return &value }
 
+func durationPointer(value time.Duration) *time.Duration { return &value }
+
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
@@ -279,21 +281,37 @@ func startScheduler(
 	wake *scheduler.Waker,
 	grace time.Duration,
 ) *runningScheduler {
+	return startSchedulerWithSpacing(t, st, registry, clock, runner, workers, random, wake, grace, 0)
+}
+
+func startSchedulerWithSpacing(
+	t *testing.T,
+	st *store.Store,
+	registry *provider.Registry,
+	clock *fakeClock,
+	runner scheduler.Runner,
+	workers int,
+	random scheduler.Random,
+	wake *scheduler.Waker,
+	grace time.Duration,
+	spacing time.Duration,
+) *runningScheduler {
 	t.Helper()
 	if random == nil {
 		random = zeroRandom()
 	}
 	sched, err := scheduler.New(scheduler.Config{
-		Repository:    st,
-		Providers:     registry,
-		Interval:      fixedInterval(300 * time.Second),
-		Runner:        runner,
-		Workers:       workers,
-		Wake:          wake.C(),
-		Clock:         clock,
-		Random:        random,
-		Logger:        discardLogger(),
-		ShutdownGrace: grace,
+		Repository:      st,
+		Providers:       registry,
+		Interval:        fixedInterval(300 * time.Second),
+		Runner:          runner,
+		Workers:         workers,
+		ProviderSpacing: durationPointer(spacing),
+		Wake:            wake.C(),
+		Clock:           clock,
+		Random:          random,
+		Logger:          discardLogger(),
+		ShutdownGrace:   grace,
 	})
 	if err != nil {
 		t.Fatalf("scheduler.New: %v", err)
@@ -474,9 +492,10 @@ func TestWorkerPoolIsBounded(t *testing.T) {
 	now := schedulerNow
 	past := now.Add(-time.Minute)
 	expires := now.Add(24 * time.Hour)
-	for _, id := range []string{"m1", "m2", "m3"} {
+	providers := []string{"alpha", "beta", "gamma"}
+	for index, id := range []string{"m1", "m2", "m3"} {
 		createSchedulerMonitor(t, st, id, true, expires,
-			targetSpec{providerID: "fake", active: true, due: &past})
+			targetSpec{providerID: provider.ID(providers[index]), active: true, due: &past})
 	}
 
 	release := make(chan struct{}, 3)
@@ -494,7 +513,7 @@ func TestWorkerPoolIsBounded(t *testing.T) {
 			return scheduler.Result{}, ctx.Err()
 		}
 	})
-	running := startScheduler(t, st, registryFor(t, "fake"), newFakeClock(now),
+	running := startScheduler(t, st, registryFor(t, "alpha", "beta", "gamma"), newFakeClock(now),
 		runner, 2, zeroRandom(), scheduler.NewWaker(), time.Second)
 
 	first := waitStart(t, starts)

@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001, and M3 SCH-002 are complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, and the due-time scheduler foundation. The scheduler runs idle in production until the SCH-004 check runner exists; provider-check execution, the MrBilit adapter, HTTP authentication endpoints, notifications, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001, SCH-002, and SCH-003 are complete.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, and provider spacing/target-backoff policy with a transaction-scoped persistence helper. The scheduler runs idle in production until the SCH-004 check runner exists; target-backoff persistence is applied by the future outcome transaction (SCH-010). Provider-check execution, the MrBilit adapter, HTTP authentication endpoints, notifications, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -47,9 +47,16 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `cmd/neda` starts and gracefully stops the scheduler. With no runner it performs recovery only and stays idle, so it cannot dispatch no-op jobs or busy-loop.
 - No provider-check execution, availability/health transitions, notifications, API endpoints, or frontend work is included.
 
+**M3 SCH-003 provider spacing and target backoff (approved slice complete)**
+
+- `internal/scheduler`: per-provider concurrency 1 and 5s start-to-start spacing (provisional), enforced alongside A-33 monitor-wide serialization. Spacing state is in-memory and resets on restart; startup staggering is unchanged.
+- `internal/scheduler/backoff.go`: pure target scheduling policy consuming `PRV-010` classifications. First infrastructure failure uses 2× interval; the delay is capped at `max(4×interval, 30m)`, gets ±10% post-cap jitter, and honors classified `RetryAfter` as a lower bound. Config/route/ordinary 4xx use the normal interval; success/valid empty reset the counter; abandoned outcomes do not update scheduling.
+- `internal/store`: transaction-scoped `ApplyTargetSchedule` updates only `consecutive_failures`, `next_due_at`, and `updated_at`. It never begins/commits a transaction. Production invocation belongs to SCH-010; no migration is required.
+- No provider HTTP retries, redirects, timeouts, availability/health transitions, notifications, API, or frontend work is included.
+
 ## Not implemented yet
 
-Provider-check execution, availability/health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. The scheduler is wired but idle until the SCH-004 check runner exists. Nothing in this repository authorizes live provider traffic or deployment.
+Provider-check execution, availability/health transitions, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, availability episodes/events processing, Telegram, Web Push, the dashboard, Docker packaging, and deployment. The scheduler is wired but idle until the SCH-004 check runner exists; target-backoff persistence is ready for the SCH-010 outcome transaction but is not invoked in production yet. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 

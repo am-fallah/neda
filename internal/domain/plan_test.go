@@ -220,6 +220,27 @@ func TestPlanUpdateMaterialBumpsAllActiveProviders(t *testing.T) {
 	}
 }
 
+func TestPlanUpdatePreservesConsecutiveFailures(t *testing.T) {
+	current := fixtureMonitor()
+	current.Providers[0].ConsecutiveFailures = 3
+	current.Providers[1].ConsecutiveFailures = 4
+	input := inputFor(current)
+	input.Adults = 2
+	plan, err := PlanUpdate(current, input, planNow, mustLocation())
+	if err != nil {
+		t.Fatalf("PlanUpdate: %v", err)
+	}
+	if !plan.Material {
+		t.Fatal("passenger edit was not material")
+	}
+	if plan.Monitor.Providers[0].ConsecutiveFailures != 3 ||
+		plan.Monitor.Providers[1].ConsecutiveFailures != 4 {
+		t.Fatalf("material edit reset failures: %d/%d",
+			plan.Monitor.Providers[0].ConsecutiveFailures,
+			plan.Monitor.Providers[1].ConsecutiveFailures)
+	}
+}
+
 func TestPlanUpdateDateChangeClearsExpiryAndKeepsPaused(t *testing.T) {
 	current := fixtureMonitor()
 	current.Enabled = false

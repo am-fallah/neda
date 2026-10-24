@@ -26,6 +26,9 @@ const (
 	MaxWorkers = 16
 	// DefaultShutdownGrace bounds how long Run waits for in-flight runners.
 	DefaultShutdownGrace = 5 * time.Second
+	// DefaultProviderSpacing is the provisional start-to-start spacing per
+	// provider. It is not a provider-published limit.
+	DefaultProviderSpacing = 5 * time.Second
 
 	// storeErrorRetry prevents a tight loop when due selection fails.
 	storeErrorRetry = time.Second
@@ -116,30 +119,35 @@ type Random interface {
 // Config controls the scheduler. Zero values receive safe defaults except for
 // the repository, provider lookup, and interval source, which are required.
 type Config struct {
-	Repository    Repository
-	Providers     ProviderLookup
-	Interval      IntervalSource
-	Runner        Runner // nil keeps the scheduler safely idle after recovery
-	Workers       int
-	Wake          <-chan struct{}
-	Clock         Clock
-	Random        Random
-	Logger        *slog.Logger
-	ShutdownGrace time.Duration
+	Repository Repository
+	Providers  ProviderLookup
+	Interval   IntervalSource
+	Runner     Runner // nil keeps the scheduler safely idle after recovery
+	Workers    int
+	// ProviderSpacing is the start-to-start minimum per provider. Nil uses
+	// DefaultProviderSpacing; a non-nil zero explicitly disables spacing for
+	// deterministic tests. Production uses the nil default.
+	ProviderSpacing *time.Duration
+	Wake            <-chan struct{}
+	Clock           Clock
+	Random          Random
+	Logger          *slog.Logger
+	ShutdownGrace   time.Duration
 }
 
 // Scheduler is a single-process due-time scheduler.
 type Scheduler struct {
-	repo          Repository
-	providers     ProviderLookup
-	interval      IntervalSource
-	runner        Runner
-	workers       int
-	wake          <-chan struct{}
-	clock         Clock
-	random        Random
-	logger        *slog.Logger
-	shutdownGrace time.Duration
+	repo            Repository
+	providers       ProviderLookup
+	interval        IntervalSource
+	runner          Runner
+	workers         int
+	providerSpacing time.Duration
+	wake            <-chan struct{}
+	clock           Clock
+	random          Random
+	logger          *slog.Logger
+	shutdownGrace   time.Duration
 }
 
 // New validates dependencies and applies defaults.
@@ -159,6 +167,13 @@ func New(cfg Config) (*Scheduler, error) {
 	if cfg.Workers < 1 || cfg.Workers > MaxWorkers {
 		return nil, fmt.Errorf("scheduler: workers must be between 1 and %d", MaxWorkers)
 	}
+	if cfg.ProviderSpacing == nil {
+		defaultSpacing := DefaultProviderSpacing
+		cfg.ProviderSpacing = &defaultSpacing
+	}
+	if *cfg.ProviderSpacing < 0 {
+		return nil, errors.New("scheduler: provider spacing must not be negative")
+	}
 	if cfg.Clock == nil {
 		cfg.Clock = realClock{}
 	}
@@ -175,16 +190,17 @@ func New(cfg Config) (*Scheduler, error) {
 		return nil, errors.New("scheduler: shutdown grace must not be negative")
 	}
 	return &Scheduler{
-		repo:          cfg.Repository,
-		providers:     cfg.Providers,
-		interval:      cfg.Interval,
-		runner:        cfg.Runner,
-		workers:       cfg.Workers,
-		wake:          cfg.Wake,
-		clock:         cfg.Clock,
-		random:        cfg.Random,
-		logger:        cfg.Logger,
-		shutdownGrace: cfg.ShutdownGrace,
+		repo:            cfg.Repository,
+		providers:       cfg.Providers,
+		interval:        cfg.Interval,
+		runner:          cfg.Runner,
+		workers:         cfg.Workers,
+		providerSpacing: *cfg.ProviderSpacing,
+		wake:            cfg.Wake,
+		clock:           cfg.Clock,
+		random:          cfg.Random,
+		logger:          cfg.Logger,
+		shutdownGrace:   cfg.ShutdownGrace,
 	}, nil
 }
 
@@ -314,6 +330,7 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 	inflight := make(map[string]bool)
 	settled := make(map[int64]generation)
 	hold := make(map[int64]time.Time)
+	providers := make(map[provider.ID]*providerRuntime)
 
 	for {
 		// Apply all completed checks before selecting new work.
@@ -321,7 +338,7 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 		for {
 			select {
 			case completed := <-done:
-				s.complete(completed, &running, inflight, settled, hold)
+				s.complete(completed, &running, inflight, settled, hold, providers)
 			default:
 				break drain
 			}
@@ -343,7 +360,7 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				return nil
 			}
 			if got {
-				s.complete(completed, &running, inflight, settled, hold)
+				s.complete(completed, &running, inflight, settled, hold, providers)
 			}
 			continue
 		}
@@ -399,6 +416,17 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				generation.due.Equal(due) {
 				continue
 			}
+			state := providerState(providers, candidate.ProviderID)
+			if state.inFlight {
+				continue
+			}
+			if slot, ok := state.nextSlot(s.providerSpacing); ok && slot.After(now) {
+				if !hasNext || slot.Before(next) {
+					next = slot
+					hasNext = true
+				}
+				continue
+			}
 			target := Target{
 				ID:            candidate.ID,
 				MonitorID:     candidate.MonitorID,
@@ -410,6 +438,7 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			case jobs <- target:
 				delete(settled, candidate.ID)
 				inflight[candidate.MonitorID] = true
+				state.dispatch(now)
 				running++
 				s.logger.Debug("scheduler dispatched check",
 					"monitor_id", target.MonitorID,
@@ -437,16 +466,17 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			return nil
 		}
 		if got {
-			s.complete(completed, &running, inflight, settled, hold)
+			s.complete(completed, &running, inflight, settled, hold, providers)
 		}
 	}
 }
 
-func (s *Scheduler) complete(completed completion, running *int, inflight map[string]bool, settled map[int64]generation, hold map[int64]time.Time) {
+func (s *Scheduler) complete(completed completion, running *int, inflight map[string]bool, settled map[int64]generation, hold map[int64]time.Time, providers map[provider.ID]*providerRuntime) {
 	if *running > 0 {
 		*running--
 	}
 	delete(inflight, completed.target.MonitorID)
+	providerState(providers, completed.target.ProviderID).complete()
 	if completed.result.Settled {
 		delete(hold, completed.target.ID)
 		settled[completed.target.ID] = generation{
