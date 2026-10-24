@@ -121,6 +121,57 @@ func TestWithTxRejectsNestedAndCanceledContext(t *testing.T) {
 	}
 }
 
+func TestWithSQLTxCommitRollbackAndNested(t *testing.T) {
+	st, _ := newTestStore(t)
+	ctx := context.Background()
+
+	direct := store.Setting{Key: "sql.direct", Value: "one", UpdatedAt: testNow}
+	throughStore := store.Setting{Key: "sql.store", Value: "two", UpdatedAt: testNow}
+	if err := st.WithSQLTx(ctx, func(tx *sql.Tx, txStore *store.Store) error {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO settings (key, value, is_secret, updated_at) VALUES (?, ?, 0, ?)`,
+			direct.Key, direct.Value, direct.UpdatedAt.Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+		return txStore.SetSetting(ctx, throughStore)
+	}); err != nil {
+		t.Fatalf("WithSQLTx commit: %v", err)
+	}
+	if _, err := st.GetSetting(ctx, direct.Key); err != nil {
+		t.Fatalf("direct setting after commit: %v", err)
+	}
+	if _, err := st.GetSetting(ctx, throughStore.Key); err != nil {
+		t.Fatalf("store setting after commit: %v", err)
+	}
+
+	rollback := store.Setting{Key: "sql.rollback", Value: "three", UpdatedAt: testNow}
+	boom := errors.New("boom")
+	err := st.WithSQLTx(ctx, func(_ *sql.Tx, txStore *store.Store) error {
+		if err := txStore.SetSetting(ctx, rollback); err != nil {
+			return err
+		}
+		return boom
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("WithSQLTx error = %v, want %v", err, boom)
+	}
+	if _, err := st.GetSetting(ctx, rollback.Key); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rollback setting error = %v, want ErrNotFound", err)
+	}
+
+	err = st.WithSQLTx(ctx, func(_ *sql.Tx, txStore *store.Store) error {
+		return txStore.WithSQLTx(ctx, func(*sql.Tx, *store.Store) error { return nil })
+	})
+	if !errors.Is(err, store.ErrNestedTx) {
+		t.Fatalf("nested WithSQLTx error = %v, want ErrNestedTx", err)
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := st.WithSQLTx(canceled, func(*sql.Tx, *store.Store) error { return nil }); err == nil {
+		t.Fatal("WithSQLTx with canceled context succeeded")
+	}
+}
+
 func TestSettingsCRUD(t *testing.T) {
 	st, _ := newTestStore(t)
 	ctx := context.Background()
