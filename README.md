@@ -1,6 +1,6 @@
 # Neda
 
-**Status: M1–M4 backend foundations and the M5 private API + dashboard are implemented and tested. Web Push delivery, production provider registration/live validation, retention cleanup, Docker packaging, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox and Telegram delivery worker, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes live provider traffic, real Telegram credentials, or deployment.
+**Status: M1–M5 foundations, the private JSON API, the dashboard, and Web Push are implemented and locally tested. Production provider registration/live validation, retention cleanup, Docker/Compose, backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 
 Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
@@ -67,7 +67,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - `internal/migrations/0004_notifications.sql`: provider-health tables, notification deliveries/attempts, and Push-subscription storage with enum, counter, foreign-key, and unique constraints plus outbox claim/lookup indexes.
 - `internal/notify/outbox.go`: `Enqueue` inserts an event and its initial `pending` deliveries inside the caller's `*sql.Tx`. A duplicate `dedupe_key` returns the existing event ID with `Created=false` and inserts nothing; duplicate delivery targets are no-ops. Delivery IDs are outbox-owned deterministic UUIDs derived from the event ID and destination identity, so multiple events in one transaction cannot collide on the global primary key. `FindEventIDByDedupeKey` provides only the minimal dedupe read-back.
 - Initial deliveries use `next_attempt_at = event.created_at`. The helper never begins, commits, or rolls back the caller's transaction.
-- No delivery worker/retry processing, Telegram or Web Push sender, Push subscription API/encryption, provider-health evaluation, or API read model is included.
+- Database rows are consumed by the P3 delivery worker (Telegram) and the Web Push sender/worker integration; event creation and enqueue remain owned by the transactional producers.
 
 **M3 SCH-005 availability state machine (approved slice complete, applier only)**
 
@@ -174,6 +174,15 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Tests cover normal, empty, missing, unauthenticated, paused, expired, stale-timestamp, unknown/missing, empty-success-vs-provider-error, provider-error, config-version isolation, and unchanged list responses.
 - PR: [#25](https://github.com/am-fallah/neda/pull/25); CI run [40122307378](https://github.com/am-fallah/neda/actions/runs/40122307378).
 
+**Web Push (PSH-001–PSH-006 implementation)**
+
+- `internal/push` stores one VAPID keypair: the public key in plaintext settings and the private key as versioned AES-256-GCM ciphertext. The pair is generated once, validated, and reused across restarts; wrong-key/tamper cases fail closed.
+- Subscription endpoints, `p256dh`, and `auth` values are validated at subscription time (HTTPS-only allowlisted Push-service hosts, no userinfo/fragment, default port, bounded length, P-256 point, 16-byte auth) and encrypted at rest with per-row AAD. Dedupe uses the SHA-256 endpoint hash; re-registration preserves the row ID.
+- The sender resolves DNS once, rejects private/loopback/link-local/multicast/metadata/documentation addresses, dials the validated IP directly, rechecks the connected IP, disables proxies/redirects, and bounds time/body. 404/410 disables a subscription; 429/5xx retries with capped `Retry-After`; 400/401/403/413 is permanent.
+- Private API: `GET /api/v1/push/config`, `POST /api/v1/push/subscriptions`, `DELETE /api/v1/push/subscriptions/{id}`, and `POST /api/v1/push/test`. They never return endpoint/key/private-key material.
+- Dashboard: explicit permission request, enable/pause, device list, per-device/all-device test, remove device, and forget-this-browser. The service worker displays bounded payloads, opens only same-origin or validated `mrbilit.com` links, and asks an open dashboard to refresh a rotated subscription.
+- Automated tests cover validation, encryption, dedupe, disable/410, retry classification, SSRF/DNS rebinding, redirect rejection, API auth/CSRF, secret scans, and UI states. Real Push delivery and closed-browser acceptance remain manual and were not run.
+
 **API-004 settings and Telegram configuration**
 
 - `GET /api/v1/settings` returns non-secret settings: `pollIntervalSeconds`, `pushEnabled`, and nested Telegram `available`/`configured`/`readable`, masked `chatLabel`, settings error category, and last-test metadata.
@@ -214,14 +223,14 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - The dashboard shows monitor counts, provider health (degraded/stale), recent events, and per-channel delivery status. The UI never treats a provider error, timeout, malformed response, missing offering, or stale observation as confirmed unavailability. "Not reservable" is never labeled "sold out"; `Unknown` and missing observations are shown as unknown with a reason category. Historical events and observations are explicitly labeled as historical, not current availability.
 - Monitor create/edit uses a Jalali date picker backed by the maintained `jalaali-js` library and stores/sends Gregorian `YYYY-MM-DD`. Validation is mirrored on the client for usability; the server remains authoritative. Create/edit supports per-provider route IDs, optional booking slugs/gender codes only when the provider advertises support, and the test-only provider is clearly labeled and never presented as a real ticket source.
 - Detail pages show last observed inventory, recent checks, per-provider diagnostics, pause/resume, edit, and confirmed delete. Observation rows expose validated booking links only; missing/unknown offerings never imply "sold out". History supports event/delivery filters and cursor pagination.
-- Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, and change the password. Telegram status exposes only a masked chat label and sanitized test result. Browser Push setup is intentionally not exposed because the server-side Push implementation (`PSH-*`) is still pending.
+- Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, enable/pause/test/remove browser Push devices, and change the password. Telegram status exposes only a masked chat label and sanitized test result; Push status exposes only the public VAPID key and device metadata. No secret or subscription endpoint is rendered.
 - The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
 - `web/dist/.gitkeep` keeps `go build ./...` valid before a frontend build. The checked-in `.gitkeep` is restored after builds; generated assets are ignored.
-- `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, and delivery labels. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
+- `npm run lint`, `npm run typecheck`, `npm test` (84 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
 
 ## Not implemented yet
 
-Web Push (VAPID keys, subscription API/encryption, service worker, sender), NTF-002 full notification presentation (including Jalali display), provider-health notification channel resolution, production MrBilit registration and live validation, retention cleanup, Docker packaging, and deployment. The MrBilit adapter foundation remains unregistered; the P2/P3 Telegram delivery foundation is wired but has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram credentials, or deployment.
+Retention/cleanup (`NTF-005`), backup/restore (`SEC-003`/`OPS-009`), Docker/Compose and operational documentation (`OPS-*`), production MrBilit registration and live validation (`PRV-006`/`PRV-007`/`PRV-009`), and deployment. Real browser/Telegram delivery acceptance and manual browser Push validation remain unrun. The MrBilit adapter foundation remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 ## Local development
 
@@ -301,7 +310,8 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_HTTP_ADDR` | `:8080` | HTTP listen address. |
 | `NEDA_DB_PATH` | `/data/neda.db` | SQLite database path. |
 | `NEDA_ENCRYPTION_KEY_FILE` | — | Required in production. Owner-only (`0400`/`0600`) base64 file containing exactly 32 bytes. |
-| `NEDA_PUBLIC_URL` | — | Required in production. HTTPS origin used for Host-header and origin validation. |
+| `NEDA_PUBLIC_URL` | — | Required in production. HTTPS origin used for Host-header/origin validation and event/notification links. |
+| `NEDA_VAPID_SUBJECT` | — | `mailto:` address or HTTPS contact required for Web Push. VAPID keys are generated once when an encryption key is configured; the public key is available only through the authenticated Push config endpoint. |
 | `NEDA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
@@ -309,7 +319,7 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source. |
 
-The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader but reserved for later milestones. Private auth, monitor, provider/health, event/delivery, overview, and settings/Telegram routes are implemented. Browser Push endpoints are not implemented. Do not commit real secrets.
+The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader. Private auth, monitor, provider/health, event/delivery, overview, settings/Telegram, and Push routes are implemented. Web Push requires HTTPS in production (localhost is allowed for development) and an external browser Push service. Do not commit real secrets.
 
 ## Repository layout
 
@@ -325,6 +335,8 @@ internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, expir
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider
+internal/push/        VAPID, subscription validation/storage, guarded transport, sender
+internal/jalali/      maintained Persian-calendar conversion wrapper
 internal/httpapi/     HTTP server, middleware, health/readiness, private API
 internal/webui/       embedded SPA handler, SPA fallback, static caching
 web/                  React/TypeScript dashboard and `go:embed` assets
@@ -341,12 +353,15 @@ docs/                 approved planning documents and frontend acceptance checkl
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture, schema, scheduler/state design, security, testing, and deployment design.
 - [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — single source of truth for tasks, gates, dependencies, and verification evidence.
 - [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and unresolved security risks.
+- [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability-scan evidence.
+- [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) — encryption-key lifecycle and recovery constraints.
 - [`docs/CODEGRAPH_WORKFLOW.md`](docs/CODEGRAPH_WORKFLOW.md) — CodeGraph usage policy.
 - [`AGENTS.md`](AGENTS.md) — operating rules for agents working in this repository.
 
 ## Safety and security
 
-- No live MrBilit, Telegram, or Web Push calls are made by ordinary tests or CI.
+- No live MrBilit, Telegram, or Web Push calls are made by ordinary tests or CI. Push sender tests use TLS loopback fixtures and injected resolvers; Telegram tests use fake servers.
 - No production server access or deployment is authorized by this repository state.
 - Runtime secrets must be supplied outside the repository.
 - The auth layer stores only session/CSRF hashes; raw tokens live in HttpOnly cookies. The dashboard keeps its CSRF token in memory only and does not store credentials, tokens, or Telegram secrets in browser storage.

@@ -196,6 +196,16 @@ Common requirements:
 - Monitoring continues with the browser closed.
 - Subscription endpoints are treated as sensitive; validation prevents SSRF and arbitrary endpoint abuse.
 
+**Implementation status (2026-10-25).** The VAPID keypair (public plaintext,
+private encrypted), encrypted subscription storage, subscription-time and
+send-time SSRF validation, service worker, authenticated config/subscription/
+test routes, dashboard enable/pause/device/test/remove flows, and independent
+Push delivery are implemented. Automated tests cover the validation, encryption,
+dedupe, 410 disable, retry, DNS/IP, redirect, API, and UI paths. Real
+browser-to-Push-service delivery, closed-browser acceptance, and iOS/PWA
+behavior remain manual items and were not run; a live deployment also needs the
+owner's HTTPS origin and `NEDA_VAPID_SUBJECT`.
+
 ### 3.7 Dashboard and API
 
 Dashboard requirements:
@@ -426,7 +436,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-23 | Retention defaults (14/30/180 days) are appropriate. | PROVISIONAL | Measure and adjust; bounded by approval. |
 | A-24 | Proposed stack/dependencies (modernc SQLite, webpush library, Jalali library, RHF/Zod) are compatible and maintained. | PROVISIONAL | Evaluate at implementation; document deviations. |
 | A-25 | Production server OS/CPU/RAM/disk/proxy/domain/ports are known. | REQUIRES OWNER INPUT | No server access in planning; provide minimum facts later. |
-| A-26 | VAPID subject, public domain, and HTTPS setup are available. | REQUIRES OWNER INPUT | Push cannot be production-tested without them. |
+| A-26 | VAPID subject, public domain, and HTTPS setup are available. | REQUIRES OWNER INPUT | Push cannot be production-tested without them. The implementation is complete and locally tested; no real Push send was authorized. |
 | A-27 | Telegram bot token/chat ID will be supplied later via the dashboard, not chat. | REQUIRES OWNER INPUT | Never ask for the token in chat or commit it. |
 | A-28 | Live MrBilit validation target route/date and permission will be supplied. | REQUIRES OWNER INPUT | Bounded read-only validation only. |
 | A-29 | V1 has no custom train/time/class/price filters. | VERIFIED (brief) | Do not add filter UI/API. |

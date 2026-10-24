@@ -51,8 +51,28 @@ tampered value, or a wrong key fails closed and returns no plaintext.
 
 `Status` returns only `configured`, `readable`, a masked chat label, and test
 metadata. There is no API or helper that returns the stored token. The bounded
-Telegram client lives in `internal/notify/telegram.go` and does not implement
-delivery retries or orchestration; those remain P3/`NTF-001`.
+Telegram client lives in `internal/notify/telegram.go`; the delivery worker owns
+retry orchestration (`internal/notify/delivery`).
+
+## VAPID and Push subscriptions
+
+`internal/push` stores:
+
+- `push.vapid_public_key` (plaintext; intentionally returned to the
+  authenticated dashboard);
+- `push.vapid_private_key` (encrypted with AAD `push.vapid_private_key`);
+- each subscription endpoint, p256dh, and auth value (encrypted with AAD
+  `push.subscription.<id>.endpoint`, `.p256dh`, or `.auth`).
+
+The VAPID pair is generated once at startup when the encryption key is present,
+validated to ensure the public key matches the private key, and persisted in one
+transaction. A missing public/private counterpart, tampered ciphertext, wrong
+master key, or mismatched pair fails closed. The private key is decrypted only
+inside the sender for a VAPID header and is never returned by an API or written
+to a log. Subscription rows are deduplicated by SHA-256 endpoint hash; the
+endpoint and key material are never logged or returned. A lost master key makes
+VAPID keys and subscriptions unrecoverable: reset Push, generate a new VAPID
+pair, and re-register every browser.
 
 ## Backup and restore
 
@@ -65,9 +85,10 @@ A usable backup requires both the SQLite database and the key file:
 5. Restore both components together; verify `PRAGMA integrity_check` and that a
    known secret setting can be decrypted.
 
-A database restored without the matching key cannot decrypt Telegram settings
-or future Push key material. In that case, remove and re-enter the Telegram
-configuration; do not attempt to recover by weakening authentication.
+A database restored without the matching key cannot decrypt Telegram settings,
+the VAPID private key, or Push subscription material. In that case, remove and
+re-enter the Telegram configuration, reset the Push key material, and re-register
+each browser; do not attempt to recover by weakening authentication.
 
 ## Rotation and key loss
 
@@ -86,11 +107,14 @@ database, but it makes encrypted values unusable by design.
 go test ./internal/crypto/...
 go test ./internal/notify/...
 go test ./internal/notify/telegramsettings/...
+go test ./internal/push/...
 go test ./internal/config/...
 ```
 
 The tests cover key-file permissions/ownership/symlink rejection, AES-GCM round
 trips, nonce freshness, tampering, wrong-key and wrong-setting AAD failures,
 redacted formatting/JSON, encrypted Telegram persistence, status/test metadata,
-and fake Telegram API success/error classification. No real Telegram credentials
-or network calls are used.
+fake Telegram API success/error classification, VAPID pair validation/restart
+stability/tamper failure, subscription AAD isolation, encrypted-at-rest storage,
+and wrong-key failure. No real Telegram/Push credentials or network calls are
+used.

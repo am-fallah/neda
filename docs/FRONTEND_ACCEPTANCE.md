@@ -102,7 +102,24 @@ Environment: production-style embedded frontend served by the Go binary on `127.
 | Clear credentials | Confirmation required; stored config removed | `SettingsPage.test.tsx`; Go tests | NOT RUN — manual |
 | Telegram test | Explicit button only; successful/failed result is sanitized | `SettingsPage.test.tsx`; fake-server Go tests | NOT RUN — manual |
 | Real Telegram send | Requires owner credentials and sends a real message; **not authorized in this session** | Not applicable | NOT RUN — requires authorization |
-| Browser Push | Clearly marked unavailable; no control implying working Push | Settings page copy | NOT RUN — manual |
+
+## Browser Web Push
+
+| Check | Expected | Automated coverage | Manual result |
+|---|---|---|---|
+| Server availability | If VAPID subject/key is missing, show operator guidance and disable controls; no fake success | `PushSettings.test.tsx`; Go push tests | NOT RUN — manual |
+| Unsupported browser/HTTPS | Explain service-worker/Push/HTTPS requirements; no control implying success | `push.test.ts`; `PushSettings.test.tsx` | NOT RUN — manual |
+| Permission flow | Permission requested only after explicit "Enable this browser"; denial shows actionable guidance and saves nothing | `PushSettings.test.tsx`; browser code review | NOT RUN — manual |
+| Register device | Valid subscription is stored; device label/list refreshes; no endpoint/key material is rendered | `PushSettings.test.tsx`; Go API tests | NOT RUN — manual |
+| Pause/resume | Global delivery switch persists; pause stops delivery without deleting devices | `PushSettings.test.tsx`; Go delivery-destination tests | NOT RUN — manual |
+| Device test | Per-device and all-device tests show sent/partial/failed feedback with sanitized categories | `PushSettings.test.tsx`; Go sender tests | NOT RUN — manual |
+| Remove device | Confirmation is not required for a single device, but removal is explicit; server row disables and disappears | `PushSettings.test.tsx`; Go API tests | NOT RUN — manual |
+| Forget this browser | Browser unsubscribes locally and UI explains that the server record is cleaned up on 404/410 | Component code review; no browser test | NOT RUN — manual |
+| Service worker display | Payload is bounded; title/body/tag display correctly; no secret in payload | `sw.js` review; Go payload tests | NOT RUN — manual |
+| Click handling | Same-origin event detail or validated `https://mrbilit.com` booking URL opens; unsafe targets fall back | `sw.js` review | NOT RUN — manual |
+| Subscription change | Open dashboard refreshes the server registration; closed browser relies on later 404/410 cleanup | `sw.js` review; component code | NOT RUN — manual |
+| Closed browser delivery | Browser fully closed still receives a Push and click opens the correct page | Not automatable here | NOT RUN — requires HTTPS + live Push service |
+| iOS/PWA constraints | Document HTTPS/install/platform limitations before claiming support | README/architecture | NOT RUN — manual |
 
 ## Responsive, theme, and accessibility
 
