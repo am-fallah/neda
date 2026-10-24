@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -58,6 +59,8 @@ type Config struct {
 	Settings   *appsettings.Service
 	Store      *store.Store
 	Providers  *provider.Registry
+	Push       PushService
+	PushTester PushTester
 	// WebUI serves the embedded SPA for non-API routes. It is optional so
 	// health-only tests and API-only deployments remain valid.
 	WebUI http.Handler
@@ -70,6 +73,33 @@ type ReadinessChecker interface {
 }
 
 // Server owns the HTTP handler and lifecycle.
+func nonNilPushService(value PushService) PushService {
+	if isNilInterface(value) {
+		return nil
+	}
+	return value
+}
+
+func nonNilPushTester(value PushTester) PushTester {
+	if isNilInterface(value) {
+		return nil
+	}
+	return value
+}
+
+func isNilInterface(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
 type Server struct {
 	cfg                Config
 	logger             *slog.Logger
@@ -82,6 +112,8 @@ type Server struct {
 	settings           *appsettings.Service
 	store              *store.Store
 	providers          *provider.Registry
+	push               PushService
+	pushTester         PushTester
 	webUI              http.Handler
 	now                func() time.Time
 }
@@ -124,6 +156,8 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		settings:           cfg.Settings,
 		store:              cfg.Store,
 		providers:          cfg.Providers,
+		push:               nonNilPushService(cfg.Push),
+		pushTester:         nonNilPushTester(cfg.PushTester),
 		webUI:              cfg.WebUI,
 		now:                cfg.Now,
 	}
@@ -215,6 +249,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/v1/overview" {
 		s.privateAuth(http.HandlerFunc(s.handleOverview)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/push" || strings.HasPrefix(r.URL.Path, "/api/v1/push/") {
+		s.privateAuth(http.HandlerFunc(s.handlePush)).ServeHTTP(w, r)
 		return
 	}
 	switch r.URL.Path {

@@ -25,6 +25,7 @@ import (
 	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
+	"github.com/am-fallah/neda/internal/push"
 	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
 )
@@ -64,9 +65,24 @@ type authFixture struct {
 	store          *store.Store
 	providers      *provider.Registry
 	telegramTester *fakeTelegramTester
+	push           *push.Service
+	pushTester     *fakePushTester
 	db             *sql.DB
 	clock          *authClock
 	logs           *bytes.Buffer
+}
+
+type fakePushTester struct {
+	outcome push.TestOutcome
+	err     error
+	calls   int
+	id      string
+}
+
+func (f *fakePushTester) Test(_ context.Context, id string) (push.TestOutcome, error) {
+	f.calls++
+	f.id = id
+	return f.outcome, f.err
 }
 
 type fakeTelegramTester struct {
@@ -159,6 +175,8 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 	}
 	var telegramSettings *telegramsettings.Settings
 	var telegramTester *fakeTelegramTester
+	var pushService *push.Service
+	var pushTester *fakePushTester
 	if withTelegram {
 		material := make([]byte, crypto.KeySize)
 		for index := range material {
@@ -173,6 +191,14 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 			t.Fatalf("telegramsettings.New: %v", err)
 		}
 		telegramTester = &fakeTelegramTester{}
+		pushService, err = push.New(st, database.DB, key, "mailto:owner@example.com", clock.Now)
+		if err != nil {
+			t.Fatalf("push.New: %v", err)
+		}
+		if err := pushService.Ensure(ctx); err != nil {
+			t.Fatalf("push.Ensure: %v", err)
+		}
+		pushTester = &fakePushTester{}
 	}
 	settingsService, err := appsettings.New(st, telegramSettings, telegramTester, clock.Now)
 	if err != nil {
@@ -188,6 +214,8 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 		Settings:   settingsService,
 		Store:      st,
 		Providers:  registry,
+		Push:       pushService,
+		PushTester: pushTester,
 		Now:        clock.Now,
 	}, slog.New(slog.NewJSONHandler(logs, nil)), authReadiness{}, applied)
 	if withPassword {
@@ -198,6 +226,7 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 	return &authFixture{
 		server: server, manager: manager, monitors: monitors, settings: settingsService,
 		store: st, providers: registry, telegramTester: telegramTester,
+		push: pushService, pushTester: pushTester,
 		db: database.DB, clock: clock, logs: logs,
 	}
 }

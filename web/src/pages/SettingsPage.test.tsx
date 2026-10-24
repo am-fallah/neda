@@ -1,7 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { authApi, settingsApi } from "@/api/endpoints";
+import { authApi, pushApi, settingsApi } from "@/api/endpoints";
 import { ThemeProvider } from "@/lib/theme";
 import { makeSettings } from "@/test/fixtures";
 import { SettingsPage } from "./SettingsPage";
@@ -14,7 +14,15 @@ vi.mock("@/api/endpoints", () => ({
     testTelegram: vi.fn(),
   },
   authApi: { changePassword: vi.fn() },
+  pushApi: {
+    config: vi.fn(),
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+    test: vi.fn(),
+  },
 }));
+
+const pushConfigMock = vi.mocked(pushApi.config);
 
 const getMock = vi.mocked(settingsApi.get);
 const updateMock = vi.mocked(settingsApi.update);
@@ -37,6 +45,14 @@ describe("SettingsPage", () => {
     updateTelegramMock.mockReset();
     testTelegramMock.mockReset();
     changePasswordMock.mockReset();
+    pushConfigMock.mockReset();
+    pushConfigMock.mockResolvedValue({
+      enabled: false,
+      available: true,
+      subjectConfigured: true,
+      publicKey: "test-public-key",
+      subscriptions: [],
+    });
     getMock.mockResolvedValue(makeSettings());
   });
 

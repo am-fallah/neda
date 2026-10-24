@@ -1266,6 +1266,37 @@ Formatting:
 - UI: enable/disable, permission state, device list, test button, unsubscribe. HTTPS required except localhost; document iOS/PWA constraints.
 - No endpoint/key logging; no secrets in Push payload.
 
+**Web Push implementation (2026-10-25).** `internal/push` owns the VAPID
+keypair, subscription lifecycle, validation, and sender. The public key is
+stored plaintext in settings; the private key is AES-256-GCM ciphertext bound to
+`push.vapid_private_key`, generated once at startup and never returned. Each
+subscription's endpoint, p256dh, and auth values are encrypted with AAD binding
+them to the row ID; dedupe uses SHA-256(endpoint) and re-registration preserves
+the row. `internal/push/validate.go` enforces the HTTPS host allowlist
+(`fcm.googleapis.com`, `android.googleapis.com`, Mozilla's `push.services.mozilla.com`
+and `updates.push.services.mozilla.com`, `push.apple.com` suffixes, and
+`notify.windows.com` suffixes), default port, no userinfo/fragment, a 2048-byte
+cap, an uncompressed P-256 p256dh, a 16-byte auth secret, and bounded labels.
+
+`internal/push/transport.go` resolves all A/AAAA answers once, rejects any
+private/loopback/link-local/multicast/unspecified/metadata/documentation
+address, dials the validated IP literal, rechecks the connected remote address,
+disables proxies and redirects, and bounds the response. `sender.go` uses
+webpush-go for RFC 8291 encryption and VAPID headers, TTL 3600, urgency `high`,
+maps 404/410 to subscription disable, 429/5xx to bounded retry, and
+400/401/403/413 to permanent failure. Push deliveries are composed with Telegram
+inside the SCH-010 outcome transaction and use the existing worker/outbox.
+
+`GET /api/v1/push/config` returns only enable/availability/subject state, the
+public VAPID key, and device metadata; `POST /api/v1/push/subscriptions`,
+`DELETE /api/v1/push/subscriptions/{id}`, and `POST /api/v1/push/test` are
+session+CSRF protected. The service worker at `web/public/sw.js` displays
+bounded payloads, accepts click targets only from the same origin or
+`https://mrbilit.com`, and asks an open dashboard to refresh a rotated
+subscription because the CSRF token is memory-only. Real browser-to-Push-service
+delivery remains a manual acceptance item (PSH-003/PSH-004/PSH-005), pending an
+authorized HTTPS/live-service test.
+
 ### 13.5 Retention
 
 Proposal:
@@ -1426,6 +1457,17 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 **API-002/API-008 implementation (2026-10-24).** Private monitor routes provide list/create/detail/partial-edit/delete and idempotent pause/resume with camelCase DTOs, field-keyed validation errors, and an expired-resume 409. `GET /api/v1/monitors/{id}` is the API-008 detail view: it keeps the monitor/provider fields and adds per-active-provider `observations` and `recentChecks`. Observations are restricted to the target's current `config_version`, ordered deterministically by state (`reservable`, `not_reservable`, `unknown`) and stable journey/offering keys, capped at 100, and accompanied by `observationsTruncated`. Recent checks are ordered newest-first by start time/id, capped at 10, and accompanied by `recentChecksTruncated`. Only sanitized check diagnostics are exposed: outcome, error category, HTTP status, duration, and counts. List/create/update/pause/resume responses do not include diagnostics. Inactive historical targets remain in the provider list but expose no stale observations/checks. `state` is the last persisted confirmed state; `missing=true` means the latest successful check did not return that offering, so current availability must be presented as unknown. Provider errors, timeouts, malformed responses, and discarded/abandoned checks never overwrite the persisted availability state. Delivery target keys, leases, tokens, subscription endpoints, and raw provider bodies are never returned.
 
 **API-004 settings/Telegram implementation (2026-10-24).** Private `GET /api/v1/settings` returns `pollIntervalSeconds`, `pushEnabled`, and a nested non-secret `telegram` status (`available`, `configured`, `readable`, masked `chatLabel`, `settingsErrorKind`, `lastTestAt`, `lastTestOk`, `lastErrorKind`). `PUT /api/v1/settings` atomically updates either or both of the poll interval (60–3600 seconds) and Push-enabled flag; the new interval applies to subsequent scheduling. `PUT /api/v1/settings/telegram` accepts `token`+`chatId` to save encrypted credentials or `clear:true` to remove them, rejecting a mixed clear/secret request. `POST /api/v1/settings/telegram/test` calls `getMe`, sends one static test message, records only a sanitized result category/timestamp, and returns the updated non-secret status. Telegram test failures are reported in `lastTestOk`/`lastErrorKind` with HTTP 200; missing encryption settings return 503 and missing/unreadable stored credentials return 409. The settings service and store never return, log, or serialize the token, raw chat ID, ciphertext, session material, or Telegram response body. Push config/public-key/subscription/test routes remain owned by PSH-006.
+
+**Web Push API (2026-10-25).** `GET /api/v1/push/config` is the sole owner of
+the authenticated public VAPID key and device list; `POST
+/api/v1/push/subscriptions` and `DELETE /api/v1/push/subscriptions/{id}` manage
+the lifecycle; `POST /api/v1/push/test` sends a real test through the configured
+sender to one device or, when `subscriptionId` is omitted, all active devices
+(bounded). All routes pass through session+CSRF. Responses contain no endpoint,
+p256dh/auth value, private key, ciphertext, or raw Push-service response; test
+outcomes expose only counts and sanitized error categories. An unconfigured
+encryption key yields `available:false` on GET and 503 on writes, never a
+non-functional success. `docs/openapi.yaml` documents the routes.
 
 **API-003 read endpoints (2026-10-24).** Private `GET /api/v1/providers` returns registered provider metadata/capabilities, the test-only flag, and global per-provider health with optional open degraded episode and derived stale state. A provider with no completed applicable outcome has `health: null` (unknown), never a fabricated healthy state. `GET /api/v1/events` and `/events/{id}` expose durable events with nested per-channel delivery state/summary; filters are `kind`, `monitorId`, `providerId`, `limit`, and opaque `cursor`. Availability events expose `state: "reservable"`; provider-health events expose only their sanitized `errorKind`/`failureCount` and no monitor identity. `GET /api/v1/deliveries` exposes delivery history filtered by `channel`, `status`, `eventId`, `kind`, `limit`, and opaque `cursor`. `GET /api/v1/overview` returns bounded aggregates: derived monitor counts, registered-provider degraded/stale counts, delivery status counts, five recent availability events, five recent deliveries, and `generatedAt`. Event/delivery reads reuse NTF-006; provider health uses a global provider-level read model. Target keys, leases, dedupe keys, credentials, and raw provider errors are excluded. Invalid filters/cursors return sanitized 400s, missing events 404, and database failures sanitized 500s. No write, retry, or send endpoint is added; API-003 does not duplicate notification-delivery ownership.
 

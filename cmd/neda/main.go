@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	_ "time/tzdata" // Embed IANA zones so Asia/Tehran works in minimal images.
 )
 
 // These values are overridden at build time with -ldflags.

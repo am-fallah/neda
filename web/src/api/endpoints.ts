@@ -13,6 +13,10 @@ import type {
   MonitorPatchRequest,
   Overview,
   ProviderListResponse,
+  PushConfig,
+  PushRegistrationRequest,
+  PushSubscriptionRecord,
+  PushTestResult,
   SessionResponse,
   Settings,
   SettingsUpdateRequest,
@@ -122,6 +126,30 @@ export const deliveriesApi = {
 export const overviewApi = {
   get(signal?: AbortSignal) {
     return apiRequest<Overview>("/overview", { signal });
+  },
+};
+
+export const pushApi = {
+  config(signal?: AbortSignal) {
+    return apiRequest<PushConfig>("/push/config", { signal });
+  },
+  subscribe(body: PushRegistrationRequest) {
+    return apiRequest<PushSubscriptionRecord>("/push/subscriptions", {
+      method: "POST",
+      body,
+    });
+  },
+  unsubscribe(id: string) {
+    return apiRequest<void>(
+      `/push/subscriptions/${encodeURIComponent(id)}`,
+      { method: "DELETE" },
+    );
+  },
+  test(subscriptionId?: string) {
+    return apiRequest<PushTestResult>("/push/test", {
+      method: "POST",
+      body: subscriptionId ? { subscriptionId } : {},
+    });
   },
 };
 
