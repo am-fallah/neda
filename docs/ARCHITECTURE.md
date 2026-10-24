@@ -1119,6 +1119,8 @@ If any step fails, roll back; no event without its outbox rows, no episode witho
 
 **Ownership boundary:** `SCH-004` owns the attempt-start transaction that inserts the running `check_runs` row and writes only that table; it performs provider I/O outside any transaction. `NTF-000` owns the outbox schema, atomic enqueue helper, and only the minimal dedupe read-back. `SCH-010` owns the outcome transaction and calls the availability (`SCH-005`) and provider-health (`SCH-006`) appliers with that same transaction. `NTF-001` is the delivery worker (claim/lease/retry) and must not introduce schema or perform enqueue. `NTF-006` owns the API read-model queries; `API-003` reads committed records through it and never creates them. Discarded and abandoned outcomes never call `SCH-005`/`SCH-006` and never write target scheduling fields; they transition only the existing running `check_runs` row when it still exists.
 
+**SCH-005 implementation (2026-10-24).** `availability.Apply(ctx, *sql.Tx, input)` applies one successful provider result to the state key and never begins, commits, or rolls back. It upserts `inventory_states`, opens/closes `availability_episodes`, and enqueues `availability:episode:<id>` events and initial deliveries through NTF-000 inside the caller's transaction. Missing/empty successful results update `last_missing_at` without changing state or episodes; conflicting duplicate keys become Unknown with no event. Provider errors/timeouts/malformed responses never reach this applier and are never mapped to NotReservable. `SCH-010` remains responsible for check-run finalization and the post-I/O validity gate.
+
 ### 11.4 At-least-once delivery and duplicate limits
 
 - Event generation is idempotent per episode.
