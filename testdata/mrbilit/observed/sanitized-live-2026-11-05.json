@@ -55,7 +55,7 @@
               "capacityString": "3",
               "isAvailable": true,
               "reservationAvailable": true,
-              "price": 45850000,
+              "price": 12345000,
               "minPersons": 1
             }
           ]
@@ -107,7 +107,7 @@
               "capacityString": "2",
               "isAvailable": true,
               "reservationAvailable": true,
-              "price": 19081000,
+              "price": 2345000,
               "minPersons": 1
             },
             {
