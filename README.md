@@ -138,7 +138,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/notify/format.go` renders escaped Telegram HTML with validated booking links and distinct provider-health/recovery labels. `internal/notify/delivery.TelegramSender` decrypts configured credentials and uses the bounded P2 client. Tests use fake Telegram servers only; no real credentials or messages are used.
 - Production composition starts the worker only when the encryption key file is configured. With the provider registry still empty, no production checks dispatch, so the worker has no new rows to send.
 - Remaining: NTF-002 full presentation (notably Jalali display) and the authenticated Telegram settings/test endpoint (`API-004`).
-- PR: [#19](https://github.com/am-fallah/neda/pull/19); CI recorded in the PR.
+- PR: [#19](https://github.com/am-fallah/neda/pull/19); CI [40115991305](https://github.com/am-fallah/neda/actions/runs/40115991305) passed on `dd25c02`.
 
 ## Not implemented yet
 
