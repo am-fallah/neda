@@ -476,6 +476,38 @@ func TestMonitorDetailPausedExpiredAndStaleData(t *testing.T) {
 	}
 }
 
+func TestMonitorDetailEmptyCheckIsDistinctFromProviderFailure(t *testing.T) {
+	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
+	session, csrf, _ := fixture.login(t, authTestPass)
+	created := createMonitor(t, fixture, session, csrf, "Empty check detail")
+	targetID, configVersion := monitorTarget(t, fixture, created.ID)
+	base := fixture.clock.now
+	finished := base.Add(-4 * time.Minute)
+	insertHTTPCheck(t, fixture.db, targetID, httpCheckFixture{
+		configVersion: configVersion, startedAt: base.Add(-5 * time.Minute),
+		finishedAt: &finished, outcome: "empty",
+	})
+
+	recorder := fixture.request(t, http.MethodGet, "/api/v1/monitors/"+created.ID, "", session, "", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("detail status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var detail monitorDetailPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("decode detail: %v", err)
+	}
+	provider := detail.Providers[0]
+	if provider.Observations == nil || len(provider.Observations) != 0 {
+		t.Fatalf("empty successful check observations = %+v, want empty array", provider.Observations)
+	}
+	if len(provider.RecentChecks) != 1 || provider.RecentChecks[0].Outcome != "empty" {
+		t.Fatalf("empty successful check diagnostics = %+v", provider.RecentChecks)
+	}
+	if provider.RecentChecks[0].ErrorKind != "" || provider.RecentChecks[0].HTTPStatus != nil {
+		t.Fatalf("empty successful check has failure diagnostics: %+v", provider.RecentChecks[0])
+	}
+}
+
 func TestMonitorDetailProviderErrorDoesNotChangeAvailability(t *testing.T) {
 	fixture := newAuthFixture(t, auth.DefaultRateLimitConfig(), true)
 	session, csrf, _ := fixture.login(t, authTestPass)
