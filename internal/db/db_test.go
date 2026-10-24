@@ -102,13 +102,13 @@ func assertPragmas(t *testing.T, database *sql.DB) {
 
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 3 {
-		t.Fatalf("migration count = %d, want 3", count)
+	if count := migrateReal(t, database); count != 4 {
+		t.Fatalf("migration count = %d, want 4", count)
 	}
-	if err := database.Ready(context.Background(), 3); err != nil {
+	if err := database.Ready(context.Background(), 4); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if err := database.Ready(context.Background(), 4); err == nil {
+	if err := database.Ready(context.Background(), 5); err == nil {
 		t.Fatal("Ready accepted an unexpected migration count")
 	}
 
@@ -116,18 +116,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 3 {
-		t.Fatalf("schema_migrations count = %d, want 3", migrationsApplied)
+	if migrationsApplied != 4 {
+		t.Fatalf("schema_migrations count = %d, want 4", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 3 {
-		t.Fatalf("second migration count = %d, want 3", count)
+	if count := migrateReal(t, database); count != 4 {
+		t.Fatalf("second migration count = %d, want 4", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 3 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 3", migrationsApplied)
+	if migrationsApplied != 4 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 4", migrationsApplied)
 	}
 
 	var integrity string
@@ -280,6 +280,106 @@ func TestSchemaConstraints(t *testing.T) {
 	}
 }
 
+func TestNotificationSchemaConstraints(t *testing.T) {
+	database := openTestDB(t)
+	migrateReal(t, database)
+	const now = "2026-10-24T10:00:00Z"
+
+	mustExec(t, database.DB, `INSERT INTO provider_health
+		(provider_id, consecutive_failures, updated_at) VALUES ('fake', 0, ?)`, now)
+	mustFail(t, database.DB, `UPDATE provider_health SET consecutive_failures = -1 WHERE provider_id = 'fake'`)
+	mustExec(t, database.DB, `UPDATE provider_health SET last_attempt_at = ?, last_success_at = ?,
+		last_failure_at = ?, last_error_kind = 'timeout', last_duration_ms = 25,
+		open_episode_id = NULL, updated_at = ? WHERE provider_id = 'fake'`, now, now, now, now)
+
+	mustExec(t, database.DB, `INSERT INTO provider_health_episodes
+		(provider_id, opened_at, failure_count_at_open) VALUES ('fake', ?, 3)`, now)
+	mustFail(t, database.DB, `INSERT INTO provider_health_episodes
+		(provider_id, opened_at, failure_count_at_open) VALUES ('fake', ?, 0)`, now)
+	mustFail(t, database.DB, `INSERT INTO provider_health_episodes
+		(provider_id, opened_at, failure_count_at_open) VALUES ('fake', ?, 3)`, now)
+	mustExec(t, database.DB, `UPDATE provider_health_episodes SET closed_at = ?, last_error_kind = 'timeout'
+		WHERE provider_id = 'fake' AND closed_at IS NULL`, now)
+	mustExec(t, database.DB, `INSERT INTO provider_health_episodes
+		(provider_id, opened_at, failure_count_at_open) VALUES ('fake', ?, 3)`, now)
+
+	mustExec(t, database.DB, `INSERT INTO events
+		(id, kind, dedupe_key, provider_id, occurred_at, error_kind, failure_count, created_at)
+		VALUES ('e-health', 'provider_degraded', 'health:fake:1:degraded', 'fake', ?, 'timeout', 3, ?)`,
+		now, now)
+	mustExec(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d1', 'e-health', 'telegram', 'telegram', 'pending', ?, ?, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d-bad-channel', 'e-health', 'sms', 'telegram', 'pending', ?, ?, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d-bad-status', 'e-health', 'push', 'push:sub', 'queued', ?, ?, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, attempt_count, next_attempt_at, created_at, updated_at)
+		VALUES ('d-bad-count', 'e-health', 'push', 'push:sub-count', 'pending', -1, ?, ?, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d-duplicate-target', 'e-health', 'telegram', 'telegram', 'pending', ?, ?, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d-missing-event', 'missing-event', 'push', 'push:sub-missing', 'pending', ?, ?, ?)`, now, now, now)
+
+	mustExec(t, database.DB, `INSERT INTO notification_attempts
+		(delivery_id, attempt_no, started_at, status) VALUES ('d1', 1, ?, 'sent')`, now)
+	mustFail(t, database.DB, `INSERT INTO notification_attempts
+		(delivery_id, attempt_no, started_at, status) VALUES ('d1', 0, ?, 'sent')`, now)
+	mustFail(t, database.DB, `INSERT INTO notification_attempts
+		(delivery_id, attempt_no, started_at, status) VALUES ('d1', 2, ?, 'pending')`, now)
+	mustFail(t, database.DB, `INSERT INTO notification_attempts
+		(delivery_id, attempt_no, started_at, status) VALUES ('d1', 1, ?, 'failed')`, now)
+	mustFail(t, database.DB, `INSERT INTO notification_attempts
+		(delivery_id, attempt_no, started_at, status) VALUES ('missing-delivery', 1, ?, 'sent')`, now)
+
+	mustExec(t, database.DB, `INSERT INTO push_subscriptions
+		(id, endpoint_hash, endpoint_enc, p256dh_enc, auth_enc, created_at)
+		VALUES ('p1', 'hash-1', X'01', X'02', X'03', ?)`, now)
+	mustFail(t, database.DB, `INSERT INTO push_subscriptions
+		(id, endpoint_hash, endpoint_enc, p256dh_enc, auth_enc, created_at)
+		VALUES ('p-duplicate', 'hash-1', X'01', X'02', X'03', ?)`, now)
+	mustFail(t, database.DB, `INSERT INTO push_subscriptions
+		(id, endpoint_hash, endpoint_enc, p256dh_enc, auth_enc, failure_count, created_at)
+		VALUES ('p-bad-count', 'hash-2', X'01', X'02', X'03', -1, ?)`, now)
+	mustFail(t, database.DB, `INSERT INTO push_subscriptions
+		(id, endpoint_hash, endpoint_enc, p256dh_enc, auth_enc, created_at)
+		VALUES ('p-null-blob', 'hash-3', NULL, X'02', X'03', ?)`, now)
+
+	mustExec(t, database.DB, `DELETE FROM notification_deliveries WHERE id = 'd1'`)
+	var attempts int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM notification_attempts`).Scan(&attempts); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts after delivery delete = %d, want 0", attempts)
+	}
+
+	mustExec(t, database.DB, `INSERT INTO notification_deliveries
+		(id, event_id, channel, target_key, status, next_attempt_at, created_at, updated_at)
+		VALUES ('d2', 'e-health', 'push', 'push:sub-2', 'pending', ?, ?, ?)`, now, now, now)
+	mustExec(t, database.DB, `DELETE FROM events WHERE id = 'e-health'`)
+	var deliveries int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM notification_deliveries`).Scan(&deliveries); err != nil {
+		t.Fatal(err)
+	}
+	if deliveries != 0 {
+		t.Fatalf("deliveries after event delete = %d, want 0", deliveries)
+	}
+
+	var violations int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&violations); err != nil {
+		t.Fatal(err)
+	}
+	if violations != 0 {
+		t.Fatalf("foreign key violations = %d, want 0", violations)
+	}
+}
+
 func mustExec(t *testing.T, database *sql.DB, query string, args ...any) {
 	t.Helper()
 	if _, err := database.Exec(query, args...); err != nil {
@@ -314,7 +414,7 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 3); err != nil {
+	if err := database.Ready(context.Background(), 4); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
 	}
 }

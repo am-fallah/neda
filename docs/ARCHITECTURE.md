@@ -1196,6 +1196,8 @@ flowchart LR
 - If a channel/target was removed after enqueue, mark `skipped` (Telegram not configured/subscription disabled) rather than retrying forever.
 - One channel failing does not block the other; each delivery row is independent.
 
+**NTF-000 implementation (2026-10-24).** `0004_notifications.sql` adds `provider_health`, `provider_health_episodes`, `notification_deliveries`, `notification_attempts`, and `push_subscriptions` with the documented checks, foreign keys, unique targets, one-open-episode index, delivery claim index, and Push lookup index. `notify.Enqueue(ctx, tx *sql.Tx, event, deliveries)` inserts the event and its initial deliveries inside the caller's transaction; it never begins, commits, or rolls back that transaction. New deliveries are `pending` with `next_attempt_at` set to the event's `created_at`. A duplicate `events.dedupe_key` returns the existing event ID with `Created=false` and inserts no deliveries; duplicate `(event_id, channel, target_key)` targets are no-ops. `notify.FindEventIDByDedupeKey` is the minimal dedupe read-back. `NTF-001` remains the claim/lease/retry worker; NTF-000 does not format or send notifications.
+
 ### 13.2 Content
 
 Availability notification includes, when available:
