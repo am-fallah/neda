@@ -138,7 +138,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/notify/format.go` renders escaped Telegram HTML with validated booking links and distinct provider-health/recovery labels. `internal/notify/delivery.TelegramSender` decrypts configured credentials and uses the bounded P2 client. Tests use fake Telegram servers only; no real credentials or messages are used.
 - Production composition starts the worker only when the encryption key file is configured. With the provider registry still empty, no production checks dispatch, so the worker has no new rows to send.
 - Remaining: NTF-002 full presentation (notably Jalali display) and the authenticated Telegram settings/test endpoint (`API-004`).
-- PR: [#19](https://github.com/am-fallah/neda/pull/19); CI [40115991305](https://github.com/am-fallah/neda/actions/runs/40115991305) passed on `dd25c02`.
+- PR: [#19](https://github.com/am-fallah/neda/pull/19); merged to `main` as `bddcf24`. Code CI [40115991305](https://github.com/am-fallah/neda/actions/runs/40115991305), docs CI [40116125663](https://github.com/am-fallah/neda/actions/runs/40116125663), and post-merge main CI [40116243015](https://github.com/am-fallah/neda/actions/runs/40116243015) passed.
 
 **P4 private authentication API**
 
@@ -146,7 +146,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `GET /api/v1/auth/session` returns authenticated state, CSRF token, setup-required signal, and expiry without secrets. `POST /api/v1/auth/logout` and `POST /api/v1/auth/password` require a session plus CSRF header/cookie and same-origin validation; password change revokes other sessions.
 - The API preserves the existing Host validation, body limits, security headers, no-CORS policy, request IDs, sanitized errors, and no-store caching. `cmd/neda/serve.go` composes the auth manager and login guard.
 - Tests cover login success/failure/setup-required, Origin rejection, rate limiting with `Retry-After`, cookie flags, session probes, private-route 401/403 behavior, logout, and password change. No real credentials are used.
-- PR: [#20](https://github.com/am-fallah/neda/pull/20); CI [40116569664](https://github.com/am-fallah/neda/actions/runs/40116569664) passed on `9f50adc`.
+- PR: [#20](https://github.com/am-fallah/neda/pull/20); merged to `main` as `7cd0261`. Code CI [40116569664](https://github.com/am-fallah/neda/actions/runs/40116569664), docs CI [40116746410](https://github.com/am-fallah/neda/actions/runs/40116746410), and post-merge main CI [40116899292](https://github.com/am-fallah/neda/actions/runs/40116899292) passed.
 
 ## Not implemented yet
 
