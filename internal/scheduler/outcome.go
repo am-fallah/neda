@@ -257,6 +257,7 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 		return Result{Settled: true}, newOutcomeFailure("outcome_transaction_failed", err)
 	}
 	if discarded {
+		r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 		return Result{Settled: false}, nil
 	}
 	if len(events) > 0 && hasOutbox {
@@ -338,6 +339,7 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 		return Result{Settled: true}, newOutcomeFailure("outcome_transaction_failed", err)
 	}
 	if discarded {
+		r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 		return Result{Settled: false}, nil
 	}
 	if len(events) > 0 && hasOutbox {
