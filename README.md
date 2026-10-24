@@ -113,7 +113,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - Restart requirements close and reopen SQLite rather than relying on in-memory state. The stale in-flight test proves the SCH-010 validity gate discards the old-config result while the material edit's near-term schedule and provider health remain intact. The valid-empty test asserts both check finalization and the persisted provider-health success/recovery record.
 - AC 8 limitation: NTF-001 is not implemented, so there is no production delivery worker. The test-only after-commit observer proves that the delivery source runs while the outcome is uncommitted and that the outbox is visible only at the post-commit wake. It does not claim that an external sender was exercised.
 - Evidence: `go test ./internal/... -count=1`, `go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`, `go build ./...`, `gofmt -l .`, `git diff --check`, `make check`, and `make race` passed; selected integration tests passed repeated and race-enabled runs, and targeted runs under `TZ=UTC` and `TZ=America/New_York` passed. No production sender, schema change, live provider, server, or deployment work was added.
-- PR: [#13](https://github.com/am-fallah/neda/pull/13); code-head CI [40103924704](https://github.com/am-fallah/neda/actions/runs/40103924704) passed. Not merged.
+- PR: [#13](https://github.com/am-fallah/neda/pull/13); code-head CI [40103924704](https://github.com/am-fallah/neda/actions/runs/40103924704) and evidence-head CI [40104074601](https://github.com/am-fallah/neda/actions/runs/40104074601) passed. Not merged.
 
 ## Not implemented yet
 
