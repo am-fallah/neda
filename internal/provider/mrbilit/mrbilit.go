@@ -109,7 +109,7 @@ func (p *Provider) Check(ctx context.Context, req provider.CheckRequest) (provid
 	if err != nil {
 		return provider.Result{}, err
 	}
-	result, err := parseResponse(body, req, p.now().UTC())
+	result, err := parseSyntheticResponse(body, req, p.now().UTC())
 	if err != nil {
 		return provider.Result{}, err
 	}

@@ -230,7 +230,7 @@ func TestClassificationDecisionTable(t *testing.T) {
 }
 
 func TestParseSyntheticMixedFixture(t *testing.T) {
-	result, err := parseResponse(readFixture(t, "valid-mixed.json"), testRequest(), testNow)
+	result, err := parseSyntheticResponse(readFixture(t, "valid-mixed.json"), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestParseSyntheticMixedFixture(t *testing.T) {
 }
 
 func TestParseKnownNegativeAndFallbackIdentity(t *testing.T) {
-	result, err := parseResponse(readFixture(t, "known-negative.json"), testRequest(), testNow)
+	result, err := parseSyntheticResponse(readFixture(t, "known-negative.json"), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestParseKnownNegativeAndFallbackIdentity(t *testing.T) {
 }
 
 func TestParseEmptyAndInvalidShapes(t *testing.T) {
-	result, err := parseResponse(readFixture(t, "empty.json"), testRequest(), testNow)
+	result, err := parseSyntheticResponse(readFixture(t, "empty.json"), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("empty: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestParseEmptyAndInvalidShapes(t *testing.T) {
 	}
 	for _, name := range []string{"envelope-object.json", "invalid-json.json", "identity-insufficient.json", "offerings-shape.json"} {
 		t.Run(name, func(t *testing.T) {
-			_, err := parseResponse(readFixture(t, name), testRequest(), testNow)
+			_, err := parseSyntheticResponse(readFixture(t, name), testRequest(), testNow)
 			var providerErr *provider.Error
 			if !errors.As(err, &providerErr) || providerErr.Kind != provider.ErrInvalidResponse {
 				t.Fatalf("error = %v, want invalid response", err)
@@ -313,7 +313,7 @@ func TestParseEmptyAndInvalidShapes(t *testing.T) {
 }
 
 func TestParseDuplicateOfferingsFailsClosed(t *testing.T) {
-	result, err := parseResponse(readFixture(t, "duplicate-offerings.json"), testRequest(), testNow)
+	result, err := parseSyntheticResponse(readFixture(t, "duplicate-offerings.json"), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestParseCapsBeforeNormalization(t *testing.T) {
 			builder.WriteString(`","classes":[]}`)
 		}
 		builder.WriteByte(']')
-		_, err := parseResponse([]byte(builder.String()), testRequest(), testNow)
+		_, err := parseSyntheticResponse([]byte(builder.String()), testRequest(), testNow)
 		if err == nil {
 			t.Fatal("oversized journey list accepted")
 		}
@@ -360,7 +360,7 @@ func TestParseCapsBeforeNormalization(t *testing.T) {
 			builder.WriteString(`"}`)
 		}
 		builder.WriteString(`]}]`)
-		_, err := parseResponse([]byte(builder.String()), testRequest(), testNow)
+		_, err := parseSyntheticResponse([]byte(builder.String()), testRequest(), testNow)
 		if err == nil {
 			t.Fatal("oversized offering list accepted")
 		}
@@ -387,7 +387,7 @@ func TestParseCapsBeforeNormalization(t *testing.T) {
 			builder.WriteString(`]}`)
 		}
 		builder.WriteByte(']')
-		_, err := parseResponse([]byte(builder.String()), testRequest(), testNow)
+		_, err := parseSyntheticResponse([]byte(builder.String()), testRequest(), testNow)
 		if err == nil {
 			t.Fatal("oversized total offering list accepted")
 		}
@@ -402,7 +402,7 @@ func TestParseMalformedOptionalFields(t *testing.T) {
 		{"id":"d","capacity":2,"isAvailable":true,"reservationAvailable":null},
 		{"id":"e"}
 	]}]`
-	result, err := parseResponse([]byte(body), testRequest(), testNow)
+	result, err := parseSyntheticResponse([]byte(body), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -426,7 +426,7 @@ func TestParseMalformedOptionalFields(t *testing.T) {
 
 func TestParseMissingOfferingsField(t *testing.T) {
 	body := `[{"id":"tr-1","trainNumber":"1","departureTime":"2026-10-20T08:00:00Z","providerName":"MrBilit"}]`
-	result, err := parseResponse([]byte(body), testRequest(), testNow)
+	result, err := parseSyntheticResponse([]byte(body), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("parseResponse: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestParseMissingOfferingsField(t *testing.T) {
 
 func TestParseDuplicateJourneyMergeAndConflict(t *testing.T) {
 	merge := `[{"id":"tr-1","classes":[{"id":"a"}]},{"id":"tr-1","classes":[{"id":"b"}]}]`
-	result, err := parseResponse([]byte(merge), testRequest(), testNow)
+	result, err := parseSyntheticResponse([]byte(merge), testRequest(), testNow)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestParseDuplicateJourneyMergeAndConflict(t *testing.T) {
 		t.Fatalf("merged result = %+v", result)
 	}
 	conflict := `[{"id":"tr-1","trainNumber":"1","classes":[]},{"id":"tr-1","trainNumber":"2","classes":[]}]`
-	if _, err := parseResponse([]byte(conflict), testRequest(), testNow); err == nil {
+	if _, err := parseSyntheticResponse([]byte(conflict), testRequest(), testNow); err == nil {
 		t.Fatal("conflicting duplicate journey accepted")
 	}
 }

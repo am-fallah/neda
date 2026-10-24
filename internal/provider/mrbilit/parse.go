@@ -69,7 +69,7 @@ func (w *warningSet) list() []string {
 // parseResponse decodes the explicit synthetic response contract. The real
 // MrBilit envelope and offering-container key are unverified: this parser fails
 // closed on any other top-level shape rather than guessing.
-func parseResponse(payload []byte, req provider.CheckRequest, observedAt time.Time) (provider.Result, error) {
+func parseSyntheticResponse(payload []byte, req provider.CheckRequest, observedAt time.Time) (provider.Result, error) {
 	warnings := newWarningSet()
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	token, err := decoder.Token()
