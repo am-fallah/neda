@@ -267,3 +267,15 @@ func assertForeignKeyCheck(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 }
+
+func TestRunOnceOnEmptyDatabaseIsSafe(t *testing.T) {
+	env := newTestEnv(t)
+	summary, err := env.worker.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if summary != (Summary{}) {
+		t.Fatalf("summary = %+v, want zero", summary)
+	}
+	assertForeignKeyCheck(t, env.db)
+}

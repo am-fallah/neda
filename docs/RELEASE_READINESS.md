@@ -22,7 +22,7 @@ performed.
 | Local backup/restore drill passes | `docs/BACKUP_RESTORE_DRILL.md` |
 | Real Chrome service worker displays a synthetic Push and permission denial is handled | `docs/BROWSER_PUSH_VALIDATION.md` |
 | Dependency scans pass with documented exception | `docs/DEPENDENCIES.md` |
-| Docker image/Compose runtime tested | Docker CI run (record final run ID/result here after completion) |
+| Docker image/Compose runtime tested | Docker CI run `40133170885` passed build, Compose config, non-root/read-only runtime, healthcheck, restart, fresh-volume restore, wrong-key rejection; image 16,331,188 bytes uncompressed / 7,250,978 compressed |
 
 ## 2. Definition-of-done audit
 

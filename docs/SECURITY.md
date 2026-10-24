@@ -60,7 +60,7 @@ webhook, or public admin API.
 | Notification spoofing/abuse | Fixed Telegram/Push destinations; authenticated settings; no user-supplied webhook; message labels distinguish availability from provider health; service worker accepts only same-origin or validated mrbilit.com click URLs | The Push service itself is trusted to deliver the payload. |
 | False "sold out" / false availability | Conservative availability state machine; errors/timeouts/malformed/missing/stale data never close an episode; provider errors never overwrite confirmed state; transactional events/outbox | Provider semantics remain provisional until `PRV-006` live validation. |
 | Delivery loss/duplication | Durable outbox, deterministic delivery IDs, unique targets, leases, bounded retries, at-least-once semantics, independent channels | Exactly-once external delivery is not claimed. |
-| Container/host compromise | Deployment design uses non-root, read-only root FS, dropped capabilities, no-new-privileges, resource limits; not yet built or deployed | Docker/OPS tasks are incomplete. |
+| Container/host compromise | Multi-stage distroless image/Compose run non-root, read-only root FS, dropped capabilities, no-new-privileges, bounded PIDs/CPU/memory, loopback port, and a `0400` key secret; CI runs it on a fresh volume and after restore | Target-host Docker/host hardening and deployment are not yet verified. |
 | Dependency compromise | `go.sum` + `package-lock.json`; `govulncheck` and `npm audit`; maintained libraries; no floating installs in CI | Third-party supply chain remains a residual risk; the openpgp module is present but unused. |
 | Internal error disclosure | Sanitized JSON error model; provider/Telegram/Push errors mapped to stable categories; panic recovery returns generic 500; readiness errors are not echoed | New handlers must keep using the shared error helpers. |
 
@@ -171,7 +171,8 @@ applicable to the current scope.
 - [x] Dependency vulnerability scan and lockfile review.
 - [x] English-only UI; no secret prefilling.
 - [ ] HTTPS/reverse-proxy/HSTS behavior on the real host (`OPS-005`/`GATE-004`).
-- [ ] Backup/restore drill with key and database on a fresh volume (`OPS-009`/`SEC-003`).
+- [x] Backup/restore drill with key and database on a fresh directory and fresh Docker volume (`OPS-009`/`SEC-003`); target-host drill remains deployment-gated.
+- [x] Docker image/Compose build, non-root/read-only runtime, healthcheck, restart, key-mode failure, and fresh-volume restore in CI (run 40133170885).
 - [ ] Real Telegram delivery with owner credentials (not authorized/run).
 - [ ] Real browser-to-Push-service delivery with a live Push service (not authorized/run).
 - [ ] Live MrBilit validation (`PRV-006`/`GATE-003`) (not authorized/run).
@@ -193,6 +194,6 @@ applicable to the current scope.
 5. **Manual delivery acceptance pending.** Automated tests use fake Push and
    Telegram endpoints. Real external delivery, closed-browser behavior, and
    device-specific Push constraints remain manual acceptance items.
-6. **Container and host hardening pending.** Docker/Compose, reverse proxy,
-   TLS, firewall, key ownership on the target volume, and backup/restore are
-   design-only until the deployment gate is approved.
+6. **Target-host hardening pending.** The image/Compose pass CI runtime and
+   restore checks, but the production host's proxy/TLS/firewall, key ownership
+   on the real volume, backup target, and deployment remain approval-gated.
