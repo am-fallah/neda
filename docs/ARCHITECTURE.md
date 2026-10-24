@@ -1421,7 +1421,7 @@ Retention follows the deterministic order in §7.5. Events/deliveries are delete
 ### 15.3 DTO notes
 
 - Monitor create/update: `label`, `originName`, `destinationName`, `departureDate`, `adults`, `children`, `infants`, `providers[]` (`providerId`, `originId`, `destinationId`, optional `bookingSlug`, optional `genderCode`).
-- Monitor response: status (`enabled`/`paused`/`expired`), last/next check, last outcome, per-provider health/observations, limitation flags (booking URL unverified, gender unsupported).
+- Monitor response: `id`, label, route names, Gregorian `departureDate`, passenger counts, `enabled`, derived status (`active`/`paused`/`expired`), `expiresAt`, `expiredAt`, timestamps, and provider rows with provider ID, active flag, route IDs, booking/gender config, `configVersion`, next/last attempt, last success/outcome/error, and consecutive failures. `GET /api/v1/monitors` returns `{"monitors":[...]}`; create/update/pause/resume return one monitor DTO; delete returns 204. Validation errors include a `fields` map keyed by request path.
 - Event: kind, provider, monitor label/route snapshot, journey/offering, state (`reservable` only for availability events), occurredAt, bookingUrl optional, delivery statuses.
 - Settings: `pollIntervalSeconds`, `telegramConfigured`, `telegramLastTest`, `pushEnabled`, `vapidPublicKey` (only via push config), `version`.
 - Never include token, key, endpoint, p256dh, auth, session token, or raw provider body.

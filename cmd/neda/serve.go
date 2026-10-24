@@ -13,6 +13,7 @@ import (
 	"github.com/am-fallah/neda/internal/config"
 	"github.com/am-fallah/neda/internal/crypto"
 	"github.com/am-fallah/neda/internal/db"
+	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/httpapi"
 	"github.com/am-fallah/neda/internal/logging"
 	"github.com/am-fallah/neda/internal/migrations"
@@ -119,6 +120,20 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("provider registry initialization failed", "error", err)
 		return 1
 	}
+	// The waker is the scheduler's wake source and the post-commit hook for
+	// monitor CRUD changes.
+	waker := scheduler.NewWaker()
+	monitorService, err := domain.NewMonitorService(appStore, providerRegistry, domain.MonitorServiceConfig{
+		Now: time.Now,
+		NearTermSchedule: func(now time.Time) time.Time {
+			return now.Add(scheduler.NearTermDelay(pollInterval, nil))
+		},
+		Wake: waker.Wake,
+	})
+	if err != nil {
+		logger.Error("monitor service initialization failed", "error", err)
+		return 1
+	}
 	checkStage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
 		Repository: appStore,
 		Providers:  providerRegistry,
@@ -141,9 +156,6 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("outcome runner initialization failed", "error", err)
 		return 1
 	}
-	// The waker is the scheduler's wake source and the intended post-commit
-	// hook for MonitorService when the API layer composes it.
-	waker := scheduler.NewWaker()
 	sched, err := scheduler.New(scheduler.Config{
 		Repository: appStore,
 		Providers:  providerRegistry,
@@ -194,6 +206,7 @@ func runServe(stdout, stderr io.Writer) int {
 		PublicURL:  cfg.PublicURL,
 		Auth:       authManager,
 		LoginGuard: loginGuard,
+		Monitors:   monitorService,
 	}, logger, database, applied)
 
 	runCtx, cancel := context.WithCancel(ctx)
