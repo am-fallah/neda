@@ -73,7 +73,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/availability/apply.go`: `Apply(ctx, *sql.Tx, input)` applies one successful provider result to `monitor_provider_id × config_version × journey_key × offering_key` states. It covers initial Reservable, NotReservable→Reservable, continuous Reservable, decisive close, Unknown preservation, later re-open, missing/empty observations, and conflicting duplicate keys.
 - The applier never begins, commits, or rolls back. It writes availability states/episodes and enqueues availability events plus initial deliveries through NTF-000 inside the caller's transaction.
 - Missing and empty successful results set `last_missing_at` without closing episodes. Provider errors/timeouts/malformed results are never mapped to NotReservable; Unknown and conflict results remain Unknown.
-- No provider health, check-run finalization, target scheduling/backoff, worker/sender, or production runner wiring is included.
+- This slice did not include provider health, check-run finalization, target scheduling/backoff, worker/sender, or production runner wiring; SCH-010 now supplies finalization and runner composition.
 
 **M3 SCH-006 provider health (approved slice complete, applier only)**
 
@@ -81,7 +81,7 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - A-21 is resolved to **Option A (infrastructure-only)**: only applicable infrastructure failures with the provider classification's outage flag increment the provider counter. Config/route/ordinary 4xx and business/availability outcomes update diagnostics but do not count as provider failures; success/empty resets the counter.
 - Three eligible infrastructure failures open one degraded episode and one event; further failures do not repeat it. Recovery closes the episode and emits one recovery event.
 - `internal/health/status.go` derives stale status as `max(3×poll interval, 15m)` or an open degraded episode.
-- Target `consecutive_failures`/`next_due_at`/`updated_at` remain owned by SCH-003; availability state, check-run finalization, workers/senders, and production runner wiring remain out of scope.
+- Target `consecutive_failures`/`next_due_at`/`updated_at` remain owned by SCH-003; this slice did not include availability state, check-run finalization, workers/senders, or production runner wiring. SCH-010 supplies check finalization and runner composition.
 
 **M3 SCH-010 per-check outcome orchestrator (approved slice complete)**
 
