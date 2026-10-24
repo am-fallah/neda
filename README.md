@@ -1,6 +1,6 @@
 # Neda
 
-**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001 through SCH-006 and SCH-010, and M4 NTF-000 are implemented.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, provider spacing/target-backoff policy with a transaction-scoped persistence helper, the provider-check stage, the transactional notification-outbox schema and enqueue boundary, the availability state/episode/dedupe applier, the provider-health counter/episode/diagnostics applier, and the SCH-010 outcome orchestrator with pre- and in-transaction validity gates, check-run finalization, and atomic composition. The production scheduler now composes the check stage and outcome runner, but the production provider registry is intentionally empty and delivery destinations default to none until provider integration and notification-channel tasks are authorized. Production provider checks, notification delivery workers/senders, the MrBilit adapter, HTTP authentication endpoints, and the dashboard are not implemented yet.
+**Status: implementation in progress — M1, the approved M2 initial slice, M3 SCH-001 through SCH-007 and SCH-010, and M4 NTF-000 are implemented.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation/config-version rules, the due-time scheduler foundation, provider spacing/target-backoff policy with a transaction-scoped persistence helper, the provider-check stage, the transactional notification-outbox schema and enqueue boundary, the availability state/episode/dedupe applier, the provider-health counter/episode/diagnostics applier, the Tehran-expiry sweep with next-expiry wake, and the SCH-010 outcome orchestrator with pre- and in-transaction validity gates, check-run finalization, and atomic composition. The production scheduler now composes the check stage and outcome runner, but the production provider registry is intentionally empty and delivery destinations default to none until provider integration and notification-channel tasks are authorized. Production provider checks, notification delivery workers/senders, the MrBilit adapter, HTTP authentication endpoints, and the dashboard are not implemented yet.
 
 Neda is a planned single-user, self-hosted train-ticket availability monitor for Iranian train routes. It will monitor configured routes, departure dates, passenger counts, and selected providers in the background, then send actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
 
@@ -83,6 +83,14 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - `internal/health/status.go` derives stale status as `max(3×poll interval, 15m)` or an open degraded episode.
 - Target `consecutive_failures`/`next_due_at`/`updated_at` remain owned by SCH-003; this slice did not include availability state, check-run finalization, workers/senders, or production runner wiring. SCH-010 supplies check finalization and runner composition.
 
+**M3 SCH-007 expiry reconciliation and next-expiry wake (approved slice complete)**
+
+- `internal/availability/expiry.go`: `CloseExpired` closes every open availability episode for a monitor with `close_reason='expired'`, inside the caller's transaction, without creating an event or delivery.
+- `internal/store/expiry.go`: `ReconcileExpirations` applies one transaction-scoped sweep over all monitors whose parsed `expires_at` is at or before `now`, including paused and disabled monitors. It sets `expired_at`, preserves `expires_at`, delegates episode closure to SCH-005, and returns the earliest remaining future expiry. It does not poll or write target scheduling, check-run, provider-health, event, or delivery state.
+- `internal/scheduler/scheduler.go`: the scheduler reconciles expiry during startup and every loop iteration and includes the next expiry in its timer deadline. Expiry is reconciled even while every worker is busy. Date-edit or pause/resume wakes recalculate the deadline, and old timers are stopped by the existing wait loop.
+- Expiry remains a non-event diagnostic transition: historical availability events remain, open episodes close, and paused monitors stay paused. An expired monitor cannot be resumed until a future departure-date edit recomputes `expires_at` and clears `expired_at`.
+- No schema migration, live provider request, notification sender, API, or deployment work is included.
+
 **M3 SCH-010 per-check outcome orchestrator (approved slice complete)**
 
 - `internal/scheduler/outcome.go`: `OutcomeRunner` composes the SCH-004 check stage with one caller-owned outcome transaction. It applies the mandatory pre-I/O-return and in-transaction target validity gates (target existence/active state, monitor enabled, expiry, config version, booking slug) before any outcome write.
@@ -90,11 +98,11 @@ Neda is a planned single-user, self-hosted train-ticket availability monitor for
 - Structural result validation runs before the outcome transaction. Invalid results are classified as `invalid_response` and take the provider-error branch. Caller cancellation is abandoned; deadline/timeout is a provider failure; target invalidity takes precedence over cancellation.
 - `internal/store`: `WithSQLTx` provides the raw transaction plus a transaction-scoped repository view; `FinalizeCheckRun` uses a conditional `WHERE id=? AND outcome='running'` update and reports `ErrNoRunningCheck` for duplicate/lost finalization.
 - An injected delivery source supplies destinations; production defaults to none until notification-channel tasks define resolution. The outbox wake is a no-op until a delivery worker exists. Outcome-transaction failure leaves the running row for startup recovery and returns `Settled:true` so the scheduler does not start a duplicate attempt immediately; the target is not rechecked until the process restarts or persisted scheduling changes, which is a documented limitation of this slice.
-- No live provider requests, notification senders, channel configuration, expiry sweep, multi-provider end-to-end matrix, API, or deployment work is included.
+- No live provider requests, notification senders, channel configuration, multi-provider end-to-end matrix, API, or deployment work is included.
 
 ## Not implemented yet
 
-Notification delivery workers and retries, Telegram/Web Push senders, Push subscription API/encryption, provider destination/health-alert channel resolution, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, expiry sweep orchestration (SCH-007), multi-provider end-to-end verification (SCH-008/SCH-009), the dashboard, Docker packaging, and deployment. The production scheduler composes the SCH-004 stage and SCH-010 runner but the provider registry is empty, so no provider checks dispatch in production. Nothing in this repository authorizes live provider traffic or deployment.
+Notification delivery workers and retries, Telegram/Web Push senders, Push subscription API/encryption, provider destination/health-alert channel resolution, HTTP authentication endpoints and private-route enforcement, monitor HTTP APIs/UI, the MrBilit adapter, multi-provider end-to-end verification (SCH-008), full scheduler/restart integration (SCH-009), the dashboard, Docker packaging, and deployment. The production scheduler composes the SCH-004 stage, SCH-007 expiry sweep/wake, and SCH-010 runner, but the provider registry is empty, so no provider checks dispatch in production. Nothing in this repository authorizes live provider traffic or deployment.
 
 ## Local development
 
@@ -159,7 +167,7 @@ internal/db/          SQLite open/PRAGMAs, migration runner, readiness
 internal/migrations/  embedded forward-only SQL migrations
 internal/store/       transaction helper and core repositories
 internal/domain/      monitor model, validation, expiry, and CRUD service
-internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, runner boundary
+internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, expiry wake, runner boundary
 internal/auth/        password, session, CSRF, origin, and rate-limit primitives
 internal/provider/    normalized provider boundary, registry, and classification
 internal/provider/fake/ deterministic test-only provider
