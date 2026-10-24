@@ -66,6 +66,12 @@ jobs:
             sleep 1
           done
           curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/healthz
+          for attempt in $(seq 1 60); do
+            HEALTH="$(docker inspect -f '{{.State.Health.Status}}' neda-ci)"
+            [ "$HEALTH" = "healthy" ] && break
+            sleep 1
+          done
+          test "$HEALTH" = "healthy"
           test -s "$RUNNER_TEMP/neda-data/neda.db"
           test "$(stat -c '%u' "$RUNNER_TEMP/neda-data/neda.db")" = "$(id -u)"
           test "$(stat -c '%a' "$RUNNER_TEMP/neda-key/encryption_key")" = "400"
@@ -103,6 +109,12 @@ jobs:
             sleep 1
           done
           curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18081/healthz
+          for attempt in $(seq 1 60); do
+            HEALTH="$(docker inspect -f '{{.State.Health.Status}}' neda-restored)"
+            [ "$HEALTH" = "healthy" ] && break
+            sleep 1
+          done
+          test "$HEALTH" = "healthy"
           RESTORED_PUBLIC_2="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$RUNNER_TEMP/neda-restore/neda.db")"
           test "$ORIGINAL_PUBLIC" = "$RESTORED_PUBLIC_2"
           test "$(stat -c '%u' "$RUNNER_TEMP/neda-restore/neda.db")" = "$(id -u)"
@@ -132,4 +144,6 @@ jobs:
           grep -q "NEDA_ENCRYPTION_KEY_FILE" "$RUNNER_TEMP/bad-key.log"
 
       - name: Show image size
-        run: docker image inspect neda:ci --format '{{.Size}} bytes'
+        run: |
+          docker image inspect neda:ci --format 'uncompressed={{.Size}} bytes'
+          docker save neda:ci | gzip -1 | wc -c | awk '{print "compressed=" $1 " bytes"}'

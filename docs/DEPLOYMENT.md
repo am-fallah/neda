@@ -19,7 +19,7 @@ Telegram/Push credentials.
 | Runtime user | A non-root UID/GID (default `1000:1000`; macOS dev user may differ) |
 | Data | Bind-mounted host directory `./data`; backup target off-host |
 | Secrets | Key file outside Git and outside the database; Compose secret with mode 0400 |
-| Resource budget | 1 CPU, 512 MiB memory, 256 PIDs, 10 MiB × 5 log files as starting limits |
+| Resource budget | 1 CPU, 512 MiB memory, 256 PIDs, 10 MiB × 3 log files as starting limits |
 
 Do not invent server facts. Record actual values during the approved deployment
 window and adjust limits only from measured behavior.
@@ -221,7 +221,7 @@ force-push images or overwrite the only backup.
 
 ## 9. Operations
 
-- Log rotation: Compose json-file driver is capped at 10 MiB × 5; the proxy must
+- Log rotation: Compose json-file driver is capped at 10 MiB × 3; the proxy must
   also rotate its logs.
 - Disk: monitor `data/neda.db`, `-wal`, and backups. SQLite needs free space for
   WAL/checkpoint and vacuum; do not fill the volume.

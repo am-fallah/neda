@@ -168,7 +168,10 @@ func (s *Service) storeSubscription(ctx context.Context, endpoint, p256dh, auth,
 		return Subscription{}, err
 	}
 	if id == "" {
-		id = uuid.NewString()
+		// Derive a stable ID from the endpoint hash. Concurrent first-time
+		// registrations then use the same row ID/AAD instead of racing with
+		// different random IDs against ON CONFLICT.
+		id = uuid.NewSHA1(uuid.NameSpaceURL, []byte("push:"+endpointHash)).String()
 	}
 
 	endpointEnc, err := s.key.Encrypt(subscriptionAAD(id, "endpoint"), []byte(endpoint))
