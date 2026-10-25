@@ -1,12 +1,13 @@
 import { useMemo } from "react";
 import {
   AlertTriangle,
-  ArrowRight,
   CheckCircle2,
   ClipboardCheck,
   Loader2,
   Plus,
+  Search,
   Settings2,
+  TrainFront,
 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type {
@@ -15,7 +16,6 @@ import type {
   SelectedOption,
   Settings,
 } from "@/api/types";
-import { DateDisplay } from "@/components/JalaliDatePicker";
 import { ObservationStateBadge } from "@/components/status";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -29,13 +29,13 @@ import {
 } from "@/components/ui/card";
 import { FormField, fieldProps } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
+  classFamilyMeta,
   describeSelection,
-  formatPassengerSummary,
   notificationReadiness,
   pollIntervalLabel,
-  resultDestinationName,
-  resultOriginName,
   selectionKey,
   type ChannelTone,
   type SearchJourneyGroup,
@@ -52,6 +52,8 @@ interface MonitorSummaryPanelProps {
   createError: string;
   submitting: boolean;
   stale: boolean;
+  searching: boolean;
+  emptyResult: boolean;
   settings: Settings;
   pushConfig: PushConfig;
   onLabelChange: (value: string) => void;
@@ -72,10 +74,15 @@ function SettingsSummary({
   const notifications = notificationReadiness(settings, pushConfig);
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          Delivery settings
-        </h3>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Delivery
+          </h3>
+          <p className="mt-0.5 text-[0.7rem] text-muted-foreground">
+            Applies to every monitor.
+          </p>
+        </div>
         <Badge variant="outline" className="font-normal">
           Global
         </Badge>
@@ -83,7 +90,7 @@ function SettingsSummary({
       <dl className="flex flex-col gap-2.5 text-sm">
         <div className="flex items-center justify-between gap-3">
           <dt className="text-muted-foreground">Polling interval</dt>
-          <dd className="text-right font-medium">
+          <dd className="text-right font-medium tabular-nums">
             {pollIntervalLabel(settings.pollIntervalSeconds)}
           </dd>
         </div>
@@ -106,7 +113,7 @@ function SettingsSummary({
       </dl>
       <Link
         to="/settings"
-        className="inline-flex w-fit items-center gap-1.5 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+        className="inline-flex w-fit items-center gap-1.5 py-1 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
       >
         <Settings2 className="size-3.5" aria-hidden="true" />
         Manage in Settings
@@ -115,7 +122,7 @@ function SettingsSummary({
   );
 }
 
-const LABEL_DESCRIPTION = "Used in the monitor list and notifications.";
+const LABEL_DESCRIPTION = "Shown in the monitor list and notifications.";
 
 export function MonitorSummaryPanel({
   result,
@@ -127,6 +134,8 @@ export function MonitorSummaryPanel({
   createError,
   submitting,
   stale,
+  searching,
+  emptyResult,
   settings,
   pushConfig,
   onLabelChange,
@@ -173,34 +182,69 @@ export function MonitorSummaryPanel({
         : "The first check is scheduled shortly after creation.";
 
   return (
-    <Card className="gap-0 overflow-hidden py-0 lg:sticky lg:top-6 lg:max-h-[calc(100dvh-3rem)] lg:overflow-y-auto">
+    <Card
+      aria-busy={submitting}
+      className="gap-0 overflow-hidden py-0 xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:overscroll-contain"
+    >
       <CardHeader className="border-b px-5 py-4">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <ClipboardCheck
-            className="size-4 text-muted-foreground"
-            aria-hidden="true"
-          />
-          Monitor summary
-        </CardTitle>
-        <CardDescription>
-          Review the exact route, passengers, classes, and delivery settings
-          before creating the monitor.
-        </CardDescription>
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+            <ClipboardCheck className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <CardTitle
+              className="text-base"
+              role="heading"
+              aria-level={2}
+            >
+              Review &amp; create
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Name the monitor and confirm the classes to watch.
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-5 px-5 py-5">
         {!result ? (
-          <div className="flex flex-col items-center gap-3 py-6 text-center">
-            <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-              <ClipboardCheck className="size-5" aria-hidden="true" />
-            </span>
-            <div className="flex flex-col gap-1">
-              <p className="text-sm font-medium">No journey selected yet</p>
+          searching ? (
+            <div className="flex flex-col gap-3">
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <Search
+                  className="size-4 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                Searching MrBilit…
+              </p>
+              <div className="flex flex-col gap-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-1/2" />
+                <Skeleton className="h-9 w-full" />
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2 rounded-xl border border-dashed bg-muted/15 px-4 py-5">
+              <p className="flex items-center gap-2 text-sm font-medium">
+                {emptyResult ? (
+                  <TrainFront
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <Search
+                    className="size-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                )}
+                {emptyResult ? "No classes to review" : "Start with a search"}
+              </p>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                Search for a train to review the route, date, passengers, and
-                exact classes here.
+                {emptyResult
+                  ? "MrBilit returned no trains for this route and date. Try another date or URL."
+                  : "Search for trains, then select the classes you want to monitor."}
               </p>
             </div>
-          </div>
+          )
         ) : (
           <>
             <FormField
@@ -223,97 +267,67 @@ export function MonitorSummaryPanel({
               />
             </FormField>
 
-            <dl className="flex flex-col gap-3.5 border-t pt-4 text-sm">
-              <div className="flex flex-col gap-0.5">
-                <dt className="text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase">
-                  Route
-                </dt>
-                <dd
-                  dir="ltr"
-                  className="flex min-w-0 items-center gap-1.5 font-medium"
-                >
-                  <bdi dir="auto" className="min-w-0 break-words">
-                    {resultOriginName(result)}
-                  </bdi>
-                  {resultDestinationName(result) ? (
-                    <>
-                      <ArrowRight
-                        className="size-3.5 shrink-0 text-muted-foreground"
-                        aria-hidden="true"
-                      />
-                      <bdi dir="auto" className="min-w-0 break-words">
-                        {resultDestinationName(result)}
-                      </bdi>
-                    </>
-                  ) : null}
-                </dd>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <dt className="text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase">
-                  Departure
-                </dt>
-                <dd>
-                  <DateDisplay value={result.departureDate} />
-                </dd>
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <dt className="text-[0.7rem] font-medium tracking-wide text-muted-foreground uppercase">
-                  Passengers
-                </dt>
-                <dd className="font-medium">
-                  {formatPassengerSummary(result.passengers, true)}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="border-t pt-4">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <h3 className="text-xs font-semibold">Selected options</h3>
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  Selected options
+                </h3>
                 <span
-                  className="text-xs text-muted-foreground"
+                  className="text-xs text-muted-foreground tabular-nums"
                   aria-live="polite"
                 >
                   {selectedCount === 0
-                    ? "None selected"
-                    : `${selectedCount} of ${totalOptions} selected`}
+                    ? "None"
+                    : `${selectedCount} of ${totalOptions}`}
                 </span>
               </div>
               {selectedCount === 0 ? (
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  Choose at least one class from the results. Unavailable
-                  classes are still valid monitoring targets.
+                <p className="rounded-lg border border-dashed bg-muted/15 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+                  {stale
+                    ? "Search again to refresh these results before selecting classes."
+                    : "Choose at least one class from the results. Unavailable classes are still valid monitoring targets."}
                 </p>
               ) : (
-                <ul className="max-h-56 divide-y overflow-y-auto rounded-lg border text-xs">
+                <ul
+                  aria-label="Selected offerings"
+                  tabIndex={0}
+                  className="max-h-56 divide-y overflow-y-auto rounded-lg border text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+                >
                   {selectedPositions.map((position) => (
                     <li
                       key={selectionKey(
                         position.journey.train.journeyKey,
                         position.option.offeringKey,
                       )}
-                      className="flex items-start justify-between gap-2 px-3 py-2.5"
+                      className="flex flex-col gap-1.5 px-3 py-2.5"
                     >
-                      <span className="min-w-0">
-                        <span className="block break-words font-medium">
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="break-words font-medium">
                           <bdi dir="auto">{describeSelection(position)}</bdi>
                         </span>
-                        <span className="mt-0.5 block text-muted-foreground">
-                          {position.option.wagonName ||
-                            position.family.wagonName ||
-                            position.option.className ||
-                            "Class details unavailable"}
-                        </span>
+                        <ObservationStateBadge state={position.option.state} />
                       </span>
-                      <ObservationStateBadge state={position.option.state} />
+                      <span className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
+                        <bdi dir="auto">
+                          {classFamilyMeta(position.family) ||
+                            position.family.compartmentType ||
+                            "Class details unavailable"}
+                        </bdi>
+                        {position.option.capacity !== null ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="tabular-nums">
+                              Capacity {position.option.capacity}
+                            </span>
+                          </>
+                        ) : null}
+                      </span>
                     </li>
                   ))}
                 </ul>
               )}
               {selectionError ? (
-                <p
-                  className="mt-2 text-xs font-medium text-destructive"
-                  role="alert"
-                >
+                <p className="text-xs font-medium text-destructive" role="alert">
                   {selectionError}
                 </p>
               ) : null}
@@ -321,9 +335,9 @@ export function MonitorSummaryPanel({
           </>
         )}
 
-        <div className="border-t pt-4">
-          <SettingsSummary settings={settings} pushConfig={pushConfig} />
-        </div>
+        <Separator />
+
+        <SettingsSummary settings={settings} pushConfig={pushConfig} />
 
         {result && !notifications.ready ? (
           <Alert variant="warning">
@@ -369,9 +383,13 @@ export function MonitorSummaryPanel({
               aria-describedby="create-monitor-help"
             >
               {submitting ? (
-                <Loader2 className="animate-spin" aria-hidden="true" />
+                <Loader2
+                  data-icon="inline-start"
+                  className="animate-spin"
+                  aria-hidden="true"
+                />
               ) : (
-                <Plus aria-hidden="true" />
+                <Plus data-icon="inline-start" aria-hidden="true" />
               )}
               {submitting ? "Creating…" : "Create monitor"}
             </Button>

@@ -993,7 +993,18 @@ and `docs/MRBILIT_URL_FIRST.md`.
 tracking parameters, converts the date, resolves numeric route IDs from the
 public page's embedded Nuxt `urlParams`, and fetches the initial result through
 the existing adapter. The search is stateless and distinct from scheduled
-checks; its URL is never treated as availability evidence.
+checks; its URL is never treated as availability evidence. The backend does not
+read passenger counts from that URL. The frontend reads a valid subset of
+`adultCount`/`childCount`/`infantCount` and applies MrBilit's own omitted-default
+semantics (adult 1, child/infant 0) before sending explicit `adults`/`children`/
+`infants` in the existing request body. The monitor-create payload uses the
+counts echoed by that search; invalid present values are rejected rather than
+guessed.
+
+The New Monitor route applies a route-scoped body class that maps primary,
+accent, and focus-ring tokens to neutral values across the page and shared
+shell. Other routes and the global theme are unchanged; semantic status colors
+remain for availability and delivery meaning.
 
 Selected train/class options are persisted in
 `monitor_provider_selections` with the provider target and config version:

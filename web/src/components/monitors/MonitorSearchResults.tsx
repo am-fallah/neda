@@ -1,5 +1,5 @@
 import { useId } from "react";
-import { Clock3, TrainFront } from "lucide-react";
+import { Check, Clock3, TrainFront } from "lucide-react";
 import type {
   ProviderSearchClass,
   ProviderSearchTrain,
@@ -7,11 +7,7 @@ import type {
 } from "@/api/types";
 import { ObservationStateBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import {
   classFamilyMeta,
@@ -54,7 +50,7 @@ function JourneyTimes({ train }: { train: ProviderSearchTrain }) {
       : null;
   return (
     <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-      <span>
+      <span className="tabular-nums">
         <time dateTime={train.departureAt ?? undefined}>
           {times.departure ?? "—"}
         </time>
@@ -73,30 +69,55 @@ function JourneyTimes({ train }: { train: ProviderSearchTrain }) {
         </span>
       ) : null}
       <span className="sr-only">
-        {formatTehranTimestamp(train.departureAt, "Departure time unavailable")} to{" "}
-        {formatTehranTimestamp(train.arrivalAt, "arrival time unavailable")}
+        {formatTehranTimestamp(train.departureAt, "Departure time unavailable")}{" "}
+        to {formatTehranTimestamp(train.arrivalAt, "arrival time unavailable")}
       </span>
     </span>
   );
 }
 
 function StateCounts({ journey }: { journey: SearchJourneyGroup }) {
+  const items = [
+    {
+      count: journey.reservableCount,
+      label: "reservable",
+      dot: "bg-success",
+    },
+    {
+      count: journey.unknownCount,
+      label: "unknown",
+      dot: "bg-warning",
+    },
+    {
+      count: journey.notReservableCount,
+      label: "not reservable",
+      dot: "bg-muted-foreground/40",
+    },
+  ].filter((item) => item.count > 0);
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {journey.reservableCount > 0 ? (
-        <Badge variant="success">
-          {journey.reservableCount} reservable
-        </Badge>
-      ) : null}
-      {journey.unknownCount > 0 ? (
-        <Badge variant="warning">{journey.unknownCount} unknown</Badge>
-      ) : null}
-      {journey.notReservableCount > 0 ? (
-        <Badge variant="secondary">
-          {journey.notReservableCount} not reservable
-        </Badge>
-      ) : null}
-    </div>
+    <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 text-[0.7rem] text-muted-foreground">
+      {items.map((item) => (
+        <span key={item.label} className="inline-flex items-center gap-1">
+          <span
+            className={cn("size-1.5 rounded-full", item.dot)}
+            aria-hidden="true"
+          />
+          {item.count} {item.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function SelectionBadge() {
+  return (
+    <Badge
+      variant="outline"
+      className="gap-1 border-primary/30 bg-background font-medium"
+    >
+      <Check className="size-3" aria-hidden="true" />
+      Selected
+    </Badge>
   );
 }
 
@@ -131,43 +152,51 @@ function ClassOptionRow({
     <label
       title={`Provider option ${providerReference}`}
       className={cn(
-        "group flex min-w-0 cursor-pointer items-start gap-3 p-3 transition-colors sm:gap-4 sm:p-4",
-        grouped ? "rounded-none" : "rounded-lg border",
-        checked ? "bg-muted/60" : "hover:bg-muted/30",
-        disabled && "cursor-not-allowed opacity-60 hover:bg-transparent",
-        "focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 focus-within:ring-offset-background",
+        "flex min-w-0 scroll-mt-24 cursor-pointer items-start gap-3 px-4 py-3.5 transition-colors sm:gap-4",
+        checked ? "bg-muted/45" : "hover:bg-muted/25",
+        disabled &&
+          "cursor-not-allowed opacity-55 hover:bg-transparent focus-within:bg-transparent",
+        "focus-within:bg-muted/35",
       )}
     >
-      <input
-        type="checkbox"
-        name="mrbilit-selection"
-        value={option.offeringKey}
-        checked={checked}
-        disabled={disabled}
-        onChange={() => onToggle(journey.train, option)}
-        aria-describedby={disabled ? "search-stale-notice" : undefined}
-        className="mt-0.5 size-4 shrink-0 cursor-pointer rounded border-input accent-[var(--primary)] disabled:cursor-not-allowed"
-      />
+      <span className="relative mt-0.5 flex size-4 shrink-0 items-center justify-center">
+        <input
+          type="checkbox"
+          name="mrbilit-selection"
+          value={option.offeringKey}
+          checked={checked}
+          disabled={disabled}
+          onChange={() => onToggle(journey.train, option)}
+          aria-describedby={disabled ? "search-stale-notice" : undefined}
+          className="peer size-4 cursor-pointer appearance-none rounded border border-muted-foreground/70 bg-background checked:border-primary checked:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed"
+        />
+        <Check
+          className="pointer-events-none absolute top-1/2 left-1/2 size-3 -translate-x-1/2 -translate-y-1/2 text-primary-foreground opacity-0 peer-checked:opacity-100"
+          strokeWidth={3}
+          aria-hidden="true"
+        />
+      </span>
       <span className="min-w-0 flex-1">
-        <span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5">
-          <span className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="min-w-0 break-words text-sm font-medium">
-              <bdi dir="auto">{ordinal ?? family.title}</bdi>
-            </span>
-            <ObservationStateBadge state={option.state} />
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="min-w-0 break-words text-sm font-medium">
+            <bdi dir="auto">
+              {grouped ? (ordinal ?? family.title) : family.title}
+            </bdi>
           </span>
-          <span
-            className="shrink-0 text-xs font-medium text-muted-foreground tabular-nums"
-            title="Provider-reported capacity"
-          >
+          <ObservationStateBadge state={option.state} />
+          {checked ? <SelectionBadge /> : null}
+        </span>
+        <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          {!grouped && meta ? (
+            <>
+              <bdi dir="auto">{meta}</bdi>
+              <span aria-hidden="true">·</span>
+            </>
+          ) : null}
+          <span title="Provider-reported capacity">
             {capacityLabel(option.capacity)}
           </span>
         </span>
-        {meta ? (
-          <span className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <bdi dir="auto">{meta}</bdi>
-          </span>
-        ) : null}
       </span>
     </label>
   );
@@ -215,12 +244,8 @@ function ClassFamilyBlock({
     );
   }
   return (
-    <div
-      role="group"
-      aria-labelledby={headingId}
-      className="overflow-hidden rounded-lg border bg-background/40"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-2 border-b bg-muted/25 px-3 py-2.5 sm:px-4">
+    <div role="group" aria-labelledby={headingId}>
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b bg-muted/25 px-4 py-2.5">
         <div className="min-w-0">
           <h4 id={headingId} className="text-xs font-semibold">
             <bdi dir="auto">{family.title}</bdi>
@@ -259,6 +284,44 @@ function ClassFamilyBlock({
   );
 }
 
+function ResultsSummary({
+  totalOptions,
+  totalReservable,
+  totalNotReservable,
+  totalUnknown,
+}: {
+  totalOptions: number;
+  totalReservable: number;
+  totalNotReservable: number;
+  totalUnknown: number;
+}) {
+  const items = [
+    { count: totalReservable, label: "reservable", dot: "bg-success" },
+    { count: totalUnknown, label: "unknown", dot: "bg-warning" },
+    {
+      count: totalNotReservable,
+      label: "not reservable",
+      dot: "bg-muted-foreground/40",
+    },
+  ].filter((item) => item.count > 0);
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+      <span>
+        {totalOptions} class option{totalOptions === 1 ? "" : "s"}
+      </span>
+      {items.map((item) => (
+        <span key={item.label} className="inline-flex items-center gap-1.5">
+          <span
+            className={cn("size-1.5 rounded-full", item.dot)}
+            aria-hidden="true"
+          />
+          {item.count} {item.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function MonitorSearchResults({
   groups,
   selected,
@@ -288,32 +351,21 @@ export function MonitorSearchResults({
       aria-disabled={disabled || undefined}
       className="flex flex-col gap-4"
     >
-      <div className="flex flex-col gap-1.5">
-        <h2
-          id="search-results-heading"
-          tabIndex={-1}
-          className="scroll-mt-24 text-lg font-semibold tracking-tight text-balance focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
-        >
-          Available journeys
-        </h2>
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
-          <span>
-            {groups.length} train{groups.length === 1 ? "" : "s"} ·{" "}
-            {totalOptions} class option{totalOptions === 1 ? "" : "s"}
-          </span>
-          {totalReservable > 0 ? (
-            <span className="text-success">
-              · {totalReservable} reservable
-            </span>
-          ) : null}
-          {totalUnknown > 0 ? (
-            <span className="text-warning-foreground dark:text-warning">
-              · {totalUnknown} unknown
-            </span>
-          ) : null}
-          {totalNotReservable > 0 ? (
-            <span>· {totalNotReservable} not reservable</span>
-          ) : null}
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+          <h2
+            id="search-results-heading"
+            tabIndex={-1}
+            className="scroll-mt-24 text-lg font-semibold tracking-tight text-balance focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+          >
+            Search results
+          </h2>
+          <ResultsSummary
+            totalOptions={totalOptions}
+            totalReservable={totalReservable}
+            totalNotReservable={totalNotReservable}
+            totalUnknown={totalUnknown}
+          />
         </div>
         <p className="text-xs text-muted-foreground">
           Select any classes to monitor. Unavailable classes remain selectable
@@ -323,14 +375,11 @@ export function MonitorSearchResults({
 
       <div className="flex flex-col gap-4">
         {groups.map((journey) => (
-          <Card
-            key={journey.key}
-            className="gap-0 overflow-hidden py-0"
-          >
-            <CardHeader className="border-b px-4 py-4 sm:px-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
+          <Card key={journey.key} className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b bg-muted/15 px-4 py-3.5 sm:px-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
                 <div className="flex min-w-0 items-start gap-3">
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
                     <TrainFront className="size-4" aria-hidden="true" />
                   </span>
                   <div className="min-w-0">
@@ -348,8 +397,8 @@ export function MonitorSearchResults({
                     </div>
                   </div>
                 </div>
-                <div className="flex max-w-full flex-wrap items-center justify-end gap-1.5">
-                  <Badge variant="outline">
+                <div className="flex flex-wrap items-center gap-2 sm:flex-col sm:items-end sm:gap-1.5">
+                  <Badge variant="outline" className="font-normal">
                     {journey.optionCount} option
                     {journey.optionCount === 1 ? "" : "s"}
                   </Badge>
@@ -357,9 +406,9 @@ export function MonitorSearchResults({
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="px-3 py-3 sm:px-4">
+            <CardContent className="px-0 py-0">
               {journey.families.length > 0 ? (
-                <div className="flex flex-col gap-2">
+                <div className="divide-y">
                   {journey.families.map((family) => (
                     <ClassFamilyBlock
                       key={family.key}
@@ -372,7 +421,7 @@ export function MonitorSearchResults({
                   ))}
                 </div>
               ) : (
-                <p className="rounded-lg border border-dashed px-3 py-4 text-sm text-muted-foreground">
+                <p className="px-4 py-6 text-sm text-muted-foreground">
                   No class offerings were returned for this train.
                 </p>
               )}

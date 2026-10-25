@@ -1,11 +1,20 @@
 import {
   AlertTriangle,
   Check,
+  ChevronUp,
   Info,
+  Link2,
   Loader2,
+  Pencil,
   Search,
+  Users,
+  type LucideIcon,
 } from "lucide-react";
-import type { UrlPassengerResult } from "@/lib/mrbilitSearch";
+import type {
+  PassengerSource,
+  UrlPassengerResult,
+} from "@/lib/mrbilitSearch";
+import { formatPassengerSummary } from "@/lib/mrbilitSearch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -29,7 +38,8 @@ interface MonitorSearchPanelProps {
   adults: number;
   children: number;
   infants: number;
-  passengerSource: "url" | "manual";
+  passengerSource: PassengerSource;
+  passengerEditorOpen: boolean;
   urlPassenger: UrlPassengerResult;
   fieldErrors: Record<string, string>;
   searching: boolean;
@@ -38,85 +48,65 @@ interface MonitorSearchPanelProps {
   onAdultsChange: (value: number) => void;
   onChildrenChange: (value: number) => void;
   onInfantsChange: (value: number) => void;
+  onTogglePassengerEditor: () => void;
   onSearch: () => void;
 }
 
-function PassengerSourceNote({
-  url,
-  source,
-  parsed,
-}: {
-  url: string;
-  source: "url" | "manual";
-  parsed: UrlPassengerResult;
-}) {
-  const baseClass = "flex items-start gap-1.5 text-xs";
-  if (parsed.status === "applied" && source === "url") {
-    return (
-      <p className={cn(baseClass, "text-muted-foreground")}>
-        <Check className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        Loaded from the URL. You can adjust the counts.
-      </p>
-    );
-  }
-  if (parsed.status === "partial") {
-    return (
-      <p
-        className={cn(
-          baseClass,
-          "text-warning-foreground dark:text-warning",
-        )}
-      >
-        <AlertTriangle
-          className="mt-0.5 size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        This URL includes only some passenger counts. Set all passengers below.
-      </p>
-    );
+interface PassengerNote {
+  icon: LucideIcon;
+  text: string;
+  warning?: boolean;
+}
+
+function passengerNote(
+  url: string,
+  source: PassengerSource,
+  parsed: UrlPassengerResult,
+): PassengerNote {
+  if (source === "manual") {
+    return parsed.status === "invalid"
+      ? {
+          icon: AlertTriangle,
+          text: "Using manually edited counts. The URL counts are invalid and were not applied.",
+          warning: true,
+        }
+      : {
+          icon: Info,
+          text: "Using manually edited passenger counts for this search.",
+        };
   }
   if (parsed.status === "invalid") {
-    return (
-      <p
-        className={cn(
-          baseClass,
-          "text-warning-foreground dark:text-warning",
-        )}
-      >
-        <AlertTriangle
-          className="mt-0.5 size-3.5 shrink-0"
-          aria-hidden="true"
-        />
-        The URL&apos;s passenger counts are invalid. Confirm them below.
-      </p>
-    );
+    return {
+      icon: AlertTriangle,
+      text: "The URL passenger counts are invalid. Fix the URL or edit passengers.",
+      warning: true,
+    };
   }
-  if (parsed.status === "applied" && source === "manual") {
-    return (
-      <p className={cn(baseClass, "text-muted-foreground")}>
-        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        Using manually edited passenger counts for this search.
-      </p>
-    );
+  if (parsed.status === "applied") {
+    return parsed.defaultedKeys.length > 0
+      ? {
+          icon: Check,
+          text: "Loaded from the URL. Missing counts use MrBilit defaults.",
+        }
+      : {
+          icon: Check,
+          text: "Passenger counts loaded from the URL.",
+        };
   }
   if (url.trim()) {
-    return (
-      <p className={cn(baseClass, "text-muted-foreground")}>
-        <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        This URL does not include passengers. Set them below.
-      </p>
-    );
+    return {
+      icon: Info,
+      text: "No passenger counts in this URL. Using defaults (1 adult, 0 children, 0 infants).",
+    };
   }
-  return (
-    <p className={cn(baseClass, "text-muted-foreground")}>
-      <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-      Counts are sent with the search.
-    </p>
-  );
+  return {
+    icon: Info,
+    text: "Defaults are used until the URL provides passenger counts.",
+  };
 }
 
 const URL_DESCRIPTION =
-  "Expected format: https://mrbilit.com/trains/route?departureDate=1405-08-24. Tracking parameters are ignored.";
+  "The route and Jalali date are read automatically. Tracking parameters are ignored.";
 
 export function MonitorSearchPanel({
   url,
@@ -124,6 +114,7 @@ export function MonitorSearchPanel({
   children,
   infants,
   passengerSource,
+  passengerEditorOpen,
   urlPassenger,
   fieldErrors,
   searching,
@@ -132,19 +123,34 @@ export function MonitorSearchPanel({
   onAdultsChange,
   onChildrenChange,
   onInfantsChange,
+  onTogglePassengerEditor,
   onSearch,
 }: MonitorSearchPanelProps) {
+  const note = passengerNote(url, passengerSource, urlPassenger);
+  const NoteIcon = note.icon;
+  const passengers = { adults, children, infants };
+
   return (
     <Card aria-busy={searching} className="gap-0 overflow-hidden py-0">
       <CardHeader className="border-b px-5 py-4 sm:px-6">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <Search className="size-4 text-muted-foreground" aria-hidden="true" />
-          Search MrBilit
-        </CardTitle>
-        <CardDescription>
-          Paste a public train search URL. The route and Jalali date are read
-          from it; availability is only reported after MrBilit responds.
-        </CardDescription>
+        <div className="flex items-start gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+            <Search className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <CardTitle
+              className="text-base"
+              role="heading"
+              aria-level={2}
+            >
+              Search MrBilit
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Paste a public MrBilit train search URL. We’ll read the route,
+              date, and passengers from it.
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="px-5 py-5 sm:px-6 sm:py-6">
         <form
@@ -162,98 +168,158 @@ export function MonitorSearchPanel({
             required
             description={URL_DESCRIPTION}
           >
-            <Input
-              {...fieldProps("mrbilitUrl", fieldErrors.url, URL_DESCRIPTION)}
-              type="url"
-              name="mrbilit-search-url"
-              inputMode="url"
-              autoComplete="off"
-              autoCapitalize="off"
-              spellCheck={false}
-              className="h-10"
-              value={url}
-              onChange={(event) => onUrlChange(event.target.value)}
-              placeholder="https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24"
-            />
+            <div className="relative">
+              <Link2
+                className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                {...fieldProps("mrbilitUrl", fieldErrors.url, URL_DESCRIPTION)}
+                type="url"
+                name="mrbilit-search-url"
+                inputMode="url"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                className="h-11 pl-9 font-mono text-[13px]"
+                value={url}
+                onChange={(event) => onUrlChange(event.target.value)}
+                placeholder="https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24"
+              />
+            </div>
           </FormField>
 
-          <fieldset className="flex flex-col gap-3 border-t pt-5">
-            <legend className="text-sm font-medium">Passengers</legend>
-            <PassengerSourceNote
-              url={url}
-              source={passengerSource}
-              parsed={urlPassenger}
-            />
-            <div className="grid gap-3 sm:grid-cols-3">
-              <FormField
-                id="mrbilitAdults"
-                label="Adults"
-                error={fieldErrors.adults}
-                required
+          <fieldset className="rounded-xl border bg-muted/20">
+            <legend className="sr-only">Passengers</legend>
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
+                  <Users className="size-4" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">
+                    {formatPassengerSummary(passengers)}
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-0.5 flex items-start gap-1.5 text-xs leading-relaxed",
+                      note.warning
+                        ? "text-warning-foreground dark:text-warning"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    <NoteIcon
+                      className="mt-0.5 size-3.5 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>{note.text}</span>
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-9 shrink-0"
+                aria-expanded={passengerEditorOpen}
+                aria-controls="mrbilit-passenger-fields"
+                onClick={onTogglePassengerEditor}
               >
-                <Input
-                  {...fieldProps("mrbilitAdults", fieldErrors.adults)}
-                  type="number"
-                  name="adults"
-                  min={1}
-                  max={9}
-                  step={1}
-                  inputMode="numeric"
-                  className="h-10"
-                  value={adults}
-                  onChange={(event) =>
-                    onAdultsChange(Number(event.target.value))
-                  }
-                />
-              </FormField>
-              <FormField
-                id="mrbilitChildren"
-                label="Children"
-                error={fieldErrors.children}
-              >
-                <Input
-                  {...fieldProps("mrbilitChildren", fieldErrors.children)}
-                  type="number"
-                  name="children"
-                  min={0}
-                  max={9}
-                  step={1}
-                  inputMode="numeric"
-                  className="h-10"
-                  value={children}
-                  onChange={(event) =>
-                    onChildrenChange(Number(event.target.value))
-                  }
-                />
-              </FormField>
-              <FormField
-                id="mrbilitInfants"
-                label="Infants"
-                error={fieldErrors.infants}
-              >
-                <Input
-                  {...fieldProps("mrbilitInfants", fieldErrors.infants)}
-                  type="number"
-                  name="infants"
-                  min={0}
-                  max={9}
-                  step={1}
-                  inputMode="numeric"
-                  className="h-10"
-                  value={infants}
-                  onChange={(event) =>
-                    onInfantsChange(Number(event.target.value))
-                  }
-                />
-              </FormField>
+                {passengerEditorOpen ? (
+                  <>
+                    <ChevronUp data-icon="inline-start" aria-hidden="true" />
+                    Done
+                  </>
+                ) : (
+                  <>
+                    <Pencil data-icon="inline-start" aria-hidden="true" />
+                    Edit passengers
+                  </>
+                )}
+              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Up to 9 passengers total. Passenger counts always come from these
-              fields; values are never inferred from the provider page.
-            </p>
-            {fieldErrors.passengers ? (
+
+            {passengerEditorOpen ? (
+              <div
+                id="mrbilit-passenger-fields"
+                className="border-t px-4 pt-4 pb-4"
+              >
+                <div className="grid gap-3 sm:grid-cols-3">
+                  <FormField
+                    id="mrbilitAdults"
+                    label="Adults"
+                    error={fieldErrors.adults}
+                    required
+                  >
+                    <Input
+                      {...fieldProps("mrbilitAdults", fieldErrors.adults)}
+                      type="number"
+                      name="adults"
+                      min={1}
+                      max={9}
+                      step={1}
+                      inputMode="numeric"
+                      className="h-10 tabular-nums"
+                      value={adults}
+                      onChange={(event) =>
+                        onAdultsChange(Number(event.target.value))
+                      }
+                    />
+                  </FormField>
+                  <FormField
+                    id="mrbilitChildren"
+                    label="Children"
+                    error={fieldErrors.children}
+                  >
+                    <Input
+                      {...fieldProps("mrbilitChildren", fieldErrors.children)}
+                      type="number"
+                      name="children"
+                      min={0}
+                      max={9}
+                      step={1}
+                      inputMode="numeric"
+                      className="h-10 tabular-nums"
+                      value={children}
+                      onChange={(event) =>
+                        onChildrenChange(Number(event.target.value))
+                      }
+                    />
+                  </FormField>
+                  <FormField
+                    id="mrbilitInfants"
+                    label="Infants"
+                    error={fieldErrors.infants}
+                  >
+                    <Input
+                      {...fieldProps("mrbilitInfants", fieldErrors.infants)}
+                      type="number"
+                      name="infants"
+                      min={0}
+                      max={9}
+                      step={1}
+                      inputMode="numeric"
+                      className="h-10 tabular-nums"
+                      value={infants}
+                      onChange={(event) =>
+                        onInfantsChange(Number(event.target.value))
+                      }
+                    />
+                  </FormField>
+                </div>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Up to 9 passengers total. Adults are required; children and
+                  infants may be zero.
+                </p>
+                {fieldErrors.passengers ? (
+                  <p className="mt-2 text-xs font-medium text-destructive" role="alert">
+                    {fieldErrors.passengers}
+                  </p>
+                ) : null}
+              </div>
+            ) : fieldErrors.passengers ? (
               <p
-                className="text-xs font-medium text-destructive"
+                className="border-t px-4 py-3 text-xs font-medium text-destructive"
                 role="alert"
               >
                 {fieldErrors.passengers}
@@ -277,8 +343,7 @@ export function MonitorSearchPanel({
 
           <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground">
-              Searching does not create a monitor or change any availability
-              state.
+              Searching does not create a monitor or change availability.
             </p>
             <Button
               type="submit"
@@ -287,9 +352,13 @@ export function MonitorSearchPanel({
               disabled={searching}
             >
               {searching ? (
-                <Loader2 className="animate-spin" aria-hidden="true" />
+                <Loader2
+                  data-icon="inline-start"
+                  className="animate-spin"
+                  aria-hidden="true"
+                />
               ) : (
-                <Search aria-hidden="true" />
+                <Search data-icon="inline-start" aria-hidden="true" />
               )}
               {searching ? "Searching MrBilit…" : "Find trains"}
             </Button>

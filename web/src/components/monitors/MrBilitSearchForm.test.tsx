@@ -20,6 +20,7 @@ vi.mock("@/api/endpoints", () => ({
 const searchMock = vi.mocked(providersApi.search);
 const SEARCH_URL =
   "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24";
+const STANDARD_URL = `${SEARCH_URL}&adultCount=2&childCount=1`;
 
 const provider = makeProvider({
   id: "mrbilit",
@@ -128,7 +129,7 @@ function renderForm(onSubmit = vi.fn().mockResolvedValue(undefined)) {
 async function runSearch(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/MrBilit search URL/i), SEARCH_URL);
   await user.click(screen.getByRole("button", { name: /find trains/i }));
-  await screen.findByRole("heading", { name: /available journeys/i });
+  await screen.findByRole("heading", { name: /search results/i });
 }
 
 describe("MrBilitSearchForm", () => {
@@ -158,7 +159,7 @@ describe("MrBilitSearchForm", () => {
     ).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole("checkbox")[0]);
-    expect(screen.getByText("1 of 2 selected")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
     expect(screen.getByLabelText(/monitor label/i)).toHaveValue(
       "Yazd → Mashhad — 2026-11-15",
     );
@@ -200,39 +201,160 @@ describe("MrBilitSearchForm", () => {
     });
   });
 
-  it("prefills passenger counts only when all three valid URL values exist", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <MrBilitSearchForm
-          providers={[provider]}
-          settings={settings}
-          pushConfig={pushConfig}
-          onSubmit={vi.fn()}
-        />
-      </MemoryRouter>,
+  it("prefills a standard MrBilit URL with omitted passenger defaults and hides the editor", async () => {
+    searchMock.mockResolvedValue(
+      searchResult({
+        passengers: { adults: 2, children: 1, infants: 0 },
+      }),
+    );
+    const { user, onSubmit } = renderForm();
+
+    await user.type(screen.getByLabelText(/MrBilit search URL/i), STANDARD_URL);
+
+    expect(screen.getByText("2 adults · 1 child")).toBeInTheDocument();
+    expect(screen.getByText(/loaded from the url/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Adults/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /edit passengers/i }),
+    ).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(screen.getByRole("button", { name: /edit passengers/i }));
+    expect(screen.getByLabelText(/^Adults/i)).toHaveValue(2);
+    expect(screen.getByLabelText(/^Children/i)).toHaveValue(1);
+    expect(screen.getByLabelText(/^Infants/i)).toHaveValue(0);
+
+    await user.click(screen.getByRole("button", { name: /find trains/i }));
+    await screen.findByRole("heading", { name: /search results/i });
+    expect(searchMock).toHaveBeenCalledWith(
+      "mrbilit",
+      expect.objectContaining({ adults: 2, children: 1, infants: 0 }),
+      expect.any(AbortSignal),
     );
 
-    const url = screen.getByLabelText(/MrBilit search URL/i);
-    await user.type(
-      url,
-      `${SEARCH_URL}&adultCount=2&childCount=1&infantCount=0`,
+    await user.click(screen.getAllByRole("checkbox")[0]);
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
     );
-    expect(screen.getByLabelText(/adults/i)).toHaveValue(2);
-    expect(screen.getByLabelText(/children/i)).toHaveValue(1);
-    expect(screen.getByLabelText(/infants/i)).toHaveValue(0);
-    expect(screen.getByText(/loaded from the url/i)).toBeInTheDocument();
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      adults: 2,
+      children: 1,
+      infants: 0,
+    });
+  });
+
+  it("uses clearly labelled defaults when the URL has no passenger counts", async () => {
+    searchMock.mockResolvedValue(searchResult());
+    const { user, onSubmit } = renderForm();
+
+    await user.type(screen.getByLabelText(/MrBilit search URL/i), SEARCH_URL);
+
+    expect(screen.getByText("1 adult")).toBeInTheDocument();
+    expect(screen.getByText(/no passenger counts in this url/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Adults/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /find trains/i }));
+    await screen.findByRole("heading", { name: /search results/i });
+    expect(searchMock).toHaveBeenCalledWith(
+      "mrbilit",
+      expect.objectContaining({ adults: 1, children: 0, infants: 0 }),
+      expect.any(AbortSignal),
+    );
+
+    await user.click(screen.getAllByRole("checkbox")[0]);
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      adults: 1,
+      children: 0,
+      infants: 0,
+    });
+  });
+
+  it("marks manual passenger edits and uses them for search and creation", async () => {
+    searchMock.mockResolvedValue(
+      searchResult({
+        passengers: { adults: 3, children: 1, infants: 0 },
+      }),
+    );
+    const { user, onSubmit } = renderForm();
+
+    await user.type(screen.getByLabelText(/MrBilit search URL/i), STANDARD_URL);
+    await user.click(screen.getByRole("button", { name: /edit passengers/i }));
+    const adults = screen.getByLabelText(/^Adults/i);
+    await user.clear(adults);
+    await user.type(adults, "3");
+
+    expect(
+      screen.getByText(/using manually edited passenger counts/i),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /find trains/i }));
+    await screen.findByRole("heading", { name: /search results/i });
+    expect(searchMock).toHaveBeenCalledWith(
+      "mrbilit",
+      expect.objectContaining({ adults: 3, children: 1, infants: 0 }),
+      expect.any(AbortSignal),
+    );
+
+    await user.click(screen.getAllByRole("checkbox")[0]);
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      adults: 3,
+      children: 1,
+      infants: 0,
+    });
+  });
+
+  it("resets URL-derived counts but preserves explicit manual edits when a new URL has no counts", async () => {
+    const { user } = renderForm();
+    const url = screen.getByLabelText(/MrBilit search URL/i);
+
+    await user.type(url, STANDARD_URL);
+    expect(screen.getByText("2 adults · 1 child")).toBeInTheDocument();
 
     await user.clear(url);
+    await user.type(url, SEARCH_URL);
+    expect(screen.getByText("1 adult")).toBeInTheDocument();
+    expect(screen.getByText(/no passenger counts in this url/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /edit passengers/i }));
+    expect(screen.getByLabelText(/^Adults/i)).toHaveValue(1);
+    expect(screen.getByLabelText(/^Children/i)).toHaveValue(0);
+
+    const adults = screen.getByLabelText(/^Adults/i);
+    await user.clear(adults);
+    await user.type(adults, "3");
+    await user.clear(url);
+    await user.type(url, SEARCH_URL);
+    expect(screen.getByText("3 adults")).toBeInTheDocument();
+    expect(
+      screen.getByText(/using manually edited passenger counts/i),
+    ).toBeInTheDocument();
+  });
+
+  it("does not apply invalid URL passenger counts and opens the editor on search", async () => {
+    searchMock.mockResolvedValue(searchResult());
+    const { user } = renderForm();
+
     await user.type(
-      url,
-      "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&adultCount=2",
+      screen.getByLabelText(/MrBilit search URL/i),
+      `${SEARCH_URL}&adultCount=not-a-number`,
     );
-    expect(screen.getByText(/only some passenger counts/i)).toBeInTheDocument();
-    // Partial counts are not applied and do not silently overwrite the
-    // explicit values that were previously loaded.
-    expect(screen.getByLabelText(/adults/i)).toHaveValue(2);
-    expect(screen.getByLabelText(/children/i)).toHaveValue(1);
+
+    expect(screen.getByText(/passenger counts are invalid/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /find trains/i }));
+
+    expect(searchMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText(/^Adults/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/fix the passenger counts in the url/i),
+    ).toBeInTheDocument();
   });
 
   it("keeps distinct wagon identities separate even when the class name matches", async () => {
@@ -277,7 +399,7 @@ describe("MrBilitSearchForm", () => {
     await runSearch(user);
 
     await user.click(screen.getAllByRole("checkbox")[0]);
-    expect(screen.getByText("1 of 2 selected")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /change search/i }));
     const url = screen.getByLabelText(/MrBilit search URL/i);
@@ -285,7 +407,7 @@ describe("MrBilitSearchForm", () => {
     await user.type(url, SEARCH_URL.replace("1405-08-24", "1405-08-25"));
 
     expect(screen.getByText(/search settings changed/i)).toBeInTheDocument();
-    expect(screen.getByText("None selected")).toBeInTheDocument();
+    expect(screen.getByText("None")).toBeInTheDocument();
     for (const box of screen.getAllByRole("checkbox")) {
       expect(box).toBeDisabled();
     }
@@ -351,6 +473,7 @@ describe("MrBilitSearchForm", () => {
 
     expect(screen.getByText(/No trains returned/i)).toBeInTheDocument();
     expect(screen.getByText(/not a sold-out signal/i)).toBeInTheDocument();
+    expect(screen.getByText(/no classes to review/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /create monitor/i }),
     ).not.toBeInTheDocument();
@@ -375,7 +498,9 @@ describe("MrBilitSearchForm", () => {
     expect(
       await screen.findByText(/Check the search URL/i),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/Use a MrBilit train search URL/i).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/Use a MrBilit train search URL/i).length,
+    ).toBeGreaterThan(0);
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByLabelText(/MrBilit search URL/i),
@@ -421,7 +546,7 @@ describe("MrBilitSearchForm", () => {
     });
     expect(notReservable).toBeEnabled();
     await user.click(notReservable);
-    expect(screen.getByText("1 of 3 selected")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3")).toBeInTheDocument();
   });
 
   it("preserves a manually edited label after another search", async () => {
@@ -435,7 +560,7 @@ describe("MrBilitSearchForm", () => {
 
     await user.click(screen.getByRole("button", { name: /change search/i }));
     await user.click(screen.getByRole("button", { name: /find trains/i }));
-    await screen.findByRole("heading", { name: /available journeys/i });
+    await screen.findByRole("heading", { name: /search results/i });
 
     expect(screen.getByLabelText(/monitor label/i)).toHaveValue(
       "My custom monitor",
@@ -481,6 +606,8 @@ describe("MrBilitSearchForm", () => {
     expect(screen.getByText("Every 5 minutes")).toBeInTheDocument();
     expect(screen.getByText("Configured")).toBeInTheDocument();
     expect(screen.getByText("Enabled · no devices")).toBeInTheDocument();
-    expect(screen.getByText(/at least one notification channel is ready/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/at least one notification channel is ready/i),
+    ).toBeInTheDocument();
   });
 });

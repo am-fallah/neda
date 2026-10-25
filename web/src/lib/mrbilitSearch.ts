@@ -18,11 +18,18 @@ export const PASSENGER_QUERY_KEYS = [
 
 type PassengerQueryKey = (typeof PASSENGER_QUERY_KEYS)[number];
 
+export type PassengerSource =
+  | "url"
+  | "url-defaults"
+  | "default"
+  | "manual";
+
 export interface UrlPassengerResult {
-  status: "absent" | "partial" | "invalid" | "applied";
+  status: "absent" | "invalid" | "applied";
   counts?: PassengerCounts;
   presentKeys: PassengerQueryKey[];
   invalidKeys: PassengerQueryKey[];
+  defaultedKeys: PassengerQueryKey[];
 }
 
 function normalizeText(value: string | undefined): string {
@@ -30,23 +37,31 @@ function normalizeText(value: string | undefined): string {
 }
 
 /**
- * Reads the three passenger parameters only when they are explicitly present
- * in a supported MrBilit train URL. Partial or invalid counts are never
- * guessed; the caller keeps its explicit passenger fields.
+ * Reads passenger counts from a supported MrBilit train URL.
+ *
+ * MrBilit only emits non-default values in its public search URLs:
+ * adultCount is omitted at 1, and childCount/infantCount at 0. Its own URL
+ * resolver therefore treats omitted values as those defaults. Missing values
+ * are filled with the same provider-defined defaults, but only when at least
+ * one passenger parameter is present. A URL with no passenger parameters is
+ * not treated as extracted data; the UI labels frontend defaults explicitly.
+ *
+ * Present-but-invalid values are never silently corrected.
  */
 export function parsePassengerCountsFromUrl(rawUrl: string): UrlPassengerResult {
   const presentKeys: PassengerQueryKey[] = [];
   const invalidKeys: PassengerQueryKey[] = [];
+  const defaultedKeys: PassengerQueryKey[] = [];
   const value = rawUrl.trim();
   if (!value) {
-    return { status: "absent", presentKeys, invalidKeys };
+    return { status: "absent", presentKeys, invalidKeys, defaultedKeys };
   }
 
   let parsed: URL;
   try {
     parsed = new URL(value);
   } catch {
-    return { status: "absent", presentKeys, invalidKeys };
+    return { status: "absent", presentKeys, invalidKeys, defaultedKeys };
   }
   if (
     parsed.protocol !== "https:" ||
@@ -57,38 +72,40 @@ export function parsePassengerCountsFromUrl(rawUrl: string): UrlPassengerResult 
     parsed.hash !== "" ||
     !parsed.pathname.startsWith("/trains/")
   ) {
-    return { status: "absent", presentKeys, invalidKeys };
+    return { status: "absent", presentKeys, invalidKeys, defaultedKeys };
   }
 
-  const values = new Map<PassengerQueryKey, number | null>();
+  const values = new Map<PassengerQueryKey, number>();
   for (const key of PASSENGER_QUERY_KEYS) {
     const result = readPassengerCount(parsed.searchParams, key);
     if (result.present) {
       presentKeys.push(key);
-      values.set(key, result.value);
-      if (result.value === null) invalidKeys.push(key);
+      if (result.value === null) {
+        invalidKeys.push(key);
+      } else {
+        values.set(key, result.value);
+      }
+    } else {
+      defaultedKeys.push(key);
     }
   }
 
   if (presentKeys.length === 0) {
-    return { status: "absent", presentKeys, invalidKeys };
-  }
-  if (presentKeys.length !== PASSENGER_QUERY_KEYS.length) {
-    return { status: "partial", presentKeys, invalidKeys };
+    return { status: "absent", presentKeys, invalidKeys, defaultedKeys };
   }
   if (invalidKeys.length > 0) {
-    return { status: "invalid", presentKeys, invalidKeys };
+    return { status: "invalid", presentKeys, invalidKeys, defaultedKeys };
   }
 
   const counts: PassengerCounts = {
-    adults: values.get("adultCount") ?? -1,
-    children: values.get("childCount") ?? -1,
-    infants: values.get("infantCount") ?? -1,
+    adults: values.get("adultCount") ?? 1,
+    children: values.get("childCount") ?? 0,
+    infants: values.get("infantCount") ?? 0,
   };
   if (!passengerCountsValid(counts)) {
-    return { status: "invalid", presentKeys, invalidKeys };
+    return { status: "invalid", presentKeys, invalidKeys, defaultedKeys };
   }
-  return { status: "applied", counts, presentKeys, invalidKeys };
+  return { status: "applied", counts, presentKeys, invalidKeys, defaultedKeys };
 }
 
 function readPassengerCount(
