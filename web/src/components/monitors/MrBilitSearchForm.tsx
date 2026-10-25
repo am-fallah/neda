@@ -1,6 +1,11 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, Loader2, Search, TrainFront } from "lucide-react";
-import { Link } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Info,
+  RotateCcw,
+  TrainFront,
+} from "lucide-react";
 import { isApiError } from "@/api/client";
 import { providersApi } from "@/api/endpoints";
 import type {
@@ -14,14 +19,34 @@ import type {
   Settings,
 } from "@/api/types";
 import { DateDisplay } from "@/components/JalaliDatePicker";
-import { ObservationStateBadge } from "@/components/status";
+import { EmptyState } from "@/components/layout/EmptyState";
+import { MonitorCreateStepper, type MonitorCreateStep } from "@/components/monitors/MonitorCreateStepper";
+import {
+  MonitorSearchPanel,
+  type SearchErrorDisplay,
+} from "@/components/monitors/MonitorSearchPanel";
+import { MonitorSearchResults } from "@/components/monitors/MonitorSearchResults";
+import { MonitorSummaryPanel } from "@/components/monitors/MonitorSummaryPanel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FormField, fieldProps } from "@/components/ui/form-field";
-import { Input } from "@/components/ui/input";
-import { formatTehranTimestamp } from "@/lib/dates";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  defaultMonitorLabel,
+  describeSearchWarnings,
+  formatPassengerSummary,
+  groupSearchTrains,
+  parsePassengerCountsFromUrl,
+  passengerCountsValid,
+  resultDestinationName,
+  resultOriginName,
+  searchInputSignature,
+  selectionKey,
+  toSelectedOption,
+  type SearchInputs,
+  type SearchWarningSummary,
+  type UrlPassengerResult,
+} from "@/lib/mrbilitSearch";
 
 interface MrBilitSearchFormProps {
   providers: ProviderInfo[];
@@ -30,35 +55,255 @@ interface MrBilitSearchFormProps {
   onSubmit: (payload: MonitorCreateRequest) => Promise<void>;
 }
 
-function optionKey(journeyKey: string, offeringKey: string): string {
-  return `${journeyKey}\u0000${offeringKey}`;
-}
+type PassengerSource = "url" | "manual";
 
-function toSelectedOption(
-  train: ProviderSearchTrain,
-  item: ProviderSearchClass,
-): SelectedOption {
-  return {
-    journeyKey: train.journeyKey,
-    offeringKey: item.offeringKey,
-    journeyNativeId: train.nativeId,
-    offeringNativeId: item.nativeId,
-    trainNumber: train.trainNumber,
-    operator: train.operator,
-    originName: train.originName,
-    destinationName: train.destinationName,
-    departureAt: train.departureAt,
-    arrivalAt: train.arrivalAt,
-    wagonId: item.wagonId,
-    wagonName: item.wagonName,
-    className: item.className,
-    compartmentType: item.compartmentType,
+type FocusTarget =
+  | "url"
+  | "adults"
+  | "children"
+  | "infants"
+  | "search-error"
+  | "results"
+  | "label"
+  | "selections"
+  | "create-error";
+
+function focusElement(target: FocusTarget) {
+  const ids: Record<FocusTarget, string> = {
+    url: "mrbilitUrl",
+    adults: "mrbilitAdults",
+    children: "mrbilitChildren",
+    infants: "mrbilitInfants",
+    "search-error": "search-error",
+    results: "search-results-heading",
+    label: "mrbilitLabel",
+    selections: "search-results-heading",
+    "create-error": "create-error",
   };
+  const element = document.getElementById(ids[target]);
+  if (element instanceof HTMLElement) {
+    element.focus();
+  }
 }
 
-function formatCapacity(capacity: number | null): string {
-  if (capacity === null) return "Capacity unavailable";
-  return `${capacity} seat${capacity === 1 ? "" : "s"}`;
+function searchErrorDisplay(caught: unknown): SearchErrorDisplay {
+  if (!isApiError(caught)) {
+    return {
+      title: "Search failed",
+      message: "The MrBilit search could not be completed.",
+    };
+  }
+  switch (caught.code) {
+    case "url_required":
+    case "unsupported_url":
+    case "invalid_url":
+    case "missing_date":
+    case "invalid_date":
+    case "past_date":
+      return { title: "Check the search URL", message: caught.message };
+    case "route_not_found":
+      return { title: "No matching route found", message: caught.message };
+    case "route_resolution_failed":
+      return { title: "Could not resolve this route", message: caught.message };
+    case "provider_timeout":
+      return { title: "MrBilit timed out", message: caught.message };
+    case "provider_rate_limited":
+      return { title: "Too many searches", message: caught.message };
+    case "provider_configuration":
+      return { title: "Search is not configured", message: caught.message };
+    case "provider_error":
+      return {
+        title: "Could not complete the search",
+        message: caught.message,
+      };
+    case "network_error":
+      return { title: "Network error", message: caught.message };
+    default:
+      return { title: "Search failed", message: caught.message };
+  }
+}
+
+function passengerErrors(
+  adults: number,
+  children: number,
+  infants: number,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  if (!Number.isInteger(adults) || adults < 1 || adults > 9) {
+    errors.adults = "Adults must be between 1 and 9.";
+  }
+  if (!Number.isInteger(children) || children < 0 || children > 9) {
+    errors.children = "Children must be between 0 and 9.";
+  }
+  if (!Number.isInteger(infants) || infants < 0 || infants > 9) {
+    errors.infants = "Infants must be between 0 and 9.";
+  }
+  if (
+    Object.keys(errors).length === 0 &&
+    adults + children + infants > 9
+  ) {
+    errors.passengers = "Total passengers must be at most 9.";
+  }
+  return errors;
+}
+
+function firstPassengerFocus(errors: Record<string, string>): FocusTarget {
+  if (errors.adults) return "adults";
+  if (errors.children) return "children";
+  if (errors.infants) return "infants";
+  return "adults";
+}
+
+function SearchContextBar({
+  result,
+  stale,
+  onEdit,
+}: {
+  result: ProviderSearchResult;
+  stale: boolean;
+  onEdit: () => void;
+}) {
+  const origin = resultOriginName(result);
+  const destination = resultDestinationName(result);
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-col gap-1">
+          <p
+            dir="ltr"
+            className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-semibold"
+          >
+            <bdi dir="auto" className="min-w-0 break-words">
+              {origin}
+            </bdi>
+            {destination ? (
+              <>
+                <ArrowRight
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
+                <bdi dir="auto" className="min-w-0 break-words">
+                  {destination}
+                </bdi>
+              </>
+            ) : null}
+          </p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <DateDisplay value={result.departureDate} />
+            <span aria-hidden="true">·</span>
+            <span>{formatPassengerSummary(result.passengers)}</span>
+            <span aria-hidden="true">·</span>
+            <span>
+              {result.trains.length === 0
+                ? "No trains"
+                : `${result.trains.length} train${
+                    result.trains.length === 1 ? "" : "s"
+                  }`}
+            </span>
+            {stale ? <Badge variant="warning">Out of date</Badge> : null}
+          </div>
+        </div>
+        <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+          Change search
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function StaleNotice({ onSearch }: { onSearch: () => void }) {
+  return (
+    <div
+      id="search-stale-notice"
+      role="status"
+      className="flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertTriangle
+          className="mt-0.5 size-4 shrink-0 text-warning-foreground dark:text-warning"
+          aria-hidden="true"
+        />
+        <div>
+          <p className="text-sm font-medium">Search settings changed</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+            These results no longer match the current URL or passenger counts.
+            Search again to refresh them.
+          </p>
+        </div>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-fit shrink-0"
+        onClick={onSearch}
+      >
+        <RotateCcw aria-hidden="true" />
+        Search again
+      </Button>
+    </div>
+  );
+}
+
+function ProviderNotes({ warnings }: { warnings: SearchWarningSummary }) {
+  if (warnings.notices.length === 0 && warnings.diagnostics.length === 0) {
+    return null;
+  }
+  return (
+    <details className="rounded-xl border bg-card px-4 py-3 text-xs">
+      <summary className="flex cursor-pointer items-center gap-2 font-medium">
+        <Info className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        Provider notes
+        <span className="text-muted-foreground">
+          ({warnings.notices.length + warnings.diagnostics.length})
+        </span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-1.5 text-muted-foreground">
+        {warnings.notices.map((notice) => (
+          <p key={notice} className="leading-relaxed">
+            {notice}
+          </p>
+        ))}
+        {warnings.diagnostics.length > 0 ? (
+          <p className="font-mono text-[0.7rem] break-words">
+            Diagnostics: {warnings.diagnostics.join(", ")}
+          </p>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
+function SearchResultsSkeleton() {
+  return (
+    <div
+      className="flex flex-col gap-4"
+      role="status"
+      aria-live="polite"
+      aria-label="Searching MrBilit"
+    >
+      <span className="sr-only">Searching MrBilit…</span>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-5 w-40" />
+        <Skeleton className="h-3 w-64 max-w-full" />
+      </div>
+      {[0, 1].map((index) => (
+        <div key={index} className="rounded-xl border bg-card p-4">
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-4 w-32" />
+              <Skeleton className="h-3 w-48 max-w-full" />
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-2">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function MrBilitSearchForm({
@@ -72,105 +317,293 @@ export function MrBilitSearchForm({
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
   const [infants, setInfants] = useState(0);
+  const [passengerSource, setPassengerSource] =
+    useState<PassengerSource>("manual");
   const [result, setResult] = useState<ProviderSearchResult | null>(null);
+  const [lastSearchSignature, setLastSearchSignature] = useState<string | null>(
+    null,
+  );
   const [selected, setSelected] = useState<Record<string, SelectedOption>>({});
   const [label, setLabel] = useState("");
+  const [labelEdited, setLabelEdited] = useState(false);
   const [searching, setSearching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [searchExpanded, setSearchExpanded] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [searchError, setSearchError] = useState("");
+  const [searchError, setSearchError] = useState<SearchErrorDisplay | null>(
+    null,
+  );
   const [createError, setCreateError] = useState("");
+  const [pendingFocus, setPendingFocus] = useState<FocusTarget | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const revisionRef = useRef(0);
 
-  const selectedOptions = useMemo(() => Object.values(selected), [selected]);
+  const urlPassenger: UrlPassengerResult = useMemo(
+    () => parsePassengerCountsFromUrl(url),
+    [url],
+  );
+  const currentSignature = searchInputSignature({
+    url,
+    adults,
+    children,
+    infants,
+  });
+  const stale = Boolean(
+    result && lastSearchSignature && lastSearchSignature !== currentSignature,
+  );
+  const groups = useMemo(
+    () => (result ? groupSearchTrains(result.trains) : []),
+    [result],
+  );
+  const warnings = useMemo(
+    () => (result ? describeSearchWarnings(result.warnings) : null),
+    [result],
+  );
+  const selectedOptions = useMemo(() => {
+    const options: SelectedOption[] = [];
+    for (const journey of groups) {
+      for (const family of journey.families) {
+        for (const option of family.options) {
+          const value =
+            selected[
+              selectionKey(journey.train.journeyKey, option.offeringKey)
+            ];
+          if (value) options.push(value);
+        }
+      }
+    }
+    return options;
+  }, [groups, selected]);
   const selectedCount = selectedOptions.length;
+  const summaryResult =
+    result && result.trains.length > 0 ? result : null;
+  const hasSelectableOptions = groups.some(
+    (journey) => journey.optionCount > 0,
+  );
+  const currentStep: MonitorCreateStep =
+    !hasSelectableOptions || stale ? 1 : selectedCount > 0 ? 3 : 2;
 
-  function resetResults() {
-    setResult(null);
+  useEffect(() => {
+    if (!pendingFocus) return;
+    focusElement(pendingFocus);
+    setPendingFocus(null);
+  }, [pendingFocus]);
+
+  useEffect(
+    () => () => {
+      revisionRef.current += 1;
+      abortRef.current?.abort();
+    },
+    [],
+  );
+
+  function invalidateSearch() {
+    revisionRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setSearching(false);
     setSelected({});
-    setLabel("");
     setFieldErrors({});
-    setSearchError("");
+    setSearchError(null);
     setCreateError("");
+    setSearchExpanded(true);
   }
 
-  function passengersValid(): boolean {
-    if (adults < 1 || adults > 9) return false;
-    if (children < 0 || children > 9) return false;
-    if (infants < 0 || infants > 9) return false;
-    return adults + children + infants <= 9;
+  function handleUrlChange(next: string) {
+    const parsed = parsePassengerCountsFromUrl(next);
+    setUrl(next);
+    if (parsed.status === "applied" && parsed.counts) {
+      setAdults(parsed.counts.adults);
+      setChildren(parsed.counts.children);
+      setInfants(parsed.counts.infants);
+      setPassengerSource("url");
+    } else {
+      setPassengerSource("manual");
+    }
+    invalidateSearch();
+  }
+
+  function handleAdultsChange(value: number) {
+    setAdults(value);
+    setPassengerSource("manual");
+    invalidateSearch();
+  }
+
+  function handleChildrenChange(value: number) {
+    setChildren(value);
+    setPassengerSource("manual");
+    invalidateSearch();
+  }
+
+  function handleInfantsChange(value: number) {
+    setInfants(value);
+    setPassengerSource("manual");
+    invalidateSearch();
   }
 
   async function handleSearch() {
-    setSearchError("");
-    setCreateError("");
-    setFieldErrors({});
-    if (!url.trim()) {
-      setFieldErrors({ url: "Paste a MrBilit train search URL." });
+    if (searching) return;
+    const currentUrl = url.trim();
+    const errors = passengerErrors(adults, children, infants);
+    if (!currentUrl) {
+      errors.url = "Paste a MrBilit train search URL.";
+    }
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors);
+      setSearchError(null);
+      setSearchExpanded(true);
+      setPendingFocus(errors.url ? "url" : firstPassengerFocus(errors));
       return;
     }
-    if (!passengersValid()) {
+    if (!passengerCountsValid({ adults, children, infants })) {
       setFieldErrors({ passengers: "Passengers must be between 1 and 9 total." });
+      setSearchError(null);
+      setSearchExpanded(true);
+      setPendingFocus("adults");
       return;
     }
+
+    const signature = searchInputSignature({
+      url: currentUrl,
+      adults,
+      children,
+      infants,
+    });
+    revisionRef.current += 1;
+    const revision = revisionRef.current;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setSearching(true);
+    setResult(null);
+    setLastSearchSignature(null);
+    setSelected({});
+    setFieldErrors({});
+    setSearchError(null);
+    setCreateError("");
+    setSearchExpanded(true);
+
+    const request: SearchInputs = {
+      url: currentUrl,
+      adults,
+      children,
+      infants,
+    };
     try {
-      const next = await providersApi.search("mrbilit", {
-        url: url.trim(),
-        adults,
-        children,
-        infants,
-      });
-      setResult(next);
-      setSelected({});
-      setLabel(
-        `${next.route.originName || next.slug} → ${next.route.destinationName || ""} — ${next.departureDate}`.trim(),
+      const next = await providersApi.search(
+        "mrbilit",
+        request,
+        controller.signal,
       );
-    } catch (caught) {
-      setResult(null);
+      if (revision !== revisionRef.current) return;
+      setResult(next);
+      setLastSearchSignature(signature);
+      setSearchExpanded(false);
       setSelected({});
+      if (!labelEdited) {
+        setLabel(defaultMonitorLabel(next));
+      }
+      setPendingFocus("results");
+    } catch (caught) {
+      if (revision !== revisionRef.current || controller.signal.aborted) return;
+      setResult(null);
+      setLastSearchSignature(null);
       if (isApiError(caught)) {
         setFieldErrors(caught.fields);
-        setSearchError(caught.message);
+        setSearchError(searchErrorDisplay(caught));
+        if (caught.fields.url) {
+          setPendingFocus("url");
+        } else if (caught.fields.adults) {
+          setPendingFocus("adults");
+        } else if (caught.fields.children) {
+          setPendingFocus("children");
+        } else if (caught.fields.infants) {
+          setPendingFocus("infants");
+        } else if (caught.fields.passengers) {
+          setPendingFocus("adults");
+        } else {
+          setPendingFocus("search-error");
+        }
       } else {
-        setSearchError("The MrBilit search could not be completed.");
+        setSearchError(searchErrorDisplay(caught));
+        setPendingFocus("search-error");
       }
     } finally {
-      setSearching(false);
+      if (revision === revisionRef.current) {
+        setSearching(false);
+        abortRef.current = null;
+      }
     }
   }
 
-  function toggle(train: ProviderSearchTrain, item: ProviderSearchClass) {
-    const key = optionKey(train.journeyKey, item.offeringKey);
+  function handleToggle(
+    train: ProviderSearchTrain,
+    option: ProviderSearchClass,
+  ) {
+    if (stale || searching || submitting) return;
+    const key = selectionKey(train.journeyKey, option.offeringKey);
     setSelected((current) => {
       const next = { ...current };
       if (next[key]) {
         delete next[key];
       } else {
-        next[key] = toSelectedOption(train, item);
+        next[key] = toSelectedOption(train, option);
       }
+      return next;
+    });
+    setFieldErrors((current) => {
+      if (!current.selections) return current;
+      const next = { ...current };
+      delete next.selections;
+      return next;
+    });
+    setCreateError("");
+  }
+
+  function handleLabelChange(value: string) {
+    setLabel(value);
+    setLabelEdited(true);
+    setCreateError("");
+    setFieldErrors((current) => {
+      if (!current.label) return current;
+      const next = { ...current };
+      delete next.label;
       return next;
     });
   }
 
+  function handleEditSearch() {
+    setSearchExpanded(true);
+    setPendingFocus("url");
+  }
+
   async function handleCreate() {
-    setCreateError("");
-    setFieldErrors({});
+    if (submitting) return;
     if (!result) {
       setCreateError("Search for trains before creating a monitor.");
+      setPendingFocus("create-error");
+      return;
+    }
+    if (stale) {
+      setCreateError("Search again before creating this monitor.");
+      setPendingFocus("create-error");
       return;
     }
     if (!label.trim()) {
       setFieldErrors({ label: "Enter a monitor label." });
+      setPendingFocus("label");
       return;
     }
     if (selectedCount === 0) {
       setFieldErrors({ selections: "Select at least one train and class." });
+      setPendingFocus("selections");
       return;
     }
+
     const payload: MonitorCreateRequest = {
       label: label.trim(),
-      originName: result.route.originName || result.slug,
-      destinationName: result.route.destinationName || "",
+      originName: resultOriginName(result),
+      destinationName: resultDestinationName(result),
       departureDate: result.departureDate,
       adults: result.passengers.adults,
       children: result.passengers.children,
@@ -185,7 +618,10 @@ export function MrBilitSearchForm({
         },
       ],
     };
+
     setSubmitting(true);
+    setCreateError("");
+    setFieldErrors({});
     try {
       await onSubmit(payload);
     } catch (caught) {
@@ -197,9 +633,17 @@ export function MrBilitSearchForm({
           }
         }
         setFieldErrors(nextFields);
-        setCreateError(caught.message);
+        setCreateError(caught.message || "The monitor could not be created.");
+        if (nextFields.label) {
+          setPendingFocus("label");
+        } else if (nextFields.selections) {
+          setPendingFocus("selections");
+        } else {
+          setPendingFocus("create-error");
+        }
       } else {
         setCreateError("The monitor could not be created.");
+        setPendingFocus("create-error");
       }
     } finally {
       setSubmitting(false);
@@ -219,319 +663,87 @@ export function MrBilitSearchForm({
   }
 
   return (
-    <div className="space-y-6">
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <TrainFront aria-hidden="true" />
-            Search MrBilit by URL
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <FormField
-            id="mrbilitUrl"
-            label="MrBilit train search URL"
-            error={fieldErrors.url}
-            required
-            description="Example: https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24. Tracking parameters are ignored."
-          >
-            <Input
-              {...fieldProps("mrbilitUrl", fieldErrors.url)}
-              value={url}
-              onChange={(event) => {
-                setUrl(event.target.value);
-                resetResults();
-              }}
-              placeholder="https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24"
-              autoComplete="off"
-              spellCheck={false}
+    <div className="flex flex-col gap-6">
+      <MonitorCreateStepper current={currentStep} />
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="flex min-w-0 flex-col gap-5">
+          {searchExpanded || !result ? (
+            <MonitorSearchPanel
+              url={url}
+              adults={adults}
+              children={children}
+              infants={infants}
+              passengerSource={passengerSource}
+              urlPassenger={urlPassenger}
+              fieldErrors={fieldErrors}
+              searching={searching}
+              searchError={searchError}
+              onUrlChange={handleUrlChange}
+              onAdultsChange={handleAdultsChange}
+              onChildrenChange={handleChildrenChange}
+              onInfantsChange={handleInfantsChange}
+              onSearch={handleSearch}
             />
-          </FormField>
-
-          <div className="grid gap-4 sm:grid-cols-3">
-            <FormField
-              id="mrbilitAdults"
-              label="Adults"
-              error={fieldErrors.adults}
-              required
-              description="1–9"
-            >
-              <Input
-                {...fieldProps("mrbilitAdults", fieldErrors.adults)}
-                type="number"
-                min={1}
-                max={9}
-                value={adults}
-                onChange={(event) => {
-                  setAdults(Number(event.target.value));
-                  resetResults();
-                }}
-              />
-            </FormField>
-            <FormField
-              id="mrbilitChildren"
-              label="Children"
-              error={fieldErrors.children}
-              description="0–9"
-            >
-              <Input
-                {...fieldProps("mrbilitChildren", fieldErrors.children)}
-                type="number"
-                min={0}
-                max={9}
-                value={children}
-                onChange={(event) => {
-                  setChildren(Number(event.target.value));
-                  resetResults();
-                }}
-              />
-            </FormField>
-            <FormField
-              id="mrbilitInfants"
-              label="Infants"
-              error={fieldErrors.infants}
-              description="0–9"
-            >
-              <Input
-                {...fieldProps("mrbilitInfants", fieldErrors.infants)}
-                type="number"
-                min={0}
-                max={9}
-                value={infants}
-                onChange={(event) => {
-                  setInfants(Number(event.target.value));
-                  resetResults();
-                }}
-              />
-            </FormField>
-          </div>
-          {fieldErrors.passengers ? (
-            <p className="text-xs font-medium text-destructive" role="alert">
-              {fieldErrors.passengers}
-            </p>
-          ) : null}
-          <p className="text-xs text-muted-foreground">
-            Search results are normalized for these passengers. Changing them clears the results so the next search uses the same counts.
-          </p>
-
-          {searchError ? (
-            <Alert variant="destructive">
-              <AlertTriangle aria-hidden="true" />
-              <AlertTitle>Search failed</AlertTitle>
-              <AlertDescription>{searchError}</AlertDescription>
-            </Alert>
+          ) : result ? (
+            <SearchContextBar
+              result={result}
+              stale={stale}
+              onEdit={handleEditSearch}
+            />
           ) : null}
 
-          <Button type="button" onClick={handleSearch} disabled={searching}>
-            {searching ? (
-              <Loader2 className="animate-spin" aria-hidden="true" />
-            ) : (
-              <Search aria-hidden="true" />
-            )}
-            {searching ? "Searching MrBilit…" : "Find trains"}
-          </Button>
-        </CardContent>
-      </Card>
+          {stale ? <StaleNotice onSearch={handleSearch} /> : null}
+          {warnings ? <ProviderNotes warnings={warnings} /> : null}
 
-      {result && result.trains.length === 0 ? (
-        <Alert variant="warning">
-          <AlertTriangle aria-hidden="true" />
-          <AlertTitle>No trains returned</AlertTitle>
-          <AlertDescription>
-            MrBilit returned no trains for this route and date. This is not treated as sold out. Try another date or URL.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+          {searching ? (
+            <SearchResultsSkeleton />
+          ) : result && result.trains.length === 0 ? (
+            <div
+              id="search-results-heading"
+              tabIndex={-1}
+              className="scroll-mt-24 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+            >
+              <EmptyState
+                icon={TrainFront}
+                title="No trains returned"
+                description="MrBilit returned no trains for this route and date. This is a successful empty result, not a sold-out signal. Try another date or URL."
+                action={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleEditSearch}
+                  >
+                    Change search
+                  </Button>
+                }
+              />
+            </div>
+          ) : groups.length > 0 ? (
+            <MonitorSearchResults
+              groups={groups}
+              selected={selected}
+              disabled={stale || submitting}
+              onToggle={handleToggle}
+            />
+          ) : null}
+        </div>
 
-      {result && result.trains.length > 0 ? (
-        <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Available trains and classes</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span>
-                  {result.route.originName || result.slug} → {result.route.destinationName || ""}
-                </span>
-                <span aria-hidden="true">·</span>
-                <DateDisplay value={result.departureDate} />
-                <span aria-hidden="true">·</span>
-                <span>Jalali {result.jalaliDate}</span>
-                <span aria-hidden="true">·</span>
-                <span>
-                  {result.passengers.adults} adult{result.passengers.adults === 1 ? "" : "s"}
-                  {result.passengers.children ? `, ${result.passengers.children} children` : ""}
-                  {result.passengers.infants ? `, ${result.passengers.infants} infants` : ""}
-                </span>
-              </div>
-              {result.warnings.length > 0 ? (
-                <p className="text-xs text-muted-foreground">
-                  Provider warnings: {result.warnings.join(", ")}
-                </p>
-              ) : null}
-
-              {result.trains.map((train) => (
-                <div key={train.journeyKey} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium">
-                        Train {train.trainNumber || train.nativeId || train.journeyKey}
-                        {train.operator ? ` · ${train.operator}` : ""}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatTehranTimestamp(train.departureAt)} → {formatTehranTimestamp(train.arrivalAt)}
-                      </p>
-                    </div>
-                    <Badge variant="outline">{train.classes.length} classes</Badge>
-                  </div>
-                  <div className="mt-3 space-y-2">
-                    {train.classes.map((item) => {
-                      const key = optionKey(train.journeyKey, item.offeringKey);
-                      const checked = Boolean(selected[key]);
-                      return (
-                        <label
-                          key={item.offeringKey}
-                          className="flex cursor-pointer items-start gap-3 rounded-md border p-3 transition-colors hover:bg-accent/30"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggle(train, item)}
-                            className="mt-1 size-4 rounded border-input accent-[var(--primary)]"
-                          />
-                          <span className="min-w-0 flex-1">
-                            <span className="flex flex-wrap items-center gap-2">
-                              <span className="font-medium">
-                                {item.wagonName || item.className || item.offeringKey}
-                              </span>
-                              <ObservationStateBadge state={item.state} />
-                            </span>
-                            <span className="mt-1 block text-xs text-muted-foreground">
-                              {item.className || "Class unavailable"}
-                              {item.compartmentType ? ` · ${item.compartmentType}` : ""}
-                              {` · ${formatCapacity(item.capacity)}`}
-                            </span>
-                          </span>
-                        </label>
-                      );
-                    })}
-                    {train.classes.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No normalized classes were returned for this train.
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Confirm monitor</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FormField id="mrbilitLabel" label="Monitor label" error={fieldErrors.label} required>
-                <Input
-                  {...fieldProps("mrbilitLabel", fieldErrors.label)}
-                  value={label}
-                  onChange={(event) => setLabel(event.target.value)}
-                  maxLength={100}
-                />
-              </FormField>
-              <div className="grid gap-3 text-sm sm:grid-cols-2">
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Route</p>
-                  <p>
-                    {result.route.originName || result.slug} → {result.route.destinationName || ""}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Departure</p>
-                  <p>
-                    <DateDisplay value={result.departureDate} /> · Jalali {result.jalaliDate}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Passengers</p>
-                  <p>
-                    {result.passengers.adults} adults, {result.passengers.children} children, {result.passengers.infants} infants
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Polling interval</p>
-                  <p>Every {settings.pollIntervalSeconds} seconds (global setting)</p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Telegram</p>
-                  <p>
-                    {settings.telegram.configured
-                      ? "Configured"
-                      : settings.telegram.available
-                        ? "Not configured"
-                        : "Unavailable"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground">Browser Push</p>
-                  <p>
-                    {!pushConfig.available
-                      ? "Unavailable"
-                      : pushConfig.enabled
-                        ? `Enabled · ${pushConfig.subscriptions.length} device${pushConfig.subscriptions.length === 1 ? "" : "s"}`
-                        : "Available but disabled"}
-                  </p>
-                </div>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Notification and interval settings are global. Change them in <Link to="/settings" className="underline">Settings</Link>.
-              </p>
-
-              <div>
-                <p className="text-xs font-medium text-muted-foreground">
-                  Selected options ({selectedCount})
-                </p>
-                {selectedCount === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    Select one or more classes above.
-                  </p>
-                ) : (
-                  <ul className="mt-1 space-y-1 text-sm">
-                    {selectedOptions.map((option) => (
-                      <li key={optionKey(option.journeyKey, option.offeringKey)}>
-                        Train {option.trainNumber || option.journeyNativeId} · {option.wagonName || option.className}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {fieldErrors.selections ? (
-                  <p className="mt-1 text-xs font-medium text-destructive" role="alert">
-                    {fieldErrors.selections}
-                  </p>
-                ) : null}
-              </div>
-
-              {createError ? (
-                <Alert variant="destructive">
-                  <AlertTriangle aria-hidden="true" />
-                  <AlertTitle>Monitor not created</AlertTitle>
-                  <AlertDescription>{createError}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              <Button
-                type="button"
-                onClick={handleCreate}
-                disabled={submitting || selectedCount === 0}
-              >
-                {submitting ? <Loader2 className="animate-spin" aria-hidden="true" /> : null}
-                {submitting ? "Creating…" : "Create monitor"}
-              </Button>
-            </CardContent>
-          </Card>
-        </>
-      ) : null}
+        <MonitorSummaryPanel
+          result={summaryResult}
+          groups={groups}
+          selected={selected}
+          label={label}
+          labelError={fieldErrors.label}
+          selectionError={fieldErrors.selections}
+          createError={createError}
+          submitting={submitting}
+          stale={stale}
+          settings={settings}
+          pushConfig={pushConfig}
+          onLabelChange={handleLabelChange}
+          onCreate={handleCreate}
+        />
+      </div>
     </div>
   );
 }

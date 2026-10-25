@@ -1,5 +1,6 @@
 import { useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { AlertTriangle, FlaskConical } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { monitorsApi, providersApi, pushApi, settingsApi } from "@/api/endpoints";
 import type {
@@ -9,10 +10,13 @@ import type {
   Settings,
 } from "@/api/types";
 import { ErrorState } from "@/components/layout/ErrorState";
-import { LoadingState } from "@/components/layout/LoadingState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { MonitorForm } from "@/components/monitors/MonitorForm";
 import { MrBilitSearchForm } from "@/components/monitors/MrBilitSearchForm";
+import { TestOnlyBadge } from "@/components/status";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { emptyMonitorForm } from "@/lib/monitorForm";
@@ -21,6 +25,56 @@ interface CreatePageData {
   providers: ProviderInfo[];
   settings: Settings;
   pushConfig: PushConfig;
+}
+
+function MonitorCreateSkeleton() {
+  return (
+    <div
+      className="flex flex-col gap-6"
+      role="status"
+      aria-live="polite"
+      aria-label="Loading monitor setup"
+    >
+      <span className="sr-only">Loading monitor setup…</span>
+      <div className="flex items-center gap-2">
+        <Skeleton className="size-6 rounded-full" />
+        <Skeleton className="h-3 w-16" />
+        <Skeleton className="h-px flex-1" />
+        <Skeleton className="size-6 rounded-full" />
+        <Skeleton className="h-3 w-14" />
+        <Skeleton className="h-px flex-1" />
+        <Skeleton className="size-6 rounded-full" />
+        <Skeleton className="h-3 w-16" />
+      </div>
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <div className="rounded-xl border bg-card p-5 sm:p-6">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="mt-2 h-3 w-80 max-w-full" />
+          <Skeleton className="mt-6 h-3 w-28" />
+          <Skeleton className="mt-2 h-10 w-full" />
+          <Skeleton className="mt-2 h-3 w-64 max-w-full" />
+          <div className="mt-6 grid gap-3 border-t pt-5 sm:grid-cols-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+          <div className="mt-5 flex justify-end border-t pt-5">
+            <Skeleton className="h-10 w-32" />
+          </div>
+        </div>
+        <div className="rounded-xl border bg-card p-5">
+          <Skeleton className="h-5 w-36" />
+          <Skeleton className="mt-2 h-3 w-56 max-w-full" />
+          <div className="mt-6 flex flex-col gap-3">
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function MonitorCreatePage() {
@@ -55,13 +109,19 @@ export function MonitorCreatePage() {
   const testProviders = providers.filter((provider) => provider.testOnly);
 
   return (
-    <div className="space-y-6">
+    <div className="monitor-create flex flex-col gap-6">
       <PageHeader
         title="New monitor"
-        description="Paste a MrBilit train search URL, choose the exact trains and classes to monitor, then confirm the route, date, passengers, interval, and notification settings."
+        description="Paste a MrBilit search URL, choose the exact classes to watch, and review the route, passengers, and delivery settings before creating it."
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/monitors">Cancel</Link>
+          </Button>
+        }
       />
+
       {loading ? (
-        <LoadingState rows={3} label="Loading providers" />
+        <MonitorCreateSkeleton />
       ) : error ? (
         <ErrorState
           error={error}
@@ -69,7 +129,7 @@ export function MonitorCreatePage() {
           onRetry={refresh}
         />
       ) : mrbilitAvailable && data ? (
-        <div className="space-y-8">
+        <div className="flex flex-col gap-6">
           <MrBilitSearchForm
             providers={providers}
             settings={data.settings}
@@ -77,12 +137,16 @@ export function MonitorCreatePage() {
             onSubmit={handleSubmit}
           />
           {testProviders.length > 0 ? (
-            <details className="rounded-lg border p-4">
-              <summary className="cursor-pointer text-sm font-medium">
-                Create a test-provider monitor instead
+            <details className="rounded-xl border bg-card/50 px-4 py-3">
+              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+                <FlaskConical className="size-3.5" aria-hidden="true" />
+                Local test-provider flow
+                <TestOnlyBadge />
               </summary>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The test provider is a deterministic fixture and never contacts a real ticket source.
+              <p className="mt-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+                This deterministic fixture provider is available only in
+                development. It never contacts a real ticket source and is not
+                part of the MrBilit flow above.
               </p>
               <div className="mt-4">
                 <MonitorForm
@@ -97,13 +161,24 @@ export function MonitorCreatePage() {
           ) : null}
         </div>
       ) : (
-        <MonitorForm
-          mode="create"
-          initialValues={emptyMonitorForm()}
-          providers={providers}
-          onSubmit={handleSubmit}
-          cancelTo="/monitors"
-        />
+        <div className="flex flex-col gap-6">
+          <Alert variant="warning">
+            <AlertTriangle aria-hidden="true" />
+            <AlertTitle>MrBilit is not available in this build</AlertTitle>
+            <AlertDescription>
+              Production provider registration remains deferred. Use an
+              available test-only provider only when the development
+              environment explicitly registers one.
+            </AlertDescription>
+          </Alert>
+          <MonitorForm
+            mode="create"
+            initialValues={emptyMonitorForm()}
+            providers={providers}
+            onSubmit={handleSubmit}
+            cancelTo="/monitors"
+          />
+        </div>
       )}
     </div>
   );

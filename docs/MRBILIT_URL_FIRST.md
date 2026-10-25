@@ -16,6 +16,32 @@
 The URL is search input only. It is never treated as proof of availability.
 Only the selected train/class options are tracked.
 
+### New Monitor UI behavior (2026-10-25)
+
+- **Passenger prefill is conservative and PROVISIONAL.** The frontend reads
+  `adultCount`, `childCount`, and `infantCount` only when all three are present
+  once, are valid integers, and satisfy the existing adult/child/infant and
+  total-passenger bounds. Partial or invalid values are never guessed; the
+  explicit fields remain authoritative. Counts embedded in the resolved
+  MrBilit page are not used because they may be provider defaults. The search
+  request still sends the explicit passenger counts.
+- **Changing the URL or passenger counts invalidates the previous search.**
+  In-flight responses are aborted and ignored through a revision guard, prior
+  selections are cleared, stale results are disabled, and creation is blocked
+  until a successful new search.
+- **Grouping is display-only.** Journeys remain distinct by `journeyKey`.
+  Classes are grouped under a strict wagon/class/compartment signature; each
+  distinct `offeringKey` remains an individually selectable option. Repeated
+  class names with different provider identity are not merged, and there is no
+  group-level select-all control.
+- **The generated label uses the URL route slug plus the Gregorian date** to
+  avoid bidi reordering in the text input. The summary still displays the
+  provider's route names and both Jalali and Gregorian dates. A manually edited
+  label is preserved across later searches.
+- **Polling and notification settings are global.** The summary displays their
+  current status and links to Settings; it does not add per-monitor controls.
+  The backend search and monitor-create contracts are unchanged.
+
 ## Local setup
 
 ```bash

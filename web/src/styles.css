@@ -58,6 +58,24 @@
   --info: oklch(0.72 0.1 245);
 }
 
+/*
+ * The New Monitor page is the first page in the neutral redesign. Keep the
+ * override scoped so the rest of the dashboard keeps its current theme until
+ * those pages are redesigned separately.
+ */
+.monitor-create {
+  --radius: 0.5rem;
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
+  --ring: oklch(0.55 0 0);
+}
+
+.dark .monitor-create {
+  --ring: oklch(0.72 0 0);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);

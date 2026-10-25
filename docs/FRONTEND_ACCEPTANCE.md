@@ -37,6 +37,30 @@ Environment: production-style embedded frontend served by the Go binary on `127.
 
 **Not covered by the automated audit:** real Telegram save/test delivery, Web Push, production provider data, long-running polling, human screen-reader/zoom/contrast review, and the remaining error/empty permutations listed below. The automated audit does not replace human accessibility review.
 
+## New Monitor redesign audit (2026-10-25)
+
+Environment: Vite development build, system Chrome through a temporary Playwright 1.64.1 install, private API and MrBilit-search responses mocked with deterministic fixtures. No backend database was read or changed; no live provider, Telegram, Push, or booking action occurred. Screenshots were reviewed at 1440×1000 and 390×844 in light and dark modes.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Initial search state | PASS | Two-column desktop layout; neutral page-scoped accent; search panel, empty summary, and global delivery status render without console/page errors. |
+| URL passenger prefill | PASS | Complete valid `adultCount`/`childCount`/`infantCount` values prefill and are visibly marked as loaded from the URL; partial values show guidance and do not overwrite explicit counts. |
+| Journey/class-family grouping | PASS | Strict unit tests cover same journey, repeated class names with different wagons/compartments, duplicate journey keys, and exact offering positions. Unavailable options remain selectable. |
+| Exact selection and summary | PASS | Selecting two options updates the live count, label, selected list, and creation payload. The backend payload is unchanged in shape. |
+| Stale-search invalidation | PASS | Changing the URL clears selections, disables results and creation, shows a "Search settings changed" notice, and an aborted in-flight response is ignored. |
+| Loading state | PASS | Search button and skeleton status are announced; duplicate submission is guarded. |
+| Empty result | PASS | "No trains returned" explicitly says this is not a sold-out signal; creation is unavailable. |
+| Search error | PASS | Provider failure shows an actionable error without implying unavailability; URL errors focus the URL field. |
+| Creation error | PASS | Summary-level error plus mapped selection field error; create action is re-enabled for retry. |
+| Label preservation | PASS | A manually edited label survives a subsequent search; the generated label uses the URL slug to avoid bidi reordering. |
+| Global delivery status | PASS | Polling interval is humanized; Telegram/Push state is read-only, labeled global, and links to Settings. |
+| Desktop light/dark | PASS | Success screenshots reviewed; neutral black primary in light and inverted neutral primary in dark; status colors remain semantic. |
+| Mobile 390 px | PASS | Search, grouped results, and summary stack cleanly; no horizontal overflow. Additional checks at 360 px and 320 px also pass. |
+| Axe WCAG 2 A/AA + 2.1 A/AA | PASS | 0 violations on initial, selected success, stale, empty, and error states in light mode; selected success also passes in dark mode and at 390 px. |
+| Console/page errors | PASS | No page errors and no unexpected console errors; the mocked provider-error scenario logged only the expected 502 resource status. |
+
+Remaining visual acceptance for the owner: confirm the neutral page-scoped accent, the journey/class-family density, the Persian/English bidi presentation, and the summary rail at the owner's preferred viewport. Human screen-reader and zoom review remain manual.
+
 ## Authentication
 
 | Check | Expected | Automated coverage | Manual result |
