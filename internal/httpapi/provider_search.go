@@ -13,14 +13,14 @@ import (
 
 const searchTimeout = 30 * time.Second
 
-type mrbilitSearchRequest struct {
+type providerSearchRequest struct {
 	URL      string `json:"url"`
 	Adults   int    `json:"adults"`
 	Children int    `json:"children"`
 	Infants  int    `json:"infants"`
 }
 
-type mrbilitSearchResponse struct {
+type providerSearchResponse struct {
 	URL           string                  `json:"url"`
 	Slug          string                  `json:"slug"`
 	JalaliDate    string                  `json:"jalaliDate"`
@@ -67,6 +67,8 @@ type searchClassResponse struct {
 	Capacity        *int   `json:"capacity"`
 	State           string `json:"state"`
 	Reason          string `json:"reason,omitempty"`
+	PriceAmount     *int64 `json:"priceAmount,omitempty"`
+	PriceCurrency   string `json:"priceCurrency,omitempty"`
 }
 
 func (s *Server) handleProviderSearch(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +97,7 @@ func (s *Server) handleProviderSearch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusNotFound, "search_not_supported", "provider does not support URL search")
 		return
 	}
-	var body mrbilitSearchRequest
+	var body providerSearchRequest
 	if err := decodeJSON(r, &body); err != nil {
 		writeDecodeError(w, r, err, "invalid search request")
 		return
@@ -111,13 +113,17 @@ func (s *Server) handleProviderSearch(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
-		s.writeSearchError(w, r, err)
+		s.writeSearchError(w, r, adapter.Metadata(), err)
 		return
 	}
 	writeJSON(w, http.StatusOK, searchDTO(result))
 }
 
-func (s *Server) writeSearchError(w http.ResponseWriter, r *http.Request, err error) {
+func (s *Server) writeSearchError(w http.ResponseWriter, r *http.Request, metadata provider.Metadata, err error) {
+	providerName := strings.TrimSpace(metadata.DisplayName)
+	if providerName == "" {
+		providerName = "The provider"
+	}
 	var inputErr *provider.InputError
 	if errors.As(err, &inputErr) {
 		if inputErr.Field == "" {
@@ -133,23 +139,23 @@ func (s *Server) writeSearchError(w http.ResponseWriter, r *http.Request, err er
 	if errors.As(err, &providerErr) {
 		switch providerErr.Kind {
 		case provider.ErrRouteNotFound:
-			writeError(w, r, http.StatusUnprocessableEntity, "route_not_found", "MrBilit did not find this route and date. This is not a sold-out result.")
+			writeError(w, r, http.StatusUnprocessableEntity, "route_not_found", providerName+" did not find this route and date. This is not a sold-out result.")
 		case provider.ErrTimeout:
-			writeError(w, r, http.StatusGatewayTimeout, "provider_timeout", "MrBilit did not respond in time. No availability conclusion was made.")
+			writeError(w, r, http.StatusGatewayTimeout, "provider_timeout", providerName+" did not respond in time. No availability conclusion was made.")
 		case provider.ErrRateLimited:
-			writeError(w, r, http.StatusServiceUnavailable, "provider_rate_limited", "MrBilit rate-limited the request. Try again later.")
+			writeError(w, r, http.StatusServiceUnavailable, "provider_rate_limited", providerName+" rate-limited the request. Try again later.")
 		case provider.ErrNetwork, provider.ErrHTTPStatus, provider.ErrInvalidResponse:
-			writeError(w, r, http.StatusBadGateway, "provider_error", "MrBilit returned an unusable response. No availability conclusion was made.")
+			writeError(w, r, http.StatusBadGateway, "provider_error", providerName+" returned an unusable response. No availability conclusion was made.")
 		case provider.ErrConfiguration:
-			writeError(w, r, http.StatusInternalServerError, "provider_configuration", "MrBilit search is not configured correctly.")
+			writeError(w, r, http.StatusInternalServerError, "provider_configuration", providerName+" search is not configured correctly.")
 		case provider.ErrCanceled:
-			writeError(w, r, http.StatusRequestTimeout, "provider_canceled", "The MrBilit search was canceled.")
+			writeError(w, r, http.StatusRequestTimeout, "provider_canceled", providerName+" search was canceled.")
 		default:
-			writeError(w, r, http.StatusBadGateway, "provider_error", "MrBilit search failed. No availability conclusion was made.")
+			writeError(w, r, http.StatusBadGateway, "provider_error", providerName+" search failed. No availability conclusion was made.")
 		}
 		s.logger.Warn("provider search failed",
 			"request_id", logging.RequestID(r.Context()),
-			"provider_id", "mrbilit",
+			"provider_id", string(metadata.ID),
 			"kind", string(providerErr.Kind),
 			"op", providerErr.Op,
 			"upstream_status", providerErr.StatusCode,
@@ -158,17 +164,24 @@ func (s *Server) writeSearchError(w http.ResponseWriter, r *http.Request, err er
 	}
 	s.logger.Error("provider search failed",
 		"request_id", logging.RequestID(r.Context()),
-		"provider_id", "mrbilit",
+		"provider_id", string(metadata.ID),
 		"code", "search_failed",
 	)
-	writeError(w, r, http.StatusBadGateway, "provider_error", "MrBilit search failed. No availability conclusion was made.")
+	writeError(w, r, http.StatusBadGateway, "provider_error", providerName+" search failed. No availability conclusion was made.")
 }
 
-func searchDTO(result provider.SearchResult) mrbilitSearchResponse {
+func searchDTO(result provider.SearchResult) providerSearchResponse {
 	trains := make([]searchTrainResponse, 0, len(result.Result.Journeys))
 	for _, journey := range result.Result.Journeys {
 		classes := make([]searchClassResponse, 0, len(journey.Offerings))
 		for _, offering := range journey.Offerings {
+			var priceAmount *int64
+			priceCurrency := ""
+			if offering.Offering.Price != nil {
+				amount := offering.Offering.Price.Amount
+				priceAmount = &amount
+				priceCurrency = offering.Offering.Price.Currency
+			}
 			classes = append(classes, searchClassResponse{
 				OfferingKey:     offering.Offering.Key,
 				NativeID:        offering.Offering.NativeID,
@@ -179,6 +192,8 @@ func searchDTO(result provider.SearchResult) mrbilitSearchResponse {
 				Capacity:        offering.Capacity,
 				State:           string(offering.State),
 				Reason:          offering.Reason,
+				PriceAmount:     priceAmount,
+				PriceCurrency:   priceCurrency,
 			})
 		}
 		trains = append(trains, searchTrainResponse{
@@ -197,7 +212,7 @@ func searchDTO(result provider.SearchResult) mrbilitSearchResponse {
 	if warnings == nil {
 		warnings = []string{}
 	}
-	return mrbilitSearchResponse{
+	return providerSearchResponse{
 		URL:           result.URL,
 		Slug:          result.Slug,
 		JalaliDate:    result.JalaliDate,

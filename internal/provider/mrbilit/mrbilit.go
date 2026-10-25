@@ -92,6 +92,8 @@ func (p *Provider) Metadata() provider.Metadata {
 		Capabilities: provider.Capabilities{
 			RequiresOriginID:        true,
 			RequiresDestinationID:   true,
+			SupportsURLSearch:       true,
+			SupportsPrice:           true,
 			SupportsBookingURL:      true,
 			SupportsGender:          false,
 			RequiresOptionSelection: true,

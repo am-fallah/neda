@@ -694,11 +694,14 @@ func (e *Error) Error() string { /* safe, no URLs/queries/bodies/tokens */ }
 func (e *Error) Unwrap() error { return e.Err }
 
 type Capabilities struct {
-    RequiresOriginID      bool
-    RequiresDestinationID bool
-    SupportsBookingURL    bool
-    SupportsGender        bool
-    MaxPassengers         int // 0 = unknown/not enforced here
+    RequiresOriginID        bool
+    RequiresDestinationID   bool
+    SupportsURLSearch       bool
+    SupportsPrice           bool
+    SupportsBookingURL      bool
+    SupportsGender          bool
+    RequiresOptionSelection bool
+    MaxPassengers           int // 0 = unknown/not enforced here
 }
 
 type Metadata struct {
@@ -740,8 +743,8 @@ type CheckRequest struct {
 // in its per-check context for the §10.2 post-I/O validity gate.
 
 type Price struct {
-    Amount   int64  // minor units, only when validated
-    Currency string // provider-reported; empty if unknown
+    Amount   int64  // provider-reported integer; never scaled or converted
+    Currency string // empty until the provider's unit semantics are verified
 }
 
 type Journey struct {
@@ -821,6 +824,7 @@ func (r *Registry) List() []Metadata
 4. Register explicitly in the composition root.
 5. Add per-provider config fields only if its capabilities require them.
 6. No changes to scheduler/state/notification logic should be necessary. If they are, the abstraction is wrong; fix it with tests before adding the provider.
+7. Before a second real provider is added, notification provider labels and the booking-host/click allowlists must consume provider metadata rather than the remaining MrBilit-specific constants. The current behavior is safe for MrBilit; another provider's booking link would fall back to its event page until that wiring is completed.
 
 ---
 
@@ -864,7 +868,7 @@ The response envelope and field types are **not verified**. The parser must be f
 - Enforce the journey/offering caps before allocating normalized observations. A response with too many journeys/offerings is rejected without state changes.
 - Preserve only normalized fields and bounded sanitized diagnostics; do not store raw responses.
 - Times: parse only verified formats. If a time is unparseable, keep null and add a warning; do not fail availability solely because a display time is missing. Journey identity must not depend on an unparsed time if a stable native ID exists.
-- Prices: parse only verified numeric/currency semantics. Do not infer Rial vs Toman. If unknown, leave price absent/`null` and preserve a display-safe string only if validated.
+- Prices: preserve a positive provider-reported integer as `Price.Amount` without scaling. Do not infer Rial vs Toman, a per-passenger basis, or a total. Leave `Currency` empty until verified. Zero, missing, negative, fractional, overflow, and unexpected types are unavailable price observations, never free or cheapest. Price never affects availability state or offering identity.
 - Capacity: only a numeric finite non-negative integer is usable for classification. `capacityString` is display-only until validated; never parse it into a ticket decision.
 - Booleans: only real JSON booleans. Do not coerce `"true"`, `1`, or missing values into positive evidence.
 
@@ -980,7 +984,10 @@ classes, plus shortfall, empty, route-not-found, malformed, and unexpected-type
 cases. Live validation on 2026-10-25 used two unauthenticated GETs (HTTP 200)
 and the adapter reported 1 journey, 6 offerings, 2 Reservable, 4 NotReservable,
 0 Unknown, no warnings, and 6 booking URLs. Times are local Tehran wall-clock in
-the observed payload; prices are not stored because Rial/Toman is unverified.
+the observed payload. A positive numeric provider amount is now preserved as
+`Offering.Price` without a currency; zero/missing/invalid values remain absent.
+Rial/Toman, per-passenger basis, and `sellType` semantics remain unverified, so
+notifications omit price until a currency is validated.
 The adapter is deliberately **not registered** in production; `PRV-009` remains
 a separate decision. Non-production composition registers it automatically for
 URL-first monitor creation. Full evidence: `docs/MRBILIT_LIVE_VALIDATION.md`
@@ -1005,6 +1012,23 @@ The New Monitor route applies a route-scoped body class that maps primary,
 accent, and focus-ring tokens to neutral values across the page and shared
 shell. Other routes and the global theme are unchanged; semantic status colors
 remain for availability and delivery meaning.
+
+The results presentation is **train → wagon group → fare/offering detail**.
+Wagon groups are derived in the frontend from provider-native wagon identity
+plus physical attributes; every offering remains an exact identity. The default
+wagon checkbox selects all current offering keys under that group, while
+expanded fare rows allow exact/partial selection. A wagon availability summary
+is display-only: any reservable child is reservable; otherwise any unknown
+child remains unknown; only an entirely decisive NotReservable group is shown
+as not reservable. No synthetic wagon state is persisted, no future offering is
+auto-added, and notification behavior remains per offering.
+
+The price filter is a view-only client-side control over the current search
+snapshot. It filters individual offerings, hides unpriced entries only while a
+range is active (with a visible count and explicit include control), never
+mutates selection or the monitor payload, and never invalidates a search.
+Sorting is also view-only. Unpriced offerings are never treated as zero or as
+the cheapest.
 
 Selected train/class options are persisted in
 `monitor_provider_selections` with the provider target and config version:

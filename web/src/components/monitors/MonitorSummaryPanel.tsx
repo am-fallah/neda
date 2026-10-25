@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
-  ClipboardCheck,
   Loader2,
   Plus,
   Search,
@@ -16,6 +15,7 @@ import type {
   SelectedOption,
   Settings,
 } from "@/api/types";
+import { ProviderPrice } from "@/components/ProviderPrice";
 import { ObservationStateBadge } from "@/components/status";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -32,15 +32,14 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  classFamilyMeta,
-  describeSelection,
+  describeSelectedWagon,
+  groupSelectedWagons,
   notificationReadiness,
   pollIntervalLabel,
-  selectionKey,
+  selectedOfferingCount,
   type ChannelTone,
   type SearchJourneyGroup,
-  type SelectionPosition,
-} from "@/lib/mrbilitSearch";
+} from "@/lib/searchResults";
 
 interface MonitorSummaryPanelProps {
   result: ProviderSearchResult | null;
@@ -111,13 +110,32 @@ function SettingsSummary({
           </dd>
         </div>
       </dl>
-      <Link
-        to="/settings"
-        className="inline-flex w-fit items-center gap-1.5 py-1 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
-      >
-        <Settings2 className="size-3.5" aria-hidden="true" />
-        Manage in Settings
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {notifications.ready ? (
+          <p className="flex items-start gap-1.5 text-[0.7rem] text-muted-foreground">
+            <CheckCircle2
+              className="mt-0.5 size-3.5 shrink-0 text-success"
+              aria-hidden="true"
+            />
+            At least one channel is ready.
+          </p>
+        ) : (
+          <p className="flex items-start gap-1.5 text-[0.7rem] text-warning-foreground dark:text-warning">
+            <AlertTriangle
+              className="mt-0.5 size-3.5 shrink-0"
+              aria-hidden="true"
+            />
+            No notification channel is ready. You can still create the monitor.
+          </p>
+        )}
+        <Link
+          to="/settings"
+          className="inline-flex w-fit items-center gap-1.5 py-1 text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          <Settings2 className="size-3.5" aria-hidden="true" />
+          Manage
+        </Link>
+      </div>
     </div>
   );
 }
@@ -141,68 +159,40 @@ export function MonitorSummaryPanel({
   onLabelChange,
   onCreate,
 }: MonitorSummaryPanelProps) {
-  const selectedPositions = useMemo(() => {
-    const positions: SelectionPosition[] = [];
-    for (const journey of groups) {
-      for (const family of journey.families) {
-        for (const [index, option] of family.options.entries()) {
-          const key = selectionKey(
-            journey.train.journeyKey,
-            option.offeringKey,
-          );
-          if (selected[key]) {
-            positions.push({
-              journey,
-              family,
-              option,
-              index,
-              total: family.options.length,
-            });
-          }
-        }
-      }
-    }
-    return positions;
-  }, [groups, selected]);
-  const selectedCount = selectedPositions.length;
-  const totalOptions = groups.reduce(
-    (total, journey) => total + journey.optionCount,
-    0,
+  const selectedWagons = useMemo(
+    () => groupSelectedWagons(groups, selected),
+    [groups, selected],
   );
-  const notifications = notificationReadiness(settings, pushConfig);
+  const selectedOfferings = selectedOfferingCount(selected);
   const labelReady = label.trim().length > 0;
   const canCreate =
-    Boolean(result) && !stale && !submitting && selectedCount > 0 && labelReady;
+    Boolean(result) &&
+    !stale &&
+    !submitting &&
+    selectedWagons.length > 0 &&
+    labelReady;
   const helper = stale
     ? "Search again to refresh these results before creating the monitor."
-    : selectedCount === 0
-      ? "Select at least one class to continue."
+    : selectedWagons.length === 0
+      ? "Select at least one wagon to continue."
       : !labelReady
         ? "Enter a monitor label to continue."
         : "The first check is scheduled shortly after creation.";
 
   return (
     <Card
+      id="monitor-summary"
       aria-busy={submitting}
-      className="gap-0 overflow-hidden py-0 xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:overscroll-contain"
+      className="scroll-mt-24 gap-0 overflow-hidden rounded-lg py-0 shadow-none xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:overscroll-contain"
     >
       <CardHeader className="border-b px-5 py-4">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
-            <ClipboardCheck className="size-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <CardTitle
-              className="text-base"
-              role="heading"
-              aria-level={2}
-            >
-              Review &amp; create
-            </CardTitle>
-            <CardDescription className="mt-1">
-              Name the monitor and confirm the classes to watch.
-            </CardDescription>
-          </div>
+        <div>
+          <CardTitle className="text-base" role="heading" aria-level={2}>
+            Review
+          </CardTitle>
+          <CardDescription className="mt-1">
+            Name the monitor and confirm the wagons to watch.
+          </CardDescription>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-5 px-5 py-5">
@@ -214,7 +204,7 @@ export function MonitorSummaryPanel({
                   className="size-4 text-muted-foreground"
                   aria-hidden="true"
                 />
-                Searching MrBilit…
+                Searching…
               </p>
               <div className="flex flex-col gap-2">
                 <Skeleton className="h-4 w-3/4" />
@@ -223,7 +213,7 @@ export function MonitorSummaryPanel({
               </div>
             </div>
           ) : (
-            <div className="flex flex-col gap-2 rounded-xl border border-dashed bg-muted/15 px-4 py-5">
+            <div className="flex flex-col gap-1.5">
               <p className="flex items-center gap-2 text-sm font-medium">
                 {emptyResult ? (
                   <TrainFront
@@ -236,12 +226,12 @@ export function MonitorSummaryPanel({
                     aria-hidden="true"
                   />
                 )}
-                {emptyResult ? "No classes to review" : "Start with a search"}
+                {emptyResult ? "No wagons to review" : "Review appears here"}
               </p>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {emptyResult
-                  ? "MrBilit returned no trains for this route and date. Try another date or URL."
-                  : "Search for trains, then select the classes you want to monitor."}
+                  ? "The provider returned no trains for this route and date. Try another date or URL."
+                  : "Search first, then choose the wagons or individual fare options you want Neda to monitor."}
               </p>
             </div>
           )
@@ -270,58 +260,64 @@ export function MonitorSummaryPanel({
             <div className="flex flex-col gap-2.5">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-                  Selected options
+                  Selected wagons
                 </h3>
                 <span
                   className="text-xs text-muted-foreground tabular-nums"
                   aria-live="polite"
                 >
-                  {selectedCount === 0
+                  {selectedWagons.length === 0
                     ? "None"
-                    : `${selectedCount} of ${totalOptions}`}
+                    : `${selectedWagons.length} wagon${
+                        selectedWagons.length === 1 ? "" : "s"
+                      } · ${selectedOfferings} fare option${
+                        selectedOfferings === 1 ? "" : "s"
+                      }`}
                 </span>
               </div>
-              {selectedCount === 0 ? (
+              {selectedWagons.length === 0 ? (
                 <p className="rounded-lg border border-dashed bg-muted/15 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
                   {stale
-                    ? "Search again to refresh these results before selecting classes."
-                    : "Choose at least one class from the results. Unavailable classes are still valid monitoring targets."}
+                    ? "Search again to refresh these results before selecting wagons."
+                    : "Choose at least one wagon from the results. Selecting a wagon tracks all its current fare options."}
                 </p>
               ) : (
                 <ul
-                  aria-label="Selected offerings"
+                  aria-label="Selected wagons"
                   tabIndex={0}
-                  className="max-h-56 divide-y overflow-y-auto rounded-lg border text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
+                  className="max-h-60 divide-y overflow-y-auto rounded-lg border text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none"
                 >
-                  {selectedPositions.map((position) => (
+                  {selectedWagons.map((item) => (
                     <li
-                      key={selectionKey(
-                        position.journey.train.journeyKey,
-                        position.option.offeringKey,
-                      )}
+                      key={`${item.journey.train.journeyKey}\u0000${item.wagon.key}`}
                       className="flex flex-col gap-1.5 px-3 py-2.5"
                     >
-                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="break-words font-medium">
-                          <bdi dir="auto">{describeSelection(position)}</bdi>
+                      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                        <span className="min-w-0 break-words font-medium">
+                          <bdi dir="auto">{describeSelectedWagon(item)}</bdi>
                         </span>
-                        <ObservationStateBadge state={position.option.state} />
-                      </span>
-                      <span className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
-                        <bdi dir="auto">
-                          {classFamilyMeta(position.family) ||
-                            position.family.compartmentType ||
-                            "Class details unavailable"}
-                        </bdi>
-                        {position.option.capacity !== null ? (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="tabular-nums">
-                              Capacity {position.option.capacity}
-                            </span>
-                          </>
-                        ) : null}
-                      </span>
+                        <ObservationStateBadge state={item.summary.state} />
+                      </div>
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground">
+                        <span>
+                          {item.partial
+                            ? `${item.selectedOfferings.length} of ${item.wagon.offerings.length} fare options`
+                            : `${item.summary.optionCount} fare options`}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          {item.summary.reservableCount} reservable
+                          {item.summary.unknownCount > 0
+                            ? ` · ${item.summary.unknownCount} unknown`
+                            : ""}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <ProviderPrice
+                          amount={item.summary.lowestKnownPrice}
+                          className="text-[0.7rem]"
+                          emptyLabel="Price unavailable"
+                        />
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -338,25 +334,6 @@ export function MonitorSummaryPanel({
         <Separator />
 
         <SettingsSummary settings={settings} pushConfig={pushConfig} />
-
-        {result && !notifications.ready ? (
-          <Alert variant="warning">
-            <AlertTriangle aria-hidden="true" />
-            <AlertTitle>No notification channel is ready</AlertTitle>
-            <AlertDescription>
-              You can still create the monitor. Configure Telegram or enable
-              Browser Push in Settings to receive alerts.
-            </AlertDescription>
-          </Alert>
-        ) : result ? (
-          <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-            <CheckCircle2
-              className="mt-0.5 size-3.5 shrink-0 text-success"
-              aria-hidden="true"
-            />
-            At least one notification channel is ready.
-          </p>
-        ) : null}
 
         {createError ? (
           <div
@@ -377,6 +354,7 @@ export function MonitorSummaryPanel({
             <Button
               type="button"
               size="lg"
+              variant={canCreate ? "default" : "outline"}
               className="w-full"
               onClick={onCreate}
               disabled={!canCreate}

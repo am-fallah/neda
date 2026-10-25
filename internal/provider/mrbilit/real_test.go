@@ -65,15 +65,25 @@ func TestParseObservedSanitizedEnvelope(t *testing.T) {
 	}
 	counts := map[provider.State]int{}
 	capacities := map[provider.State][]int{}
+	prices := map[string]int64{}
 	for _, offering := range journey.Offerings {
 		counts[offering.State]++
 		capacities[offering.State] = append(capacities[offering.State], *offering.Capacity)
+		if offering.Offering.Price != nil {
+			prices[offering.Offering.NativeID] = offering.Offering.Price.Amount
+			if offering.Offering.Price.Currency != "" {
+				t.Fatalf("unverified currency invented: %+v", offering.Offering.Price)
+			}
+		}
 		if offering.BookingURL == nil || offering.BookingURL.String() != "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14" {
 			t.Fatalf("booking URL = %v", offering.BookingURL)
 		}
 	}
 	if counts[provider.StateReservable] != 2 || counts[provider.StateNotReservable] != 4 {
 		t.Fatalf("state counts = %v", counts)
+	}
+	if len(prices) != 2 || prices["9102"] != 12345000 || prices["9105"] != 2345000 {
+		t.Fatalf("prices = %v", prices)
 	}
 	if len(capacities[provider.StateReservable]) != 2 ||
 		!(capacitySet(capacities[provider.StateReservable], 2) && capacitySet(capacities[provider.StateReservable], 3)) {
@@ -99,6 +109,42 @@ func TestObservedCapacityShortfallRemainsUnknown(t *testing.T) {
 	}
 	if counts[provider.StateReservable] != 0 || counts[provider.StateUnknown] != 2 || counts[provider.StateNotReservable] != 4 {
 		t.Fatalf("state counts = %v", counts)
+	}
+}
+
+func TestPriceExtractionNeverInventsZeroOrCurrency(t *testing.T) {
+	payload := []byte(`{
+		"trains":[{
+			"id":1,"trainNumber":1,
+			"prices":[{"sellType":1,"classes":[
+				{"id":11,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":1,"isAvailable":true,"reservationAvailable":true,"price":1200},
+				{"id":12,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":0,"isAvailable":false,"reservationAvailable":true,"price":0},
+				{"id":13,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":0,"isAvailable":false,"reservationAvailable":true,"price":-5},
+				{"id":14,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":1,"isAvailable":true,"reservationAvailable":true,"price":null},
+				{"id":15,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":1,"isAvailable":true,"reservationAvailable":true,"price":"1200"}
+			]}]
+		}],
+		"meta":{"routeNotFound":false}
+	}`)
+	result, err := parseResponse(payload, observedRequest(t, 1), testNow)
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+	prices := map[string]*provider.Price{}
+	for _, offering := range result.Journeys[0].Offerings {
+		prices[offering.Offering.NativeID] = offering.Offering.Price
+	}
+	if prices["11"] == nil || prices["11"].Amount != 1200 || prices["11"].Currency != "" {
+		t.Fatalf("positive price = %+v", prices["11"])
+	}
+	for _, id := range []string{"12", "13", "14", "15"} {
+		if prices[id] != nil {
+			t.Fatalf("unusable price %s was exposed: %+v", id, prices[id])
+		}
+	}
+	if !containsWarning(result.Warnings, "invalid_offer_price") ||
+		!containsWarning(result.Warnings, "unexpected_offer_price_type") {
+		t.Fatalf("warnings = %v", result.Warnings)
 	}
 }
 
@@ -224,4 +270,30 @@ func capacitySet(values []int, want int) bool {
 		}
 	}
 	return false
+}
+
+func TestDuplicateOfferingWithConflictingPriceStaysUnknown(t *testing.T) {
+	payload := []byte(`{
+		"trains":[{
+			"id":1,"trainNumber":1,
+			"prices":[{"sellType":1,"classes":[
+				{"id":11,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":1,"isAvailable":true,"reservationAvailable":true,"price":1200},
+				{"id":11,"wagonID":21,"wagonName":"W","shortTitle":"C","capacity":1,"isAvailable":true,"reservationAvailable":true,"price":1500}
+			]}]
+		}],
+		"meta":{"routeNotFound":false}
+	}`)
+	result, err := parseResponse(payload, observedRequest(t, 1), testNow)
+	if err != nil {
+		t.Fatalf("parseResponse: %v", err)
+	}
+	offerings := result.Journeys[0].Offerings
+	if len(offerings) != 1 {
+		t.Fatalf("offerings = %d", len(offerings))
+	}
+	if offerings[0].State != provider.StateUnknown ||
+		offerings[0].Reason != "duplicate_offering_key" ||
+		offerings[0].Offering.Price != nil {
+		t.Fatalf("duplicate offering = %+v", offerings[0])
+	}
 }

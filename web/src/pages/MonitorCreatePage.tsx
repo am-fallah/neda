@@ -12,8 +12,8 @@ import type {
 import { ErrorState } from "@/components/layout/ErrorState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { MonitorForm } from "@/components/monitors/MonitorForm";
-import { MrBilitSearchForm } from "@/components/monitors/MrBilitSearchForm";
 import { TestOnlyBadge } from "@/components/status";
+import { urlSearchFlowFor } from "@/providers/registry";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -120,7 +120,10 @@ export function MonitorCreatePage() {
   }
 
   const providers = data?.providers ?? [];
-  const mrbilitAvailable = providers.some((provider) => provider.id === "mrbilit");
+  const urlProvider = providers.find(
+    (provider) => provider.capabilities.supportsUrlSearch,
+  );
+  const UrlSearchFlow = urlProvider ? urlSearchFlowFor(urlProvider) : null;
   const testProviders = providers.filter((provider) => provider.testOnly);
 
   return (
@@ -148,7 +151,8 @@ export function MonitorCreatePage() {
         </nav>
         <PageHeader
           title="New monitor"
-          description="Paste a MrBilit search URL, choose the classes to watch, and confirm the monitor."
+          titleClassName="text-[1.75rem] leading-9 tracking-[-0.025em]"
+          description="Search the selected provider, choose the wagons or fare options to watch, and confirm the monitor."
           actions={
             <Button asChild variant="outline">
               <Link to="/monitors">Cancel</Link>
@@ -165,10 +169,10 @@ export function MonitorCreatePage() {
           title="Could not load monitor setup"
           onRetry={refresh}
         />
-      ) : mrbilitAvailable && data ? (
+      ) : urlProvider && UrlSearchFlow && data ? (
         <div className="flex flex-col gap-6">
-          <MrBilitSearchForm
-            providers={providers}
+          <UrlSearchFlow
+            provider={urlProvider}
             settings={data.settings}
             pushConfig={data.pushConfig}
             onSubmit={handleSubmit}
@@ -183,7 +187,7 @@ export function MonitorCreatePage() {
               <p className="mt-3 max-w-3xl text-xs leading-relaxed text-muted-foreground">
                 This deterministic fixture provider is available only in
                 development. It never contacts a real ticket source and is not
-                part of the MrBilit flow above.
+                part of the provider search flow above.
               </p>
               <div className="mt-4 rounded-xl border bg-muted/15 p-4">
                 <MonitorForm
@@ -201,11 +205,11 @@ export function MonitorCreatePage() {
         <div className="flex flex-col gap-6">
           <Alert variant="warning">
             <AlertTriangle aria-hidden="true" />
-            <AlertTitle>MrBilit is not available in this build</AlertTitle>
+            <AlertTitle>No URL-search provider is available</AlertTitle>
             <AlertDescription>
-              Production provider registration remains deferred. Use an
-              available test-only provider only when the development
-              environment explicitly registers one.
+              {urlProvider
+                ? `${urlProvider.displayName} is registered, but this build does not include its search form.`
+                : "Production provider registration remains deferred. Use an available test-only provider only when the development environment explicitly registers one."}
             </AlertDescription>
           </Alert>
           <MonitorForm

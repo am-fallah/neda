@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ func stubSearchResult() provider.SearchResult {
 						Key: "id:9102", NativeID: "9102", WagonID: "9202",
 						WagonName: "Five-star Samen", ClassName: "Samen",
 						CompartmentType: "4-person compartment",
+						Price:           &provider.Price{Amount: 12345000},
 					},
 					State: provider.StateReservable, Capacity: intPointer(3),
 					Reason: "positive_capacity_and_flags",
@@ -74,6 +76,7 @@ func TestProviderSearchEndpoint(t *testing.T) {
 			ID: "mrbilit", DisplayName: "MrBilit",
 			Capabilities: provider.Capabilities{
 				RequiresOriginID: true, RequiresDestinationID: true,
+				SupportsURLSearch: true, SupportsPrice: true,
 				RequiresOptionSelection: true, MaxPassengers: 9,
 			},
 		},
@@ -93,6 +96,8 @@ func TestProviderSearchEndpoint(t *testing.T) {
 			ID           string `json:"id"`
 			Capabilities struct {
 				RequiresOptionSelection bool `json:"requiresOptionSelection"`
+				SupportsURLSearch       bool `json:"supportsUrlSearch"`
+				SupportsPrice           bool `json:"supportsPrice"`
 			} `json:"capabilities"`
 		} `json:"providers"`
 	}
@@ -101,12 +106,13 @@ func TestProviderSearchEndpoint(t *testing.T) {
 	}
 	foundOptionCapability := false
 	for _, item := range providerList.Providers {
-		if item.ID == "mrbilit" && item.Capabilities.RequiresOptionSelection {
+		if item.ID == "mrbilit" && item.Capabilities.RequiresOptionSelection &&
+			item.Capabilities.SupportsURLSearch && item.Capabilities.SupportsPrice {
 			foundOptionCapability = true
 		}
 	}
 	if !foundOptionCapability {
-		t.Fatalf("mrbilit option capability not exposed: %+v", providerList)
+		t.Fatalf("mrbilit capabilities not exposed: %+v", providerList)
 	}
 
 	body := `{"url":"https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14&utm_source=x","adults":1,"children":0,"infants":0}`
@@ -124,9 +130,11 @@ func TestProviderSearchEndpoint(t *testing.T) {
 		Trains []struct {
 			JourneyKey string `json:"journeyKey"`
 			Classes    []struct {
-				OfferingKey string `json:"offeringKey"`
-				State       string `json:"state"`
-				Capacity    *int   `json:"capacity"`
+				OfferingKey   string `json:"offeringKey"`
+				State         string `json:"state"`
+				Capacity      *int   `json:"capacity"`
+				PriceAmount   *int64 `json:"priceAmount"`
+				PriceCurrency string `json:"priceCurrency"`
 			} `json:"classes"`
 		} `json:"trains"`
 	}
@@ -141,6 +149,12 @@ func TestProviderSearchEndpoint(t *testing.T) {
 	}
 	if payload.Trains[0].Classes[0].State != "reservable" || payload.Trains[0].Classes[0].Capacity == nil {
 		t.Fatalf("class = %+v", payload.Trains[0].Classes[0])
+	}
+	if payload.Trains[0].Classes[0].PriceAmount == nil || *payload.Trains[0].Classes[0].PriceAmount != 12345000 {
+		t.Fatalf("price amount = %+v", payload.Trains[0].Classes[0].PriceAmount)
+	}
+	if payload.Trains[0].Classes[0].PriceCurrency != "" {
+		t.Fatalf("price currency = %q", payload.Trains[0].Classes[0].PriceCurrency)
 	}
 	if stub.last.Passengers.Adults != 1 || stub.last.URL == "" {
 		t.Fatalf("stub request = %+v", stub.last)
@@ -242,6 +256,36 @@ func TestMonitorCreateWithSelectedOptions(t *testing.T) {
 	missing := fixture.request(t, http.MethodPost, "/api/v1/monitors", mustJSON(t, body), session, csrf, authOrigin)
 	if missing.Code != http.StatusBadRequest {
 		t.Fatalf("missing selections status = %d, body=%s", missing.Code, missing.Body.String())
+	}
+}
+
+func TestProviderSearchErrorUsesRegisteredDisplayName(t *testing.T) {
+	stub := &searchProviderStub{
+		metadata: provider.Metadata{
+			ID: "other", DisplayName: "OtherRail",
+			Capabilities: provider.Capabilities{
+				SupportsURLSearch: true,
+				RequiresOriginID:  true, RequiresDestinationID: true,
+			},
+		},
+		err: &provider.Error{Kind: provider.ErrTimeout, Op: "test"},
+	}
+	fixture := newAuthFixtureWithTelegram(t, auth.DefaultRateLimitConfig(), true, false, stub)
+	session, csrf, login := fixture.login(t, authTestPass)
+	if login.Code != http.StatusOK {
+		t.Fatalf("login status = %d", login.Code)
+	}
+	body := `{"url":"https://example.test/search","adults":1,"children":0,"infants":0}`
+	recorder := fixture.request(t, http.MethodPost, "/api/v1/providers/other/search", body, session, csrf, authOrigin)
+	if recorder.Code != http.StatusGatewayTimeout {
+		t.Fatalf("status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload errorPayload
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !strings.Contains(payload.Error.Message, "OtherRail") || strings.Contains(payload.Error.Message, "MrBilit") {
+		t.Fatalf("message = %q", payload.Error.Message)
 	}
 }
 

@@ -26,6 +26,8 @@ type providerResponse struct {
 type providerCapabilitiesResponse struct {
 	RequiresOriginID        bool `json:"requiresOriginId"`
 	RequiresDestinationID   bool `json:"requiresDestinationId"`
+	SupportsURLSearch       bool `json:"supportsUrlSearch"`
+	SupportsPrice           bool `json:"supportsPrice"`
 	SupportsBookingURL      bool `json:"supportsBookingUrl"`
 	SupportsGender          bool `json:"supportsGender"`
 	RequiresOptionSelection bool `json:"requiresOptionSelection"`
@@ -88,6 +90,8 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			Capabilities: providerCapabilitiesResponse{
 				RequiresOriginID:        meta.Capabilities.RequiresOriginID,
 				RequiresDestinationID:   meta.Capabilities.RequiresDestinationID,
+				SupportsURLSearch:       meta.Capabilities.SupportsURLSearch,
+				SupportsPrice:           meta.Capabilities.SupportsPrice,
 				SupportsBookingURL:      meta.Capabilities.SupportsBookingURL,
 				SupportsGender:          meta.Capabilities.SupportsGender,
 				RequiresOptionSelection: meta.Capabilities.RequiresOptionSelection,

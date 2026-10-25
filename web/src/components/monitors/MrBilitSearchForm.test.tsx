@@ -116,7 +116,7 @@ function renderForm(onSubmit = vi.fn().mockResolvedValue(undefined)) {
   render(
     <MemoryRouter>
       <MrBilitSearchForm
-        providers={[provider]}
+        provider={provider}
         settings={settings}
         pushConfig={pushConfig}
         onSubmit={onSubmit}
@@ -137,7 +137,7 @@ describe("MrBilitSearchForm", () => {
     searchMock.mockReset();
   });
 
-  it("searches, groups duplicate class names, selects an exact option, and submits it", async () => {
+  it("searches, groups offerings by wagon, selects all current wagon offerings, and submits them", async () => {
     searchMock.mockResolvedValue(searchResult());
     const { user, onSubmit } = renderForm();
 
@@ -151,15 +151,22 @@ describe("MrBilitSearchForm", () => {
         "search-results-heading",
       ),
     );
-    expect(screen.getAllByRole("checkbox")).toHaveLength(2);
-    expect(screen.getByText(/^Option 1$/)).toBeInTheDocument();
-    expect(screen.getByText(/^Option 2$/)).toBeInTheDocument();
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1);
+    expect(
+      screen.getAllByText(/1 of 2 reservable/i).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.queryByText(/loaded from the url/i),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getAllByRole("checkbox")[0]);
-    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Select Samen, all current fare options/i,
+      }),
+    );
+    expect(
+      screen.getAllByText(/1 wagon · 2 fare options/).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByLabelText(/monitor label/i)).toHaveValue(
       "Yazd → Mashhad — 2026-11-15",
     );
@@ -185,7 +192,7 @@ describe("MrBilitSearchForm", () => {
           destinationId: "191",
           bookingSlug: "yazd-mashhad",
           selections: [
-            {
+            expect.objectContaining({
               journeyKey: "id:9001",
               offeringKey: "id:9102",
               offeringNativeId: "9102",
@@ -194,7 +201,13 @@ describe("MrBilitSearchForm", () => {
               wagonName: "Five-star Samen",
               className: "Samen",
               compartmentType: "4-person compartment",
-            },
+            }),
+            expect.objectContaining({
+              journeyKey: "id:9001",
+              offeringKey: "id:9104",
+              offeringNativeId: "9104",
+              wagonId: "9202",
+            }),
           ],
         },
       ],
@@ -398,8 +411,14 @@ describe("MrBilitSearchForm", () => {
     const { user } = renderForm();
     await runSearch(user);
 
-    await user.click(screen.getAllByRole("checkbox")[0]);
-    expect(screen.getByText("1 of 2")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Select Samen, all current fare options/i,
+      }),
+    );
+    expect(
+      screen.getAllByText(/1 wagon · 2 fare options/).length,
+    ).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: /change search/i }));
     const url = screen.getByLabelText(/MrBilit search URL/i);
@@ -460,7 +479,7 @@ describe("MrBilitSearchForm", () => {
       screen.getByRole("button", { name: /create monitor/i }),
     ).toBeDisabled();
     expect(
-      screen.getByText(/select at least one class/i),
+      screen.getByText(/select at least one wagon/i),
     ).toBeInTheDocument();
   });
 
@@ -473,7 +492,7 @@ describe("MrBilitSearchForm", () => {
 
     expect(screen.getByText(/No trains returned/i)).toBeInTheDocument();
     expect(screen.getByText(/not a sold-out signal/i)).toBeInTheDocument();
-    expect(screen.getByText(/no classes to review/i)).toBeInTheDocument();
+    expect(screen.getByText(/no wagons to review/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /create monitor/i }),
     ).not.toBeInTheDocument();
@@ -539,14 +558,19 @@ describe("MrBilitSearchForm", () => {
     await runSearch(user);
 
     expect(screen.getAllByText("Reservable").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Not reservable").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Unknown").length).toBeGreaterThan(0);
+    await user.click(
+      screen.getByRole("button", {
+        name: /Show fare options for Samen/i,
+      }),
+    );
+    expect(screen.getAllByText("Not reservable").length).toBeGreaterThan(0);
     const notReservable = screen.getByRole("checkbox", {
-      name: /Option 2.*Not reservable/i,
+      name: /Select Samen, Fare option 2, not reservable/i,
     });
     expect(notReservable).toBeEnabled();
     await user.click(notReservable);
-    expect(screen.getByText("1 of 3")).toBeInTheDocument();
+    expect(screen.getByText(/1 of 2 fare options/)).toBeInTheDocument();
   });
 
   it("preserves a manually edited label after another search", async () => {
@@ -607,7 +631,217 @@ describe("MrBilitSearchForm", () => {
     expect(screen.getByText("Configured")).toBeInTheDocument();
     expect(screen.getByText("Enabled · no devices")).toBeInTheDocument();
     expect(
-      screen.getByText(/at least one notification channel is ready/i),
+      screen.getByText(/at least one channel is ready/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("wagon hierarchy, price filter, and partial selection", () => {
+  const pricedResult = () =>
+    searchResult({
+      trains: [
+        {
+          ...searchResult().trains[0],
+          classes: [
+            makeClass({
+              offeringKey: "id:sepehr-cheap",
+              nativeId: "sepehr-cheap",
+              wagonId: "sepehr",
+              wagonName: "Four-star Sepehr",
+              className: "Sepehr",
+              priceAmount: 2345000,
+            }),
+            makeClass({
+              offeringKey: "id:sepehr-unpriced",
+              nativeId: "sepehr-unpriced",
+              wagonId: "sepehr",
+              wagonName: "Four-star Sepehr",
+              className: "Sepehr",
+              capacity: 0,
+              state: "not_reservable",
+              priceAmount: null,
+            }),
+            makeClass({
+              offeringKey: "id:samen-expensive",
+              nativeId: "samen-expensive",
+              wagonId: "samen",
+              wagonName: "Five-star Samen",
+              className: "Samen",
+              priceAmount: 12345000,
+            }),
+            makeClass({
+              offeringKey: "id:samen-unpriced",
+              nativeId: "samen-unpriced",
+              wagonId: "samen",
+              wagonName: "Five-star Samen",
+              className: "Samen",
+              capacity: 0,
+              state: "not_reservable",
+              priceAmount: null,
+            }),
+          ],
+        },
+      ],
+    });
+
+  it("keeps a selected wagon selected when the price filter hides it", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user, onSubmit } = renderForm();
+    await runSearch(user);
+
+    expect(screen.getAllByText(/2 wagon/).length).toBeGreaterThan(0);
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Select Samen, all current fare options/i,
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /filter by price/i }),
+    );
+    await user.type(screen.getByLabelText(/^Minimum$/), "2000000");
+    await user.type(screen.getByLabelText(/^Maximum$/), "3000000");
+    await user.click(screen.getByRole("button", { name: /^Done$/ }));
+
+    expect(screen.queryByText(/^Samen$/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^Sepehr$/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 selected fare options are outside this view/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/2 unpriced fare options hidden/i)).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.providers[0].selections?.map((item: { offeringKey: string }) => item.offeringKey)).toEqual([
+      "id:samen-expensive",
+      "id:samen-unpriced",
+    ]);
+  });
+
+  it("selects every underlying offering when a filtered wagon is selected", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user, onSubmit } = renderForm();
+    await runSearch(user);
+
+    await user.click(
+      screen.getByRole("button", { name: /filter by price/i }),
+    );
+    await user.type(screen.getByLabelText(/^Minimum$/), "2000000");
+    await user.type(screen.getByLabelText(/^Maximum$/), "3000000");
+    await user.click(screen.getByRole("button", { name: /^Done$/ }));
+
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Select Sepehr, all current fare options/i,
+      }),
+    );
+    expect(
+      screen.getAllByText(/1 wagon · 2 fare options/).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getByText(/1 selected fare option is outside this view/i),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.providers[0].selections?.map((item: { offeringKey: string }) => item.offeringKey)).toEqual([
+      "id:sepehr-cheap",
+      "id:sepehr-unpriced",
+    ]);
+  });
+
+  it("can include unpriced offerings without treating them as cheap", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user } = renderForm();
+    await runSearch(user);
+
+    await user.click(
+      screen.getByRole("button", { name: /filter by price/i }),
+    );
+    await user.type(screen.getByLabelText(/^Minimum$/), "2000000");
+    await user.type(screen.getByLabelText(/^Maximum$/), "3000000");
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /include 2 unpriced fare options/i,
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: /^Done$/ }));
+
+    expect(screen.getByText(/^Samen$/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 fare option outside the range/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
+  });
+
+  it("sorts wagons by lowest known price without changing selection", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user } = renderForm();
+    await runSearch(user);
+
+    await user.selectOptions(
+      screen.getByLabelText(/sort search results/i),
+      "price",
+    );
+    const labels = screen
+      .getAllByRole("checkbox")
+      .map((element) => element.getAttribute("aria-label"));
+    expect(labels).toEqual([
+      "Select Sepehr, all current fare options",
+      "Select Samen, all current fare options",
+    ]);
+  });
+
+  it("supports partial fare selection and preserves exact offering keys", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user, onSubmit } = renderForm();
+    await runSearch(user);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: /Show fare options for Sepehr/i,
+      }),
+    );
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: /Select Sepehr, Fare option 2, not reservable/i,
+      }),
+    );
+    expect(screen.getByText(/1 of 2 selected/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 of 2 fare options/),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /create monitor/i }),
+    );
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    const payload = onSubmit.mock.calls[0][0];
+    expect(payload.providers[0].selections?.map((item: { offeringKey: string }) => item.offeringKey)).toEqual([
+      "id:sepehr-unpriced",
+    ]);
+  });
+
+  it("rejects an inverted price range without filtering the result", async () => {
+    searchMock.mockResolvedValue(pricedResult());
+    const { user } = renderForm();
+    await runSearch(user);
+
+    await user.click(
+      screen.getByRole("button", { name: /filter by price/i }),
+    );
+    await user.type(screen.getByLabelText(/^Minimum$/), "3000000");
+    await user.type(screen.getByLabelText(/^Maximum$/), "2000000");
+
+    expect(
+      screen.getByText(/minimum price must not exceed maximum price/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^Samen$/)).toBeInTheDocument();
   });
 });

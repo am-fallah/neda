@@ -189,6 +189,8 @@ export interface MonitorListResponse {
 export interface ProviderCapabilities {
   requiresOriginId?: boolean;
   requiresDestinationId?: boolean;
+  supportsUrlSearch?: boolean;
+  supportsPrice?: boolean;
   supportsBookingUrl?: boolean;
   supportsGender?: boolean;
   requiresOptionSelection?: boolean;
@@ -222,6 +224,8 @@ export interface ProviderSearchClass {
   capacity: number | null;
   state: ObservationState;
   reason?: string;
+  priceAmount?: number | null;
+  priceCurrency?: string;
 }
 
 export interface ProviderSearchTrain {

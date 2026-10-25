@@ -23,6 +23,8 @@ const mrbilit = makeProvider({
   capabilities: {
     requiresOriginId: true,
     requiresDestinationId: true,
+    supportsUrlSearch: true,
+    supportsPrice: true,
     supportsBookingUrl: true,
     supportsGender: false,
     requiresOptionSelection: true,
@@ -93,7 +95,7 @@ describe("MonitorCreatePage", () => {
     renderPage();
 
     expect(
-      await screen.findByText(/MrBilit is not available in this build/i),
+      await screen.findByText(/No URL-search provider is available/i),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/No providers available/i),

@@ -1,6 +1,6 @@
 # Neda Dashboard — Manual Acceptance Checklist
 
-**Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** A separate New Monitor corrective audit was executed on 2026-10-25 against a production frontend build with mocked API/search fixtures and 0 axe violations across the states recorded below. The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
+**Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** A separate New Monitor corrective audit was executed on 2026-10-25 against a production frontend build with mocked API/search fixtures and 0 axe violations across the states recorded below. A further New Monitor hierarchy/price audit on 2026-10-25 verified the train→wagon→fare presentation, wagon/all-offering selection, view-only price filtering, and 320/360/390 responsive behavior with 0 axe violations. The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
 
 ## Preconditions
 
@@ -72,6 +72,28 @@ One payload-only capture intentionally did not mock the post-create monitor-deta
 Reported gaps from the earlier review are closed: standard MrBilit URLs with omitted defaults now prefill without manual entry, and the neutral accent covers the shared shell, not only the content subtree.
 
 Remaining manual acceptance for the owner: human screen-reader/zoom review and final preference review of density, Persian/English typography, and the summary rail at the owner's viewport. Real Telegram/Push delivery, live provider monitoring, and production deployment remain out of scope for this audit.
+
+## New Monitor hierarchy and price audit (2026-10-25, NM-01…NM-10)
+
+Environment: production `vite preview` build of the current branch, system Chrome through Playwright 1.64.1, and axe-core 4.10.3. Private auth/providers/settings/Push endpoints and the MrBilit search response were mocked with the saved six-offering observed shape (two wagons × three offerings, including zero and missing prices). No backend database was read or changed; no live MrBilit, Telegram, Push, booking, or deployment action occurred. Screenshots were reviewed at 1440 light/dark and 390/360/320 mobile widths.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Train/wagon hierarchy | PASS | The six offerings render as one train and two wagon groups (Samen, Sepehr), each with one reservable and two not-reservable children. The six low-level offerings are not shown as six default rows. |
+| Wagon selection | PASS | Selecting the Samen wagon selects all three current underlying offering keys; the review rail shows `1 wagon · 3 fare options`, a partial/all state, and the exact price/state summary. |
+| Partial fare selection | PASS | Expanding Sepehr exposes three fare rows; selecting one shows `1 of 3 selected`, and the create payload retains only that exact offering key. |
+| Price display | PASS | Positive amounts render as provider-reported numbers with an explicit “currency and per-passenger basis are not verified” qualification. Zero/missing values show `Price unavailable`, never `0`; the wagon summary shows `2 unpriced`. |
+| Price filter | PASS | A 2,000,000–3,000,000 filter reduces the visible result to one fare option and one wagon, reports four unpriced options hidden and one priced option outside the range, and offers an explicit include-unpriced control. |
+| Filter/selection independence | PASS | A previously selected Samen wagon remains selected after the filter hides it; the page reports that three selected fare options are outside the view and keeps creation available with the original selection. A filtered wagon selection still selects every underlying offering, not only the visible priced child. |
+| Sort | PASS | Departure and lowest-known-price sorting are available; sorting changes presentation only. Component tests verify order and payload preservation. |
+| Empty/unknown/unavailable | PASS | The saved fixture shows Reservable, Not reservable, and Unknown as distinct states; a wagon group is never labeled not reservable unless all children are decisive negatives. Empty results remain a successful empty observation, not sold out. |
+| No-offering state | PASS | A train with no usable fare/class offerings has a distinct “No fare options returned” state and does not imply sold out. |
+| Stale/error/creation error | PASS | Existing URL/count invalidation disables results and creation; provider errors state that no availability conclusion was made; creation errors remain actionable and re-enable the action. |
+| Desktop layout | PASS | 1440px two-column layout: results + sticky review rail. Detail expansion and price-filter notices remain aligned with the rail. |
+| Mobile layout | PASS | 390/360/320px: one column, compact price/filter/sort toolbar, sticky `Review & create` action after selection, no horizontal overflow. |
+| Axe WCAG 2 A/AA + 2.1 A/AA | PASS | 0 violations on initial light/dark, results light/dark, selected light/dark, expanded light, price-filtered light, and 390/360/320px mobile results. |
+| Runtime/page errors | PASS | The audited mocked flows mounted and completed without page errors. |
+| Live-provider and delivery scope | NOT RUN — intentionally | No live MrBilit request, real monitor creation, Telegram/Push message, booking, database, or production deployment was performed. |
 
 ## Authentication
 

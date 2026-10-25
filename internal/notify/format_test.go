@@ -128,3 +128,28 @@ func TestFormatTelegramRejectsUnknownKind(t *testing.T) {
 		t.Fatal("unknown event kind accepted")
 	}
 }
+
+func TestFormatOmitsUnverifiedPriceCurrency(t *testing.T) {
+	amount := int64(2345000)
+	event := notify.Event{
+		ID:          "price-without-currency",
+		Kind:        notify.KindAvailability,
+		ProviderID:  "mrbilit",
+		OccurredAt:  formatNow,
+		PriceAmount: &amount,
+	}
+	telegram, err := notify.FormatTelegram(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(telegram, "Price:") {
+		t.Fatalf("unverified price leaked into Telegram: %s", telegram)
+	}
+	raw, err := notify.FormatPush(event, "https://neda.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "Price:") {
+		t.Fatalf("unverified price leaked into Push: %s", raw)
+	}
+}

@@ -13,8 +13,8 @@ import {
 import type {
   PassengerSource,
   UrlPassengerResult,
-} from "@/lib/mrbilitSearch";
-import { formatPassengerSummary } from "@/lib/mrbilitSearch";
+} from "@/providers/mrbilit";
+import { formatPassengerSummary } from "@/lib/searchResults";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ export interface SearchErrorDisplay {
 }
 
 interface MonitorSearchPanelProps {
+  providerName: string;
   url: string;
   adults: number;
   children: number;
@@ -86,7 +87,7 @@ function passengerNote(
     return parsed.defaultedKeys.length > 0
       ? {
           icon: Check,
-          text: "Loaded from the URL. Missing counts use MrBilit defaults.",
+          text: "Loaded from the URL. Missing counts use the provider's URL defaults.",
         }
       : {
           icon: Check,
@@ -109,6 +110,7 @@ const URL_DESCRIPTION =
   "The route and Jalali date are read automatically. Tracking parameters are ignored.";
 
 export function MonitorSearchPanel({
+  providerName,
   url,
   adults,
   children,
@@ -131,26 +133,18 @@ export function MonitorSearchPanel({
   const passengers = { adults, children, infants };
 
   return (
-    <Card aria-busy={searching} className="gap-0 overflow-hidden py-0">
+    <Card
+      aria-busy={searching}
+      className="gap-0 overflow-hidden rounded-lg py-0 shadow-none"
+    >
       <CardHeader className="border-b px-5 py-4 sm:px-6">
-        <div className="flex items-start gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
-            <Search className="size-4" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <CardTitle
-              className="text-base"
-              role="heading"
-              aria-level={2}
-            >
-              Search MrBilit
-            </CardTitle>
-            <CardDescription className="mt-1">
-              Paste a public MrBilit train search URL. We’ll read the route,
-              date, and passengers from it.
-            </CardDescription>
-          </div>
-        </div>
+        <CardTitle className="text-base" role="heading" aria-level={2}>
+          Search {providerName}
+        </CardTitle>
+        <CardDescription className="mt-1">
+          Paste a public {providerName} train search URL. The route, date, and
+          passenger counts are read from it.
+        </CardDescription>
       </CardHeader>
       <CardContent className="px-5 py-5 sm:px-6 sm:py-6">
         <form
@@ -163,7 +157,7 @@ export function MonitorSearchPanel({
         >
           <FormField
             id="mrbilitUrl"
-            label="MrBilit search URL"
+            label={`${providerName} search URL`}
             error={fieldErrors.url}
             required
             description={URL_DESCRIPTION}
@@ -181,7 +175,7 @@ export function MonitorSearchPanel({
                 autoComplete="off"
                 autoCapitalize="off"
                 spellCheck={false}
-                className="h-11 pl-9 font-mono text-[13px]"
+                className="h-10 pl-9 font-mono text-[13px]"
                 value={url}
                 onChange={(event) => onUrlChange(event.target.value)}
                 placeholder="https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24"
@@ -189,12 +183,12 @@ export function MonitorSearchPanel({
             </div>
           </FormField>
 
-          <fieldset className="rounded-xl border bg-muted/20">
+          <fieldset className="rounded-lg border bg-muted/15">
             <legend className="sr-only">Passengers</legend>
             <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background text-muted-foreground">
-                  <Users className="size-4" aria-hidden="true" />
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+                  <Users className="size-3.5" aria-hidden="true" />
                 </span>
                 <div className="min-w-0">
                   <p className="text-sm font-medium">
@@ -360,11 +354,11 @@ export function MonitorSearchPanel({
               ) : (
                 <Search data-icon="inline-start" aria-hidden="true" />
               )}
-              {searching ? "Searching MrBilit…" : "Find trains"}
+              {searching ? `Searching ${providerName}…` : "Find trains"}
             </Button>
           </div>
           <div className="sr-only" role="status" aria-live="polite">
-            {searching ? "Searching MrBilit…" : ""}
+            {searching ? `Searching ${providerName}…` : ""}
           </div>
         </form>
       </CardContent>

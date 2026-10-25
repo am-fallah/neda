@@ -7,6 +7,7 @@ interface PageHeaderProps {
   actions?: ReactNode;
   eyebrow?: string;
   className?: string;
+  titleClassName?: string;
 }
 
 export function PageHeader({
@@ -15,6 +16,7 @@ export function PageHeader({
   actions,
   eyebrow,
   className,
+  titleClassName,
 }: PageHeaderProps) {
   return (
     <header
@@ -29,7 +31,12 @@ export function PageHeader({
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-2xl font-semibold tracking-tight text-balance">
+        <h1
+          className={cn(
+            "text-2xl font-semibold tracking-tight text-balance",
+            titleClassName,
+          )}
+        >
           {title}
         </h1>
         {description ? (

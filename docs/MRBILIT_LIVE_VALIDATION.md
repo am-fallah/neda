@@ -100,9 +100,12 @@ All six received the validated booking URL
    interprets the observed `YYYY-MM-DDTHH:MM:SS` shape in `Asia/Tehran` and
    stores UTC; the live journey had both departure and arrival timestamps.
 8. **Price currency is not verified.** The live `price` fields are numeric, but
-   Rial vs Toman is not established. The parser does not populate
-   `Offering.Price`; the numeric amount is not used for decisions or displayed
-   with an invented unit.
+   Rial vs Toman, per-passenger basis, and `sellType` semantics are not
+   established. The parser preserves a positive numeric amount as
+   `Offering.Price.Amount` with an empty currency; zero, missing, negative,
+   fractional, and malformed values stay absent. The dashboard shows the
+   provider amount with an explicit qualification; notifications omit price
+   until a currency is validated.
 9. **The booking URL is verified by the owner reference.** The route slug is
    manually configured (`yazd-mashhad`); it is never derived from city names.
    The date conversion fixture is `2026-11-05` ↔ `1405-08-14`.
