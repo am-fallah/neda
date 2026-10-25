@@ -104,11 +104,12 @@ func (e *Error) Unwrap() error {
 
 // Capabilities describes provider-specific configuration needs.
 type Capabilities struct {
-	RequiresOriginID      bool
-	RequiresDestinationID bool
-	SupportsBookingURL    bool
-	SupportsGender        bool
-	MaxPassengers         int // 0 means no local bound is advertised
+	RequiresOriginID        bool
+	RequiresDestinationID   bool
+	SupportsBookingURL      bool
+	SupportsGender          bool
+	RequiresOptionSelection bool
+	MaxPassengers           int // 0 means no local bound is advertised
 }
 
 // Metadata is code-owned provider metadata. TestOnly providers must never be
@@ -174,11 +175,83 @@ type Journey struct {
 
 // Offering is a normalized offering identity and snapshot.
 type Offering struct {
-	Key       string
-	NativeID  string
-	WagonName string
-	ClassName string
-	Price     *Price
+	Key             string
+	NativeID        string
+	WagonID         string
+	WagonName       string
+	ClassName       string
+	CompartmentType string
+	Price           *Price
+}
+
+// SelectedOption is the durable identity and metadata of one selected
+// journey/class pair. Keys are provider-normalized; the remaining fields are
+// matching guardrails and display metadata.
+type SelectedOption struct {
+	JourneyKey       string
+	OfferingKey      string
+	JourneyNativeID  string
+	OfferingNativeID string
+	TrainNumber      string
+	Operator         string
+	OriginName       string
+	DestinationName  string
+	DepartureAt      *time.Time
+	ArrivalAt        *time.Time
+	WagonID          string
+	WagonName        string
+	ClassName        string
+	CompartmentType  string
+}
+
+// SearchRequest asks a URL-capable provider to resolve and fetch an initial
+// train search. It never mutates monitor state.
+type SearchRequest struct {
+	URL        string
+	Passengers Passengers
+}
+
+// SearchResult is the normalized initial search response.
+type SearchResult struct {
+	URL           string
+	Slug          string
+	JalaliDate    string
+	DepartureDate string
+	Route         Route
+	Passengers    Passengers
+	Result        Result
+}
+
+// URLSearcher is implemented by providers that can resolve a public search
+// URL and fetch an initial result without creating a monitor.
+type URLSearcher interface {
+	SearchURL(ctx context.Context, req SearchRequest) (SearchResult, error)
+}
+
+// InputError is a user-correctable search/configuration error. Code is a
+// stable machine-readable value; Message is safe for display.
+type InputError struct {
+	Field   string
+	Code    string
+	Message string
+	Cause   error
+}
+
+func (e *InputError) Error() string {
+	if e == nil {
+		return "provider input error"
+	}
+	if e.Field != "" {
+		return e.Field + ": " + e.Message
+	}
+	return e.Message
+}
+
+func (e *InputError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
 }
 
 // OfferingObservation is one normalized offering state.

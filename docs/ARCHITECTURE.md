@@ -612,6 +612,7 @@ Forward-only embedded SQL migrations:
 - `0002_monitors.sql` — monitors, monitor_providers.
 - `0003_inventory.sql` — check_runs, inventory_states, availability_episodes, events.
 - `0004_notifications.sql` — provider_health, provider_health_episodes, notification_deliveries, notification_attempts, push_subscriptions. Owned by `NTF-000`; applied before `SCH-005`/`SCH-006`.
+- `0005_monitor_selections.sql` — selected train/class keys, native IDs, display metadata, and match guardrails tied to `monitor_providers.id` and `config_version`. Owned by `PRV-011`; independent of event/outbox schema.
 - `0005_indexes.sql` — any indexes separated for clarity; may be folded into the above.
 
 Runner behavior:
@@ -808,7 +809,7 @@ func (r *Registry) List() []Metadata
 ```
 
 - Explicit construction in `cmd/neda`; no reflection, `init()` side effects, or dynamic loading.
-- MrBilit is always registered in production.
+- MrBilit is registered automatically in non-production environments for the URL-first local flow. Production registration remains deferred (`PRV-009`); the production registry stays empty until that gate is explicitly satisfied.
 - Fake provider is registered only when `NEDA_FAKE_PROVIDER_ENABLED=true` (development/test) or in tests. The UI must label it "Test provider — not a real ticket source" and it must never appear as a real provider by default.
 - Provider metadata and fixed provider base URLs are code-owned, not user-editable. Per-monitor user configuration is limited to provider selection, origin/destination IDs, optional booking slug, and optional validated gender code. Health/config state that is persisted is DB-owned; the Settings page displays read-only provider metadata/health and must not accept arbitrary provider base URLs.
 
@@ -981,7 +982,32 @@ and the adapter reported 1 journey, 6 offerings, 2 Reservable, 4 NotReservable,
 0 Unknown, no warnings, and 6 booking URLs. Times are local Tehran wall-clock in
 the observed payload; prices are not stored because Rial/Toman is unverified.
 The adapter is deliberately **not registered** in production; `PRV-009` remains
-a separate decision. Full evidence: `docs/MRBILIT_LIVE_VALIDATION.md`.
+a separate decision. Non-production composition registers it automatically for
+URL-first monitor creation. Full evidence: `docs/MRBILIT_LIVE_VALIDATION.md`
+and `docs/MRBILIT_URL_FIRST.md`.
+
+### 9.8 URL-first monitor creation and selected options (2026-10-25)
+
+`POST /api/v1/providers/mrbilit/search` validates a public
+`https://mrbilit.com/trains/<slug>?departureDate=<Jalali date>` URL, ignores
+tracking parameters, converts the date, resolves numeric route IDs from the
+public page's embedded Nuxt `urlParams`, and fetches the initial result through
+the existing adapter. The search is stateless and distinct from scheduled
+checks; its URL is never treated as availability evidence.
+
+Selected train/class options are persisted in
+`monitor_provider_selections` with the provider target and config version:
+journey/offering keys, native IDs, train number, operator, display names,
+times, wagon ID/name, class name, and compartment type. Material edits bump the
+config version and close old episodes through the existing rules.
+
+Scheduled checks query the whole route. A deterministic filter keeps only
+selected options. Exact keys are preferred and validated against metadata to
+detect reused identities. A unique fallback based on train/date/time/operator
+and wagon/class attributes is allowed. Missing, ambiguous, or conflicting
+matches become `Unknown`; errors never update availability. Unselected options
+never create state/events/deliveries, and existing episode/outbox dedupe remains
+the sole notification path.
 
 ---
 

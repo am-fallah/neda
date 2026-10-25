@@ -13,6 +13,7 @@ import (
 	"github.com/am-fallah/neda/internal/health"
 	"github.com/am-fallah/neda/internal/notify"
 	"github.com/am-fallah/neda/internal/provider"
+	"github.com/am-fallah/neda/internal/selection"
 	"github.com/am-fallah/neda/internal/store"
 )
 
@@ -179,9 +180,17 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	// this transaction commits, the running row is left for startup
 	// abandonment rather than committing a success during cancellation. The
 	// error branch may detach only to finalize an already-classified timeout.
+	outcomeResult := attempt.Result
+	if attempt.SelectionRequired {
+		options := make([]provider.SelectedOption, 0, len(attempt.Selections))
+		for _, item := range attempt.Selections {
+			options = append(options, item.Option)
+		}
+		outcomeResult, _ = selection.Filter(attempt.Result, options)
+	}
 	outcome := store.CheckOutcomeSuccess
 	healthOutcome := health.OutcomeSuccess
-	if len(attempt.Result.Journeys) == 0 {
+	if len(outcomeResult.Journeys) == 0 {
 		outcome = store.CheckOutcomeEmpty
 		healthOutcome = health.OutcomeEmpty
 	}
@@ -202,7 +211,7 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 			return r.finalizeCheckTx(ctx, tx, attempt, store.CheckOutcomeDiscarded, discardReason, txNow, outcomeCounts{}, nil)
 		}
 
-		counts := countOutcomeResult(attempt.Result)
+		counts := countOutcomeResult(outcomeResult)
 		if err := r.finalizeCheckTx(ctx, tx, attempt, outcome, "", txNow, counts, nil); err != nil {
 			return err
 		}
@@ -216,9 +225,9 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 			TargetID:      attempt.TargetID,
 			ProviderID:    attempt.ProviderID,
 			ConfigVersion: attempt.ConfigVersion,
-			ObservedAt:    attempt.Result.ObservedAt,
+			ObservedAt:    outcomeResult.ObservedAt,
 			Now:           txNow,
-			Result:        attempt.Result,
+			Result:        outcomeResult,
 			Deliveries:    deliveries,
 		})
 		if err != nil {

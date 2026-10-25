@@ -24,11 +24,12 @@ type providerResponse struct {
 }
 
 type providerCapabilitiesResponse struct {
-	RequiresOriginID      bool `json:"requiresOriginId"`
-	RequiresDestinationID bool `json:"requiresDestinationId"`
-	SupportsBookingURL    bool `json:"supportsBookingUrl"`
-	SupportsGender        bool `json:"supportsGender"`
-	MaxPassengers         int  `json:"maxPassengers"`
+	RequiresOriginID        bool `json:"requiresOriginId"`
+	RequiresDestinationID   bool `json:"requiresDestinationId"`
+	SupportsBookingURL      bool `json:"supportsBookingUrl"`
+	SupportsGender          bool `json:"supportsGender"`
+	RequiresOptionSelection bool `json:"requiresOptionSelection"`
+	MaxPassengers           int  `json:"maxPassengers"`
 }
 
 type providerHealthResponse struct {
@@ -85,11 +86,12 @@ func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
 			DisplayName: meta.DisplayName,
 			TestOnly:    meta.TestOnly,
 			Capabilities: providerCapabilitiesResponse{
-				RequiresOriginID:      meta.Capabilities.RequiresOriginID,
-				RequiresDestinationID: meta.Capabilities.RequiresDestinationID,
-				SupportsBookingURL:    meta.Capabilities.SupportsBookingURL,
-				SupportsGender:        meta.Capabilities.SupportsGender,
-				MaxPassengers:         meta.Capabilities.MaxPassengers,
+				RequiresOriginID:        meta.Capabilities.RequiresOriginID,
+				RequiresDestinationID:   meta.Capabilities.RequiresDestinationID,
+				SupportsBookingURL:      meta.Capabilities.SupportsBookingURL,
+				SupportsGender:          meta.Capabilities.SupportsGender,
+				RequiresOptionSelection: meta.Capabilities.RequiresOptionSelection,
+				MaxPassengers:           meta.Capabilities.MaxPassengers,
 			},
 		}
 		if record, ok := byID[string(meta.ID)]; ok {

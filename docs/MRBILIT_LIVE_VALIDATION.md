@@ -127,3 +127,27 @@ parsed timestamps are authoritative.
 - No booking/reservation/purchase request and no booking-page fetch.
 - The provider remains unregistered in the production registry (`PRV-009`
   requires a separate decision).
+
+## URL-first local search validation (2026-10-25)
+
+The local URL-first search path was validated separately from scheduled
+monitoring with the fixed public example:
+
+- URL:
+  `https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&utm_source=neda-test`
+- Resolved route: Yazd `219` → Mashhad `191`
+- Resolved date: `1405-08-24` (`2026-11-15`)
+- The private local search endpoint returned HTTP 200 and a normalized result:
+  1 train (`682`), 6 classes, 2 Reservable (capacity 38 and 2), 4
+  NotReservable (capacity 0), 0 Unknown, no warnings.
+- Route display names were the upstream Persian names.
+- One earlier page request used the wrong default page host
+  (`train.mrbilit.com`) and returned 404; the default was corrected to
+  `https://mrbilit.com`.
+- Total public read-only GETs for the session inspection and validation: five
+  (two inspection GETs, one failed page GET, one successful page GET, one
+  successful API GET). No auth headers, cookies, session IDs, tokens, retries,
+  booking requests, live monitors, Telegram messages, or Push messages were
+  used.
+- No live monitor was created; scheduled selected-option behavior is covered
+  by deterministic fixture integration tests.

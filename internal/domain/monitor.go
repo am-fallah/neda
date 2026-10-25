@@ -90,8 +90,19 @@ type MonitorProvider struct {
 	LastErrorKind       string
 	LastErrorAt         *time.Time
 	ConsecutiveFailures int
+	Selections          []MonitorProviderSelection
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+// MonitorProviderSelection is one persisted train/class option for a provider
+// target and configuration version.
+type MonitorProviderSelection struct {
+	ID                int64
+	MonitorProviderID int64
+	ConfigVersion     int64
+	Option            provider.SelectedOption
+	CreatedAt         time.Time
 }
 
 // ProviderInput is one selected provider and its route configuration.
@@ -101,6 +112,7 @@ type ProviderInput struct {
 	DestinationID string
 	BookingSlug   string
 	GenderCode    string
+	Selections    []provider.SelectedOption
 }
 
 // MonitorInput is the create/edit payload after normalization.

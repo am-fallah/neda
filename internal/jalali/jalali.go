@@ -55,6 +55,23 @@ func FromGregorianDate(year, month, day int) (Date, bool) {
 	return FromTime(value)
 }
 
+// ToGregorianDate converts a civil Persian-calendar date to a Gregorian civil
+// date. The returned value is noon UTC so it is safe to format as YYYY-MM-DD
+// without a timezone-dependent day shift.
+func ToGregorianDate(year, month, day int) (time.Time, bool) {
+	if year <= 0 || month < 1 || month > 12 || day < 1 || day > 31 {
+		return time.Time{}, false
+	}
+	converted := ptime.Date(year, ptime.Month(month), day, 12, 0, 0, 0, ptime.Iran())
+	gregorian := converted.Time().In(time.UTC)
+	// Reject impossible dates that the upstream library normalizes forward.
+	jy, jm, jd := converted.Date()
+	if jy != year || int(jm) != month || jd != day {
+		return time.Time{}, false
+	}
+	return time.Date(gregorian.Year(), gregorian.Month(), gregorian.Day(), 12, 0, 0, 0, time.UTC), true
+}
+
 // FormatDate renders the Persian-calendar date portion of an instant,
 // such as "1405-07-28".
 func FormatDate(value time.Time) string {

@@ -60,6 +60,7 @@ export function makeProviderRow(
     lastErrorKind: "",
     lastErrorAt: null,
     consecutiveFailures: 0,
+    selections: [],
     createdAt: "2026-10-20T10:00:00Z",
     updatedAt: "2026-10-24T11:55:00Z",
     ...overrides,

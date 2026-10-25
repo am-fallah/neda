@@ -379,6 +379,58 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/providers/{providerId}/search:
+    post:
+      tags: [Providers]
+      summary: Resolve a provider search URL and fetch normalized initial results
+      operationId: providerSearch
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProviderSearchRequest"
+      responses:
+        "200":
+          description: Normalized initial search results; no monitor state is written
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderSearchResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Invalid URL/date/passengers or unresolved route
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: Provider returned an unusable response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+        "504":
+          description: Provider timeout
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /api/v1/events:
     get:
       tags: [History]
@@ -856,6 +908,160 @@ components:
         newPassword:
           type: string
           format: password
+    ProviderSearchRequest:
+      type: object
+      required: [url, adults]
+      properties:
+        url:
+          type: string
+          description: Public MrBilit train search URL with a Jalali departureDate.
+        adults:
+          type: integer
+          minimum: 1
+          maximum: 9
+        children:
+          type: integer
+          minimum: 0
+          maximum: 9
+        infants:
+          type: integer
+          minimum: 0
+          maximum: 9
+    SelectedOption:
+      type: object
+      required: [journeyKey, offeringKey]
+      properties:
+        journeyKey:
+          type: string
+        offeringKey:
+          type: string
+        journeyNativeId:
+          type: string
+        offeringNativeId:
+          type: string
+        trainNumber:
+          type: string
+        operator:
+          type: string
+        originName:
+          type: string
+        destinationName:
+          type: string
+        departureAt:
+          type: string
+          format: date-time
+          nullable: true
+        arrivalAt:
+          type: string
+          format: date-time
+          nullable: true
+        wagonId:
+          type: string
+        wagonName:
+          type: string
+        className:
+          type: string
+        compartmentType:
+          type: string
+    ProviderSearchRoute:
+      type: object
+      required: [originId, destinationId, originName, destinationName]
+      properties:
+        originId:
+          type: string
+        destinationId:
+          type: string
+        originName:
+          type: string
+        destinationName:
+          type: string
+    ProviderSearchClass:
+      type: object
+      required: [offeringKey, state]
+      properties:
+        offeringKey:
+          type: string
+        nativeId:
+          type: string
+        wagonId:
+          type: string
+        wagonName:
+          type: string
+        className:
+          type: string
+        compartmentType:
+          type: string
+        capacity:
+          type: integer
+          nullable: true
+        state:
+          type: string
+          enum: [reservable, not_reservable, unknown]
+        reason:
+          type: string
+    ProviderSearchTrain:
+      type: object
+      required: [journeyKey, classes]
+      properties:
+        journeyKey:
+          type: string
+        nativeId:
+          type: string
+        trainNumber:
+          type: string
+        operator:
+          type: string
+        originName:
+          type: string
+        destinationName:
+          type: string
+        departureAt:
+          type: string
+          format: date-time
+          nullable: true
+        arrivalAt:
+          type: string
+          format: date-time
+          nullable: true
+        classes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderSearchClass"
+    ProviderSearchResponse:
+      type: object
+      required: [url, slug, jalaliDate, departureDate, route, passengers, trains, warnings, observedAt]
+      properties:
+        url:
+          type: string
+        slug:
+          type: string
+        jalaliDate:
+          type: string
+        departureDate:
+          type: string
+          format: date
+        route:
+          $ref: "#/components/schemas/ProviderSearchRoute"
+        passengers:
+          type: object
+          properties:
+            adults:
+              type: integer
+            children:
+              type: integer
+            infants:
+              type: integer
+        trains:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProviderSearchTrain"
+        warnings:
+          type: array
+          items:
+            type: string
+        observedAt:
+          type: string
+          format: date-time
     MonitorProviderRequest:
       type: object
       required: [providerId, originId, destinationId]
@@ -870,6 +1076,11 @@ components:
           type: string
         genderCode:
           type: string
+        selections:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SelectedOption"
     MonitorRequest:
       type: object
       required: [label, originName, destinationName, departureDate, adults, providers]
@@ -915,6 +1126,11 @@ components:
           type: string
         genderCode:
           type: string
+        selections:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SelectedOption"
     MonitorPatchRequest:
       type: object
       properties:
@@ -1018,6 +1234,10 @@ components:
           nullable: true
         consecutiveFailures:
           type: integer
+        selections:
+          type: array
+          items:
+            $ref: "#/components/schemas/SelectedOption"
         createdAt:
           type: string
           format: date-time
@@ -1194,6 +1414,8 @@ components:
         supportsBookingUrl:
           type: boolean
         supportsGender:
+          type: boolean
+        requiresOptionSelection:
           type: boolean
         maxPassengers:
           type: integer

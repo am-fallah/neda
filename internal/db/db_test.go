@@ -102,13 +102,13 @@ func assertPragmas(t *testing.T, database *sql.DB) {
 
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 4 {
-		t.Fatalf("migration count = %d, want 4", count)
+	if count := migrateReal(t, database); count != 5 {
+		t.Fatalf("migration count = %d, want 5", count)
 	}
-	if err := database.Ready(context.Background(), 4); err != nil {
+	if err := database.Ready(context.Background(), 5); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if err := database.Ready(context.Background(), 5); err == nil {
+	if err := database.Ready(context.Background(), 6); err == nil {
 		t.Fatal("Ready accepted an unexpected migration count")
 	}
 
@@ -116,18 +116,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 4 {
-		t.Fatalf("schema_migrations count = %d, want 4", migrationsApplied)
+	if migrationsApplied != 5 {
+		t.Fatalf("schema_migrations count = %d, want 5", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 4 {
-		t.Fatalf("second migration count = %d, want 4", count)
+	if count := migrateReal(t, database); count != 5 {
+		t.Fatalf("second migration count = %d, want 5", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 4 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 4", migrationsApplied)
+	if migrationsApplied != 5 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 5", migrationsApplied)
 	}
 
 	var integrity string
@@ -414,7 +414,7 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 4); err != nil {
+	if err := database.Ready(context.Background(), 5); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
 	}
 }

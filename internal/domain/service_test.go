@@ -84,7 +84,7 @@ func newServiceHarness(t *testing.T) *serviceHarness {
 	if err != nil {
 		t.Fatalf("TehranLocation: %v", err)
 	}
-	registry, err := provider.NewRegistry(fake.New(), acceptingProvider{id: "stub"})
+	registry, err := provider.NewRegistry(fake.New(), acceptingProvider{id: "stub"}, optionAcceptingProvider{id: "selection"})
 	if err != nil {
 		t.Fatalf("provider.NewRegistry: %v", err)
 	}

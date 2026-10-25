@@ -113,6 +113,7 @@ func (s *MonitorService) Create(ctx context.Context, input MonitorInput) (Monito
 			BookingSlug:   candidate.BookingSlug,
 			GenderCode:    candidate.GenderCode,
 			ConfigVersion: 1,
+			Selections:    selectionRows(0, 1, candidate.Selections, now),
 			NextDueAt:     &due,
 			CreatedAt:     now,
 			UpdatedAt:     now,
