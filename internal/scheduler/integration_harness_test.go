@@ -51,6 +51,8 @@ type harnessTarget struct {
 	bookingSlug   string
 	genderCode    string
 	configVersion int64
+	departureDate string
+	selections    []domain.MonitorProviderSelection
 }
 
 func harnessTargetFor(providerID provider.ID) harnessTarget {
@@ -185,16 +187,23 @@ func (h *integrationHarness) createMonitor(id string, enabled bool, expiresAt ti
 			BookingSlug:   target.bookingSlug,
 			GenderCode:    target.genderCode,
 			ConfigVersion: version,
+			Selections:    append([]domain.MonitorProviderSelection(nil), target.selections...),
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		})
+	}
+	departureDate := "2026-12-15"
+	for _, target := range targets {
+		if target.departureDate != "" {
+			departureDate = target.departureDate
+		}
 	}
 	monitor, err := h.st.CreateMonitor(context.Background(), domain.Monitor{
 		ID:              id,
 		Label:           "Integration " + id,
 		OriginName:      "Tehran",
 		DestinationName: "Mashhad",
-		DepartureDate:   "2026-12-15",
+		DepartureDate:   departureDate,
 		Adults:          2,
 		Children:        1,
 		Enabled:         enabled,
@@ -433,12 +442,17 @@ func monitorInput(monitor domain.Monitor) domain.MonitorInput {
 		if !target.Active {
 			continue
 		}
+		options := make([]provider.SelectedOption, 0, len(target.Selections))
+		for _, selection := range target.Selections {
+			options = append(options, selection.Option)
+		}
 		providers = append(providers, domain.ProviderInput{
 			ProviderID:    target.ProviderID,
 			OriginID:      target.OriginID,
 			DestinationID: target.DestinationID,
 			BookingSlug:   target.BookingSlug,
 			GenderCode:    target.GenderCode,
+			Selections:    options,
 		})
 	}
 	return domain.MonitorInput{

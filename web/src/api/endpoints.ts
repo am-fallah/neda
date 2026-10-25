@@ -13,6 +13,8 @@ import type {
   MonitorPatchRequest,
   Overview,
   ProviderListResponse,
+  ProviderSearchRequest,
+  ProviderSearchResult,
   PushConfig,
   PushRegistrationRequest,
   PushSubscriptionRecord,
@@ -84,6 +86,12 @@ export const monitorsApi = {
 export const providersApi = {
   list(signal?: AbortSignal) {
     return apiRequest<ProviderListResponse>("/providers", { signal });
+  },
+  search(providerId: string, body: ProviderSearchRequest, signal?: AbortSignal) {
+    return apiRequest<ProviderSearchResult>(
+      `/providers/${encodeURIComponent(providerId)}/search`,
+      { method: "POST", body, signal },
+    );
   },
 };
 

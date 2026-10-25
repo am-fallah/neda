@@ -163,6 +163,9 @@ func (s *Store) UpdateMonitor(ctx context.Context, id string, input domain.Monit
 			if err := updateMonitorProvider(ctx, tx.db, id, target); err != nil {
 				return err
 			}
+			if err := replaceSelections(ctx, tx.db, target.ID, target.ConfigVersion, target.Selections, now); err != nil {
+				return err
+			}
 		}
 		for _, close := range plan.CloseEpisodes {
 			if _, err := tx.db.ExecContext(ctx, closeConfigEpisodesQuery, formatTime(now), close.TargetID, close.ConfigVersion); err != nil {
@@ -331,6 +334,7 @@ func loadMonitorProviders(ctx context.Context, db dbtx, monitorID string) ([]dom
 	defer rows.Close()
 
 	providers := make([]domain.MonitorProvider, 0)
+	providerIndex := make(map[int64]int)
 	for rows.Next() {
 		var target domain.MonitorProvider
 		var providerID string
@@ -383,16 +387,96 @@ func loadMonitorProviders(ctx context.Context, db dbtx, monitorID string) ([]dom
 		if target.UpdatedAt, err = parseTime(updatedAt); err != nil {
 			return nil, err
 		}
+		providerIndex[target.ID] = len(providers)
 		providers = append(providers, target)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, wrap("iterate monitor providers", err)
 	}
+	if err := rows.Close(); err != nil {
+		return nil, wrap("close monitor providers", err)
+	}
+	selections, err := loadMonitorSelections(ctx, db, monitorID)
+	if err != nil {
+		return nil, err
+	}
+	for providerID, items := range selections {
+		index, ok := providerIndex[providerID]
+		if !ok {
+			continue
+		}
+		providers[index].Selections = items
+	}
 	return providers, nil
 }
 
+const monitorSelectionSelectQuery = `SELECT s.id, s.monitor_provider_id, s.config_version,
+	s.journey_key, s.offering_key, s.journey_native_id, s.offering_native_id,
+	s.train_number, s.operator, s.origin_name, s.destination_name, s.departure_at,
+	s.arrival_at, s.wagon_id, s.wagon_name, s.class_name, s.compartment_type, s.created_at
+FROM monitor_provider_selections s
+JOIN monitor_providers p ON p.id = s.monitor_provider_id
+WHERE p.monitor_id = ? AND s.config_version = p.config_version
+ORDER BY s.monitor_provider_id, s.id`
+
+func loadMonitorSelections(ctx context.Context, db dbtx, monitorID string) (map[int64][]domain.MonitorProviderSelection, error) {
+	rows, err := db.QueryContext(ctx, monitorSelectionSelectQuery, monitorID)
+	if err != nil {
+		return nil, wrap("list monitor selections", err)
+	}
+	defer rows.Close()
+	result := make(map[int64][]domain.MonitorProviderSelection)
+	for rows.Next() {
+		var selection domain.MonitorProviderSelection
+		var journeyNative, offeringNative, trainNumber, operator sql.NullString
+		var originName, destinationName, departureAt, arrivalAt sql.NullString
+		var wagonID, wagonName, className, compartmentType sql.NullString
+		var createdAt string
+		if err := rows.Scan(
+			&selection.ID, &selection.MonitorProviderID, &selection.ConfigVersion,
+			&selection.Option.JourneyKey, &selection.Option.OfferingKey,
+			&journeyNative, &offeringNative, &trainNumber, &operator,
+			&originName, &destinationName, &departureAt, &arrivalAt,
+			&wagonID, &wagonName, &className, &compartmentType, &createdAt,
+		); err != nil {
+			return nil, wrap("scan monitor selection", err)
+		}
+		selection.Option.JourneyNativeID = nullString(journeyNative)
+		selection.Option.OfferingNativeID = nullString(offeringNative)
+		selection.Option.TrainNumber = nullString(trainNumber)
+		selection.Option.Operator = nullString(operator)
+		selection.Option.OriginName = nullString(originName)
+		selection.Option.DestinationName = nullString(destinationName)
+		selection.Option.WagonID = nullString(wagonID)
+		selection.Option.WagonName = nullString(wagonName)
+		selection.Option.ClassName = nullString(className)
+		selection.Option.CompartmentType = nullString(compartmentType)
+		if selection.Option.DepartureAt, err = parseOptionalTime(departureAt); err != nil {
+			return nil, err
+		}
+		if selection.Option.ArrivalAt, err = parseOptionalTime(arrivalAt); err != nil {
+			return nil, err
+		}
+		if selection.CreatedAt, err = parseTime(createdAt); err != nil {
+			return nil, err
+		}
+		result[selection.MonitorProviderID] = append(result[selection.MonitorProviderID], selection)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, wrap("iterate monitor selections", err)
+	}
+	return result, nil
+}
+
+func nullString(value sql.NullString) string {
+	if !value.Valid {
+		return ""
+	}
+	return value.String
+}
+
 func insertMonitorProvider(ctx context.Context, db dbtx, monitorID string, target domain.MonitorProvider) error {
-	if _, err := db.ExecContext(ctx, insertMonitorProviderQuery,
+	result, err := db.ExecContext(ctx, insertMonitorProviderQuery,
 		monitorID, string(target.ProviderID), boolToInt(target.Active),
 		target.OriginID, target.DestinationID,
 		nullableString(target.BookingSlug), nullableString(target.GenderCode),
@@ -401,10 +485,54 @@ func insertMonitorProvider(ctx context.Context, db dbtx, monitorID string, targe
 		nullableString(target.LastOutcome), nullableString(target.LastErrorKind),
 		formatOptionalTime(target.LastErrorAt), target.ConsecutiveFailures,
 		formatTime(target.CreatedAt), formatTime(target.UpdatedAt),
-	); err != nil {
+	)
+	if err != nil {
 		return wrap("create monitor provider", err)
 	}
+	targetID, err := result.LastInsertId()
+	if err != nil {
+		return wrap("created monitor provider id", err)
+	}
+	return insertSelections(ctx, db, targetID, target.ConfigVersion, target.Selections, target.CreatedAt)
+}
+
+const insertMonitorSelectionQuery = `INSERT INTO monitor_provider_selections
+	(monitor_provider_id, config_version, journey_key, offering_key, journey_native_id,
+	 offering_native_id, train_number, operator, origin_name, destination_name,
+	 departure_at, arrival_at, wagon_id, wagon_name, class_name, compartment_type, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+func insertSelections(ctx context.Context, db dbtx, targetID, configVersion int64, selections []domain.MonitorProviderSelection, fallbackCreatedAt time.Time) error {
+	for _, selection := range selections {
+		createdAt := selection.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = fallbackCreatedAt
+		}
+		option := selection.Option
+		if _, err := db.ExecContext(ctx, insertMonitorSelectionQuery,
+			targetID, configVersion, option.JourneyKey, option.OfferingKey,
+			nullableString(option.JourneyNativeID), nullableString(option.OfferingNativeID),
+			nullableString(option.TrainNumber), nullableString(option.Operator),
+			nullableString(option.OriginName), nullableString(option.DestinationName),
+			formatOptionalTime(option.DepartureAt), formatOptionalTime(option.ArrivalAt),
+			nullableString(option.WagonID), nullableString(option.WagonName),
+			nullableString(option.ClassName), nullableString(option.CompartmentType),
+			formatTime(createdAt),
+		); err != nil {
+			return wrap("create monitor selection", err)
+		}
+	}
 	return nil
+}
+
+func replaceSelections(ctx context.Context, db dbtx, targetID, configVersion int64, selections []domain.MonitorProviderSelection, now time.Time) error {
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM monitor_provider_selections WHERE monitor_provider_id = ? AND config_version = ?`,
+		targetID, configVersion,
+	); err != nil {
+		return wrap("replace monitor selections", err)
+	}
+	return insertSelections(ctx, db, targetID, configVersion, selections, now)
 }
 
 func updateMonitor(ctx context.Context, db dbtx, monitor domain.Monitor) error {

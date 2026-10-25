@@ -36,7 +36,7 @@ performed.
 | 3 | Persistent SQLite and migrations work safely | PASS | Migrations, FK checks, backup/restore tests |
 | 4 | Multiple monitors survive restarts | PASS | Scheduler/restart tests; SQLite authoritative |
 | 5 | One job can select multiple providers | PASS (engine) | API/scheduler support; production registry still empty |
-| 6 | MrBilit first real adapter; fake proves engine independence | PARTIAL | Adapter live-validated against the observed envelope; **not registered** in production (`PRV-009` remains a separate decision) |
+| 6 | MrBilit first real adapter; fake proves engine independence | PARTIAL | Adapter live-validated against the observed envelope; URL-first selected-option creation works in non-production; **not registered** in production (`PRV-009` remains a separate decision) |
 | 7 | Provider-specific reservability; unknown/error never sold out | PASS | Table-driven tests plus live positive/known-negative classes; shortfall remains Unknown |
 | 8 | One provider failure does not invalidate another | PASS | SCH-008 multi-provider tests |
 | 9 | Durable events/dedupe across restart/retry | PASS | SCH-005/SCH-009 tests |

@@ -45,6 +45,32 @@ func TestKnownGregorianToJalaliDates(t *testing.T) {
 	}
 }
 
+func TestToGregorianDateKnownValues(t *testing.T) {
+	tests := []struct {
+		year, month, day int
+		want             string
+	}{
+		{1405, 8, 14, "2026-11-05"},
+		{1405, 8, 24, "2026-11-15"},
+		{1405, 7, 28, "2026-10-20"},
+		{1403, 12, 30, "2025-03-20"},
+		{1406, 1, 1, "2027-03-21"},
+	}
+	for _, tc := range tests {
+		got, ok := ToGregorianDate(tc.year, tc.month, tc.day)
+		if !ok || got.Format("2006-01-02") != tc.want {
+			t.Fatalf("ToGregorianDate(%d-%d-%d) = (%v,%v), want %s", tc.year, tc.month, tc.day, got, ok, tc.want)
+		}
+	}
+	for _, tc := range []struct{ year, month, day int }{
+		{0, 1, 1}, {1405, 13, 1}, {1405, 0, 1}, {1405, 1, 32},
+	} {
+		if _, ok := ToGregorianDate(tc.year, tc.month, tc.day); ok {
+			t.Fatalf("ToGregorianDate(%d-%d-%d) accepted invalid date", tc.year, tc.month, tc.day)
+		}
+	}
+}
+
 func TestFromGregorianDateAndBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		year, month, day int

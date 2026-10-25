@@ -16,6 +16,8 @@ const maxWarnings = 20
 
 type rawTrain struct {
 	ID              optionalID      `json:"id"`
+	From            optionalID      `json:"from"`
+	To              optionalID      `json:"to"`
 	FromName        optionalString  `json:"fromName"`
 	ToName          optionalString  `json:"toName"`
 	TrainNumber     optionalID      `json:"trainNumber"`
@@ -39,9 +41,15 @@ type rawMeta struct {
 	AlwaysHasTrain optionalBool `json:"alwaysHasTrain"`
 }
 
+type rawLocation struct {
+	Title optionalString `json:"title"`
+}
+
 type rawRealEnvelope struct {
-	Trains json.RawMessage `json:"trains"`
-	Meta   json.RawMessage `json:"meta"`
+	Trains       json.RawMessage `json:"trains"`
+	Meta         json.RawMessage `json:"meta"`
+	FromLocation rawLocation     `json:"fromLocation"`
+	ToLocation   rawLocation     `json:"toLocation"`
 }
 
 type rawOffering struct {
@@ -191,6 +199,9 @@ func parseRealTrain(raw json.RawMessage, req provider.CheckRequest, warnings *wa
 	if err := json.Unmarshal(raw, &train); err != nil {
 		return provider.JourneyObservation{}, 0, parseError("invalid_train")
 	}
+	if err := validateTrainRoute(train, req); err != nil {
+		return provider.JourneyObservation{}, 0, err
+	}
 	journey, err := buildJourney(train, req, warnings)
 	if err != nil {
 		return provider.JourneyObservation{}, 0, err
@@ -316,6 +327,38 @@ func parseTrain(raw json.RawMessage, req provider.CheckRequest, warnings *warnin
 	}
 	offerings = attachBookingURL(offerings, req.Config.BookingSlug, req.DepartureDate)
 	return provider.JourneyObservation{Journey: journey, Offerings: offerings}, elementCount, nil
+}
+
+// validateTrainRoute rejects a response whose train-level route differs from
+// the persisted/requested route. A missing field is tolerated for compatibility
+// with the original synthetic fixtures; a present but unparseable or different
+// route is a fail-closed invalid response.
+func validateTrainRoute(train rawTrain, req provider.CheckRequest) error {
+	if train.From.Unexpected || train.To.Unexpected {
+		return parseError("route_id_unexpected_type")
+	}
+	checks := []struct {
+		field string
+		got   optionalID
+		want  string
+	}{
+		{"from", train.From, req.Config.OriginID},
+		{"to", train.To, req.Config.DestinationID},
+	}
+	for _, check := range checks {
+		if !check.got.Present || !check.got.Valid {
+			continue
+		}
+		got, err := normalizePositiveID(check.got.Value)
+		if err != nil {
+			return parseError("route_id_invalid")
+		}
+		want, err := normalizePositiveID(check.want)
+		if err != nil || got != want {
+			return parseError("route_mismatch")
+		}
+	}
+	return nil
 }
 
 func buildJourney(train rawTrain, req provider.CheckRequest, warnings *warningSet) (provider.Journey, error) {
@@ -458,9 +501,11 @@ func parseOffering(raw json.RawMessage, passengers provider.Passengers) (provide
 		className = normalizeText(offering.ClassLabel.Value)
 	}
 	model := provider.Offering{
-		NativeID:  nativeIDValue(offering.ID),
-		WagonName: normalizeText(offering.WagonName.Value),
-		ClassName: className,
+		NativeID:        nativeIDValue(offering.ID),
+		WagonID:         normalizeNativeID(offering.WagonID.Value),
+		WagonName:       normalizeText(offering.WagonName.Value),
+		ClassName:       className,
+		CompartmentType: normalizeText(offering.CompartmentType.Value),
 	}
 	if offering.Capacity.Unexpected || offering.IsAvailable.Unexpected || offering.ReservationAvailable.Unexpected {
 		identityWarning = "unexpected_availability_type"

@@ -24,6 +24,7 @@ import (
 	"github.com/am-fallah/neda/internal/notify/telegramsettings"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
+	"github.com/am-fallah/neda/internal/provider/mrbilit"
 	pushservice "github.com/am-fallah/neda/internal/push"
 	"github.com/am-fallah/neda/internal/retention"
 	"github.com/am-fallah/neda/internal/scheduler"
@@ -160,9 +161,9 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 
 	// PRV-009 (production provider configuration) remains deferred, so the
-	// production registry is empty. Development/test may explicitly enable the
-	// deterministic fake provider; it is never registered in production.
-	providerRegistry, fakeProviderEnabled, err := providerRegistryForConfig(cfg)
+	// production registry stays empty. Non-production environments register the
+	// real MrBilit adapter automatically; the fake provider remains explicit.
+	providerRegistry, providerFlags, err := providerRegistryForConfig(cfg)
 	if err != nil {
 		logger.Error("provider registry initialization failed", "error", err)
 		return 1
@@ -250,7 +251,8 @@ func runServe(stdout, stderr io.Writer) int {
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
 		"delivery_worker", deliveryWorker != nil,
-		"fake_provider", fakeProviderEnabled,
+		"fake_provider", providerFlags.FakeEnabled,
+		"mrbilit_provider", providerFlags.MrBilitEnabled,
 		"mode", "runner-composed",
 	)
 
@@ -363,15 +365,29 @@ func publicURLString(publicURL *url.URL) string {
 	return publicURL.String()
 }
 
-func providerRegistryForConfig(cfg config.Config) (*provider.Registry, bool, error) {
-	providers := make([]provider.Provider, 0, 1)
-	fakeEnabled := cfg.FakeProviderEnabled && !cfg.IsProduction()
-	if fakeEnabled {
+type providerFlags struct {
+	FakeEnabled    bool
+	MrBilitEnabled bool
+}
+
+func providerRegistryForConfig(cfg config.Config) (*provider.Registry, providerFlags, error) {
+	providers := make([]provider.Provider, 0, 2)
+	flags := providerFlags{}
+	if !cfg.IsProduction() {
+		adapter, err := mrbilit.New(mrbilit.Config{NoRetries: true})
+		if err != nil {
+			return nil, providerFlags{}, err
+		}
+		providers = append(providers, adapter)
+		flags.MrBilitEnabled = true
+	}
+	if cfg.FakeProviderEnabled && !cfg.IsProduction() {
 		providers = append(providers, fake.New())
+		flags.FakeEnabled = true
 	}
 	registry, err := provider.NewRegistry(providers...)
 	if err != nil {
-		return nil, false, err
+		return nil, providerFlags{}, err
 	}
-	return registry, fakeEnabled, nil
+	return registry, flags, nil
 }

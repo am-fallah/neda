@@ -55,19 +55,21 @@ type CheckStage struct {
 // mutually exclusive in practice; Classification always describes the
 // PRV-010 outcome for the caller.
 type CheckAttempt struct {
-	CheckRunID     int64
-	TargetID       int64
-	MonitorID      string
-	ProviderID     provider.ID
-	ConfigVersion  int64
-	BookingSlug    string
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	Duration       time.Duration
-	Request        provider.CheckRequest
-	Result         provider.Result
-	Err            error
-	Classification provider.Classification
+	CheckRunID        int64
+	TargetID          int64
+	MonitorID         string
+	ProviderID        provider.ID
+	ConfigVersion     int64
+	BookingSlug       string
+	StartedAt         time.Time
+	FinishedAt        time.Time
+	Duration          time.Duration
+	Request           provider.CheckRequest
+	Result            provider.Result
+	Selections        []domain.MonitorProviderSelection
+	SelectionRequired bool
+	Err               error
+	Classification    provider.Classification
 }
 
 // NewCheckStage validates dependencies and applies safe defaults.
@@ -140,15 +142,25 @@ func (s *CheckStage) RunCheck(ctx context.Context, target Target) (CheckAttempt,
 		return s.fail(target, fmt.Errorf("scheduler: start check run: %w", err))
 	}
 
+	metadata := adapter.Metadata()
 	attempt := CheckAttempt{
-		CheckRunID:    checkRunID,
-		TargetID:      persisted.ID,
-		MonitorID:     persisted.MonitorID,
-		ProviderID:    persisted.ProviderID,
-		ConfigVersion: persisted.ConfigVersion,
-		BookingSlug:   persisted.BookingSlug,
-		StartedAt:     startedAt,
-		Request:       request,
+		CheckRunID:        checkRunID,
+		TargetID:          persisted.ID,
+		MonitorID:         persisted.MonitorID,
+		ProviderID:        persisted.ProviderID,
+		ConfigVersion:     persisted.ConfigVersion,
+		BookingSlug:       persisted.BookingSlug,
+		StartedAt:         startedAt,
+		Request:           request,
+		Selections:        append([]domain.MonitorProviderSelection(nil), persisted.Selections...),
+		SelectionRequired: metadata.Capabilities.RequiresOptionSelection,
+	}
+
+	if attempt.SelectionRequired && len(attempt.Selections) == 0 {
+		attempt.Err = configurationFailure(errors.New("selected train/class options are missing"))
+		attempt.Classification = provider.Classify(ctx, attempt.Err)
+		attempt.FinishedAt, attempt.Duration = s.finish(startedAt)
+		return attempt, nil
 	}
 
 	if err := ctx.Err(); err != nil {

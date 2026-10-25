@@ -13,42 +13,57 @@ import (
 
 func TestProviderRegistryForConfig(t *testing.T) {
 	tests := []struct {
-		name       string
-		cfg        config.Config
-		wantFake   bool
-		wantLookup bool
+		name           string
+		cfg            config.Config
+		wantFake       bool
+		wantFakeLookup bool
+		wantMrBilit    bool
+		wantMrBilitUse bool
 	}{
 		{
-			name:       "development fake enabled",
-			cfg:        config.Config{Env: config.Development, FakeProviderEnabled: true},
-			wantFake:   true,
-			wantLookup: true,
+			name:           "development fake enabled",
+			cfg:            config.Config{Env: config.Development, FakeProviderEnabled: true},
+			wantFake:       true,
+			wantFakeLookup: true,
+			wantMrBilit:    true,
+			wantMrBilitUse: true,
 		},
 		{
-			name:       "production fake ignored",
-			cfg:        config.Config{Env: config.Production, FakeProviderEnabled: true},
-			wantFake:   false,
-			wantLookup: false,
+			name:           "production fake ignored",
+			cfg:            config.Config{Env: config.Production, FakeProviderEnabled: true},
+			wantFake:       false,
+			wantFakeLookup: false,
+			wantMrBilit:    false,
+			wantMrBilitUse: false,
 		},
 		{
-			name:       "development fake disabled",
-			cfg:        config.Config{Env: config.Development},
-			wantFake:   false,
-			wantLookup: false,
+			name:           "development fake disabled",
+			cfg:            config.Config{Env: config.Development},
+			wantFake:       false,
+			wantFakeLookup: false,
+			wantMrBilit:    true,
+			wantMrBilitUse: true,
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			registry, fakeEnabled, err := providerRegistryForConfig(test.cfg)
+			registry, flags, err := providerRegistryForConfig(test.cfg)
 			if err != nil {
 				t.Fatalf("providerRegistryForConfig: %v", err)
 			}
-			if fakeEnabled != test.wantFake {
-				t.Fatalf("fakeEnabled = %v, want %v", fakeEnabled, test.wantFake)
+			if flags.FakeEnabled != test.wantFake {
+				t.Fatalf("fakeEnabled = %v, want %v", flags.FakeEnabled, test.wantFake)
+			}
+			if flags.MrBilitEnabled != test.wantMrBilit {
+				t.Fatalf("mrbilitEnabled = %v, want %v", flags.MrBilitEnabled, test.wantMrBilit)
 			}
 			_, found := registry.Lookup(fake.ID)
-			if found != test.wantLookup {
-				t.Fatalf("fake lookup = %v, want %v", found, test.wantLookup)
+			if found != test.wantFakeLookup {
+				t.Fatalf("fake lookup = %v, want %v", found, test.wantFakeLookup)
+			}
+			_, found = registry.Lookup("mrbilit")
+			if found != test.wantMrBilitUse {
+				t.Fatalf("mrbilit lookup = %v, want %v", found, test.wantMrBilitUse)
 			}
 		})
 	}

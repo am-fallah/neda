@@ -199,6 +199,37 @@ function ProviderTarget({
           </>
         )}
 
+        {target.active && target.selections.length > 0 ? (
+          <section aria-labelledby={`selections-${target.providerId}`}>
+            <h3
+              id={`selections-${target.providerId}`}
+              className="mb-2 text-sm font-semibold"
+            >
+              Selected options
+            </h3>
+            <ul className="space-y-1 text-sm">
+              {target.selections.map((selection) => (
+                <li
+                  key={`${selection.journeyKey}:${selection.offeringKey}`}
+                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
+                >
+                  <span className="font-medium">
+                    Train {selection.trainNumber || selection.journeyNativeId || "unknown"}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {selection.wagonName || selection.className || selection.offeringNativeId}
+                  </span>
+                  {selection.departureAt ? (
+                    <span className="text-xs text-muted-foreground">
+                      {formatTehranTimestamp(selection.departureAt)}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
+
         {target.active ? (
           <section aria-labelledby={`observations-${target.providerId}`}>
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

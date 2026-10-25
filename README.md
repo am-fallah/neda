@@ -1,6 +1,6 @@
 # Neda
 
-**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, Docker/Compose packaging, and the bounded MrBilit live validation are implemented and locally/CI/live tested. Production provider registration, real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes further live provider traffic, real Telegram/Push credentials, or deployment.
+**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, Docker/Compose packaging, bounded MrBilit live validation, and a URL-first local MrBilit monitor flow are implemented and locally/CI/live tested. Production provider registration, real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes further live provider traffic, real Telegram/Push credentials, or deployment.
 
 
 Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
@@ -12,7 +12,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Go module pinned to Go `1.27.3`.
 - Validated environment configuration with fail-closed production checks.
 - Structured logging with request IDs and credential/URL/body redaction.
-- SQLite with WAL, foreign keys, `synchronous=FULL`, a single-writer connection, embedded forward-only migrations (`0001`–`0003`, with NTF-000 adding `0004`), checksum verification, and rollback-safe application.
+- SQLite with WAL, foreign keys, `synchronous=FULL`, a single-writer connection, embedded forward-only migrations (`0001`–`0005`), checksum verification, and rollback-safe application.
 - HTTP server with `GET /healthz`, `GET /readyz`, JSON errors, Host-header validation, body limits, security headers, panic recovery, explicit timeouts, and graceful shutdown.
 - `neda healthcheck` for local/container health probes.
 - Backend CI for formatting, module tidiness, vet, tests, race tests, and build.
@@ -30,7 +30,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - `internal/provider`: normalized provider IDs, availability states, capabilities, metadata, request/result types, `Provider` interface, and an explicit immutable registry that rejects nil, duplicate, empty-ID, and empty-display-name entries.
 - Shared error taxonomy and `Classify` contract for scheduler/health: success, infrastructure, configuration, route, request, and abandoned categories; timeout/network/429/5xx/invalid-response and provider-side cancellation are infrastructure failures, while 4xx/route/config are not.
 - `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
-- Fake-provider metadata is surfaced as a test-only source in the dashboard; the MrBilit adapter remains unregistered pending its validation gate.
+- Fake-provider metadata is surfaced as a test-only source in the dashboard. MrBilit is registered automatically in non-production environments for URL-first local monitor creation; the production registry remains empty pending `PRV-009`.
 
 **M3 SCH-001 monitor foundation (approved slice complete)**
 
@@ -65,6 +65,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 **NTF-000 transactional notification outbox (approved slice complete)**
 
 - `internal/migrations/0004_notifications.sql`: provider-health tables, notification deliveries/attempts, and Push-subscription storage with enum, counter, foreign-key, and unique constraints plus outbox claim/lookup indexes.
+- `internal/migrations/0005_monitor_selections.sql`: selected train/class identities and matching metadata tied to provider targets and config versions.
 - `internal/notify/outbox.go`: `Enqueue` inserts an event and its initial `pending` deliveries inside the caller's `*sql.Tx`. A duplicate `dedupe_key` returns the existing event ID with `Created=false` and inserts nothing; duplicate delivery targets are no-ops. Delivery IDs are outbox-owned deterministic UUIDs derived from the event ID and destination identity, so multiple events in one transaction cannot collide on the global primary key. `FindEventIDByDedupeKey` provides only the minimal dedupe read-back.
 - Initial deliveries use `next_attempt_at = event.created_at`. The helper never begins, commits, or rolls back the caller's transaction.
 - Database rows are consumed by the P3 delivery worker (Telegram) and the Web Push sender/worker integration; event creation and enqueue remain owned by the transactional producers.
@@ -116,14 +117,23 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Evidence: `go test ./internal/... -count=1`, `go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`, `go build ./...`, `gofmt -l .`, `git diff --check`, `make check`, and `make race` passed; selected integration tests passed repeated and race-enabled runs, and targeted runs under `TZ=UTC` and `TZ=America/New_York` passed. No production sender, schema change, live provider, server, or deployment work was added.
 - PR: [#13](https://github.com/am-fallah/neda/pull/13); code-head CI [40103924704](https://github.com/am-fallah/neda/actions/runs/40103924704) and evidence-head CI [40104074601](https://github.com/am-fallah/neda/actions/runs/40104074601) passed. Merged to `main` as `25d46b9` on 2026-10-24.
 
-**P1a MrBilit adapter foundation (unregistered)**
+**P1a MrBilit adapter foundation**
 
 - `internal/provider/mrbilit` implements the documented/provisional `GET /api/GetAvailable/v2` request with `from`, `to`, `date`, `adultCount`, `childCount`, and `infantCount`. It never sends unverified `genderCode`, `exclusive`, or `availableStatus` values and never sends cookies or credentials.
 - The transport owns only the 6s per-attempt timeout, two bounded retries (timeouts, connection errors, 429, 502/503/504), 500ms/1s backoff with jitter, `Retry-After` bounded by the caller's deadline, redirect rejection, cancellation, and a 2 MiB response cap. It does not create an overall check deadline; `SCH-004` remains the sole owner of the 20s context.
-- The parser accepts only an explicitly labeled synthetic response envelope (`testdata/mrbilit/synthetic`) because the real envelope, offering-container key, time/price formats, and capacity semantics are unverified. Other shapes fail closed as invalid responses. Caps are 100 journeys, 50 offerings per journey, and 500 offerings total.
+- The parser accepts the observed `trains[]`/`prices[].classes[]`/`meta` envelope and keeps the synthetic fixtures as a separate test contract. Other shapes fail closed as invalid responses. Caps are 100 journeys, 50 offerings per journey, and 500 offerings total.
 - Journey/offering keys follow Architecture §9.3: native IDs use `id:<native>`; fallback keys hash a versioned canonical string and exclude price, capacity, availability flags, and array index. The known-negative sample (`capacity=0`, `isAvailable=false`, `reservationAvailable=true`) is `NotReservable`; positive/shortfall/contradiction cases use synthetic fixtures only.
-- The adapter is deliberately not registered in `cmd/neda/serve.go`; production checks remain inert. Real-contract validation requires the owner-approved `PRV-006`/`GATE-003` protocol.
+- The adapter is not registered in production; `PRV-009` remains deferred. Non-production environments register it automatically for the URL-first local flow. Real contract evidence is recorded in `docs/MRBILIT_LIVE_VALIDATION.md`.
 - PR: [#14](https://github.com/am-fallah/neda/pull/14); merged to `main` as `33f8a7c`, reverted by [#16](https://github.com/am-fallah/neda/pull/16) (`1fdba66`), and re-applied by [#17](https://github.com/am-fallah/neda/pull/17) (`bb514c3`). The code is present in `main`; code-head CI [40110863710](https://github.com/am-fallah/neda/actions/runs/40110863710) (`a477150`) and final code-head CI [40111365080](https://github.com/am-fallah/neda/actions/runs/40111365080) (`10ba711`) passed.
+
+**URL-first MrBilit monitor creation (local/non-production)**
+
+- `POST /api/v1/providers/mrbilit/search` accepts a public MrBilit train search URL such as `https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24`. It validates the exact Host/path/query shape, ignores tracking parameters, converts the Jalali date to Gregorian, resolves numeric route IDs from the public page's embedded Nuxt `urlParams`, and fetches the initial API result through the existing adapter.
+- The initial search is stateless and separate from scheduled checks. It returns normalized trains/classes, route IDs/names, dates, passenger counts, warnings, capacity, and Reservable/NotReservable/Unknown states. Price and currency remain absent because currency is unverified. Empty `trains[]` is a valid empty result, not a sold-out verdict.
+- The dashboard New Monitor page uses the search result to let the owner select exact train/class options. The create API persists those selections in `monitor_provider_selections` with the target's config version and all matching/display metadata.
+- Scheduled checks continue to call the existing adapter for the whole route. A deterministic selection filter reduces the result to selected options only. Exact journey/offering keys are preferred and validated against train/class metadata; a unique metadata fallback is allowed. Missing, ambiguous, or conflicting matches become `Unknown`; they never become `NotReservable`. Unselected classes create no inventory states, events, or deliveries.
+- Selection changes and material monitor edits use the existing config-version and episode-closure rules. Existing event/outbox dedupe remains the only notification path; repeated checks for the same open episode do not create duplicate events or deliveries.
+- Production remains unchanged: no MrBilit provider is registered and no production checks dispatch. Live validation remains bounded, unauthenticated, read-only, and non-booking.
 
 **P2 encryption and Telegram foundation**
 
@@ -221,7 +231,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - `web/` is a React 19 + TypeScript + Vite + Tailwind CSS 4 + shadcn/ui single-page app. Routes: `/login`, `/` (overview), `/monitors`, `/monitors/new`, `/monitors/:id`, `/monitors/:id/edit`, `/events`, `/events/:id`, and `/settings`. A protected layout redirects unauthenticated visitors to `/login`; any private API 401 with `unauthenticated` also clears the client session and redirects.
 - The typed API client uses same-origin credentials and an in-memory CSRF token from the login/session response. The token is never written to localStorage or sessionStorage. Server field errors are mapped into forms, while server validation remains authoritative.
 - The dashboard shows monitor counts, provider health (degraded/stale), recent events, and per-channel delivery status. The UI never treats a provider error, timeout, malformed response, missing offering, or stale observation as confirmed unavailability. "Not reservable" is never labeled "sold out"; `Unknown` and missing observations are shown as unknown with a reason category. Historical events and observations are explicitly labeled as historical, not current availability.
-- Monitor create/edit uses a Jalali date picker backed by the maintained `jalaali-js` library and stores/sends Gregorian `YYYY-MM-DD`. Validation is mirrored on the client for usability; the server remains authoritative. Create/edit supports per-provider route IDs, optional booking slugs/gender codes only when the provider advertises support, and the test-only provider is clearly labeled and never presented as a real ticket source.
+- Monitor creation for MrBilit is URL-first: paste a MrBilit train search URL, search, choose exact train/class options, confirm route/date/passengers/global interval/notification status, and create. The backend persists the selected option identities and metadata. The existing manual form remains available for the test-only provider. Edit supports label-only changes for selected-option monitors; changing route/date/passengers requires a new selection set, and the server fails closed on stale selection dates.
 - Detail pages show last observed inventory, recent checks, per-provider diagnostics, pause/resume, edit, and confirmed delete. Observation rows expose validated booking links only; missing/unknown offerings never imply "sold out". History supports event/delivery filters and cursor pagination.
 - Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, enable/pause/test/remove browser Push devices, and change the password. Telegram status exposes only a masked chat label and sanitized test result; Push status exposes only the public VAPID key and device metadata. No secret or subscription endpoint is rendered.
 - The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
@@ -230,7 +240,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 
 ## Not implemented yet
 
-Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, production MrBilit registration (`PRV-009`), and deployment. The MrBilit adapter now parses the observed live envelope and booking URL, but remains unregistered; the Telegram/Push delivery foundation has no production credentials and no provider checks dispatch with the empty registry. Nothing in this repository authorizes real Telegram/Push credentials or deployment.
+Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, production MrBilit registration (`PRV-009`), and deployment. The MrBilit adapter parses the observed live envelope and booking URL and supports the URL-first local flow, but production registration remains deferred; the Telegram/Push delivery foundation has no production credentials and no production provider checks dispatch with the empty registry. Nothing in this repository authorizes real Telegram/Push credentials or deployment.
 
 ## Local development
 
@@ -257,7 +267,7 @@ Run the backend:
 NEDA_FAKE_PROVIDER_ENABLED=true make run
 ```
 
-`make run` sets `NEDA_ENV=development` and `NEDA_DB_PATH=./data/neda.db`. The fake provider is test-only and disabled by default; enable it only for local workflows. In another terminal:
+`make run` sets `NEDA_ENV=development` and `NEDA_DB_PATH=./data/neda.db`. Non-production environments automatically register MrBilit for the URL-first monitor flow. The fake provider is test-only and disabled by default; enable it only for local workflows. In another terminal:
 
 ```bash
 curl -i http://127.0.0.1:8080/healthz
@@ -319,6 +329,8 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and ignored in production. |
+
+MrBilit has no separate enable flag. It registers automatically when `NEDA_ENV` is not `production`; production keeps the provider registry empty until `PRV-009`.
 
 Compose-only variables: `NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID` select the non-root
 runtime user and must match the owner of `./data` and the key-secret target. They
@@ -499,6 +511,7 @@ docs/                 approved planning documents and frontend acceptance checkl
 - [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
 - [`docs/BROWSER_PUSH_VALIDATION.md`](docs/BROWSER_PUSH_VALIDATION.md) — real Chrome service-worker/Push simulation and permission-denial evidence.
 - [`docs/MRBILIT_LIVE_VALIDATION.md`](docs/MRBILIT_LIVE_VALIDATION.md) — bounded MrBilit live request evidence, observed semantics, and limitations.
+- [`docs/MRBILIT_URL_FIRST.md`](docs/MRBILIT_URL_FIRST.md) — URL-first monitor creation, selected-option matching, persistence, and live-search evidence.
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, rollback, and approval checklist.
 - [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence and limitations.
 - [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — Definition-of-done audit, blockers, and next milestone.

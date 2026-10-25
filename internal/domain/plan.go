@@ -79,6 +79,7 @@ func PlanUpdate(current Monitor, input MonitorInput, now time.Time, loc *time.Lo
 				BookingSlug:   candidate.BookingSlug,
 				GenderCode:    candidate.GenderCode,
 				ConfigVersion: 1,
+				Selections:    selectionRows(0, 1, candidate.Selections, now),
 				CreatedAt:     now,
 				UpdatedAt:     now,
 			}
@@ -92,7 +93,8 @@ func PlanUpdate(current Monitor, input MonitorInput, now time.Time, loc *time.Lo
 		providerMaterial := globalMaterial ||
 			target.OriginID != candidate.OriginID ||
 			target.DestinationID != candidate.DestinationID ||
-			target.GenderCode != candidate.GenderCode
+			target.GenderCode != candidate.GenderCode ||
+			!sameSelections(target.Selections, candidate.Selections)
 		bookingChanged := target.BookingSlug != candidate.BookingSlug
 		needsBump := reAdd || providerMaterial
 
@@ -109,6 +111,7 @@ func PlanUpdate(current Monitor, input MonitorInput, now time.Time, loc *time.Lo
 			target.DestinationID = candidate.DestinationID
 			target.BookingSlug = candidate.BookingSlug
 			target.GenderCode = candidate.GenderCode
+			target.Selections = selectionRows(target.ID, target.ConfigVersion, candidate.Selections, now)
 			target.UpdatedAt = now
 			target.NextDueAt = nil
 			plan.Material = true
@@ -139,4 +142,53 @@ func PlanUpdate(current Monitor, input MonitorInput, now time.Time, loc *time.Lo
 	}
 
 	return plan, nil
+}
+
+func selectionRows(targetID, configVersion int64, options []provider.SelectedOption, now time.Time) []MonitorProviderSelection {
+	if len(options) == 0 {
+		return nil
+	}
+	rows := make([]MonitorProviderSelection, 0, len(options))
+	for _, option := range options {
+		rows = append(rows, MonitorProviderSelection{
+			MonitorProviderID: targetID,
+			ConfigVersion:     configVersion,
+			Option:            option,
+			CreatedAt:         now,
+		})
+	}
+	return rows
+}
+
+func sameSelections(current []MonitorProviderSelection, next []provider.SelectedOption) bool {
+	if len(current) != len(next) {
+		return false
+	}
+	for index, option := range next {
+		row := current[index].Option
+		if row.JourneyKey != option.JourneyKey ||
+			row.OfferingKey != option.OfferingKey ||
+			row.JourneyNativeID != option.JourneyNativeID ||
+			row.OfferingNativeID != option.OfferingNativeID ||
+			row.TrainNumber != option.TrainNumber ||
+			row.Operator != option.Operator ||
+			row.OriginName != option.OriginName ||
+			row.DestinationName != option.DestinationName ||
+			row.WagonID != option.WagonID ||
+			row.WagonName != option.WagonName ||
+			row.ClassName != option.ClassName ||
+			row.CompartmentType != option.CompartmentType ||
+			!sameOptionalTime(row.DepartureAt, option.DepartureAt) ||
+			!sameOptionalTime(row.ArrivalAt, option.ArrivalAt) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameOptionalTime(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
 }

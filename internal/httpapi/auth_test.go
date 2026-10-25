@@ -127,7 +127,7 @@ func newAuthFixture(t *testing.T, limiterConfig auth.RateLimitConfig, withPasswo
 	return newAuthFixtureWithTelegram(t, limiterConfig, withPassword, true)
 }
 
-func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword, withTelegram bool) *authFixture {
+func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig, withPassword, withTelegram bool, extra ...provider.Provider) *authFixture {
 	t.Helper()
 	ctx := context.Background()
 	database, err := db.Open(ctx, filepath.Join(t.TempDir(), "httpapi-auth.db"))
@@ -160,7 +160,9 @@ func newAuthFixtureWithTelegram(t *testing.T, limiterConfig auth.RateLimitConfig
 		t.Fatalf("auth.NewRateLimiter: %v", err)
 	}
 	guard := auth.NewLoginGuard(auth.OriginPolicy{PublicURL: publicURL, Production: true}, limiter, false)
-	registry, err := provider.NewRegistry(fake.NewWithClock(clock.Now), permissiveProvider{id: "alt"})
+	registered := []provider.Provider{fake.NewWithClock(clock.Now), permissiveProvider{id: "alt"}}
+	registered = append(registered, extra...)
+	registry, err := provider.NewRegistry(registered...)
 	if err != nil {
 		t.Fatalf("provider.NewRegistry: %v", err)
 	}

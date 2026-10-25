@@ -34,12 +34,18 @@ type Config struct {
 	Sleep            func(context.Context, time.Duration) error
 	Logger           *slog.Logger
 	Now              func() time.Time
+	// SearchPageBaseURL is a test/development seam for the public search-page
+	// resolver. It defaults to https://mrbilit.com and never accepts an
+	// arbitrary user-supplied host.
+	SearchPageBaseURL *url.URL
 }
 
 // Provider implements provider.Provider for MrBilit.
 type Provider struct {
-	client *httpClient
-	now    func() time.Time
+	client     *httpClient
+	pageClient *http.Client
+	pageBase   *url.URL
+	now        func() time.Time
 }
 
 // New validates configuration and constructs an unregistered adapter.
@@ -63,7 +69,18 @@ func New(cfg Config) (*Provider, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Provider{client: client, now: now}, nil
+	pageBase, err := validateSearchPageBaseURL(cfg.SearchPageBaseURL)
+	if err != nil {
+		return nil, err
+	}
+	pageHTTPClient := http.Client{
+		Timeout: searchPageTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errRedirectRejected
+		},
+	}
+	pageHTTPClient.Jar = nil
+	return &Provider{client: client, pageClient: &pageHTTPClient, pageBase: pageBase, now: now}, nil
 }
 
 // Metadata returns code-owned provider metadata.
@@ -73,11 +90,12 @@ func (p *Provider) Metadata() provider.Metadata {
 		DisplayName: DisplayName,
 		TestOnly:    false,
 		Capabilities: provider.Capabilities{
-			RequiresOriginID:      true,
-			RequiresDestinationID: true,
-			SupportsBookingURL:    true,
-			SupportsGender:        false,
-			MaxPassengers:         maxPassengers,
+			RequiresOriginID:        true,
+			RequiresDestinationID:   true,
+			SupportsBookingURL:      true,
+			SupportsGender:          false,
+			RequiresOptionSelection: true,
+			MaxPassengers:           maxPassengers,
 		},
 	}
 }
@@ -91,32 +109,40 @@ func (p *Provider) ValidateConfig(cfg provider.MonitorProviderConfig) error {
 // contract. It honors the caller's context deadline and never creates a
 // competing overall deadline.
 func (p *Provider) Check(ctx context.Context, req provider.CheckRequest) (provider.Result, error) {
+	result, _, err := p.fetch(ctx, req)
+	return result, err
+}
+
+// fetch is shared by scheduled checks and the initial URL search. It performs
+// one validated request and returns the raw body only for non-persisted search
+// metadata extraction.
+func (p *Provider) fetch(ctx context.Context, req provider.CheckRequest) (provider.Result, []byte, error) {
 	if p == nil || p.client == nil {
-		return provider.Result{}, errors.New("mrbilit: provider is not initialized")
+		return provider.Result{}, nil, errors.New("mrbilit: provider is not initialized")
 	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return provider.Result{}, contextError(err)
+		return provider.Result{}, nil, contextError(err)
 	}
 	if err := validateCheckRequest(req); err != nil {
-		return provider.Result{}, err
+		return provider.Result{}, nil, err
 	}
 	endpoint, err := buildURL(p.client.base, req)
 	if err != nil {
-		return provider.Result{}, err
+		return provider.Result{}, nil, err
 	}
 	body, _, err := p.client.get(ctx, endpoint)
 	if err != nil {
-		return provider.Result{}, err
+		return provider.Result{}, nil, err
 	}
 	result, err := parseResponse(body, req, p.now().UTC())
 	if err != nil {
-		return provider.Result{}, err
+		return provider.Result{}, nil, err
 	}
 	if err := provider.ValidateResult(result); err != nil {
-		return provider.Result{}, parseError("invalid_normalized_result")
+		return provider.Result{}, nil, parseError("invalid_normalized_result")
 	}
-	return result, nil
+	return result, body, nil
 }

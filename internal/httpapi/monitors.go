@@ -23,11 +23,29 @@ type monitorRequest struct {
 }
 
 type monitorProviderRequest struct {
-	ProviderID    string `json:"providerId"`
-	OriginID      string `json:"originId"`
-	DestinationID string `json:"destinationId"`
-	BookingSlug   string `json:"bookingSlug"`
-	GenderCode    string `json:"genderCode"`
+	ProviderID    string                    `json:"providerId"`
+	OriginID      string                    `json:"originId"`
+	DestinationID string                    `json:"destinationId"`
+	BookingSlug   string                    `json:"bookingSlug"`
+	GenderCode    string                    `json:"genderCode"`
+	Selections    []monitorSelectionRequest `json:"selections"`
+}
+
+type monitorSelectionRequest struct {
+	JourneyKey       string     `json:"journeyKey"`
+	OfferingKey      string     `json:"offeringKey"`
+	JourneyNativeID  string     `json:"journeyNativeId"`
+	OfferingNativeID string     `json:"offeringNativeId"`
+	TrainNumber      string     `json:"trainNumber"`
+	Operator         string     `json:"operator"`
+	OriginName       string     `json:"originName"`
+	DestinationName  string     `json:"destinationName"`
+	DepartureAt      *time.Time `json:"departureAt"`
+	ArrivalAt        *time.Time `json:"arrivalAt"`
+	WagonID          string     `json:"wagonId"`
+	WagonName        string     `json:"wagonName"`
+	ClassName        string     `json:"className"`
+	CompartmentType  string     `json:"compartmentType"`
 }
 
 type monitorPatchRequest struct {
@@ -42,11 +60,12 @@ type monitorPatchRequest struct {
 }
 
 type monitorProviderPatchRequest struct {
-	ProviderID    string  `json:"providerId"`
-	OriginID      *string `json:"originId"`
-	DestinationID *string `json:"destinationId"`
-	BookingSlug   *string `json:"bookingSlug"`
-	GenderCode    *string `json:"genderCode"`
+	ProviderID    string                     `json:"providerId"`
+	OriginID      *string                    `json:"originId"`
+	DestinationID *string                    `json:"destinationId"`
+	BookingSlug   *string                    `json:"bookingSlug"`
+	GenderCode    *string                    `json:"genderCode"`
+	Selections    *[]monitorSelectionRequest `json:"selections"`
 }
 
 type monitorResponse struct {
@@ -68,22 +87,40 @@ type monitorResponse struct {
 }
 
 type monitorProviderResponse struct {
-	ProviderID          string     `json:"providerId"`
-	Active              bool       `json:"active"`
-	OriginID            string     `json:"originId"`
-	DestinationID       string     `json:"destinationId"`
-	BookingSlug         string     `json:"bookingSlug,omitempty"`
-	GenderCode          string     `json:"genderCode,omitempty"`
-	ConfigVersion       int64      `json:"configVersion"`
-	NextDueAt           *time.Time `json:"nextDueAt,omitempty"`
-	LastAttemptAt       *time.Time `json:"lastAttemptAt,omitempty"`
-	LastSuccessAt       *time.Time `json:"lastSuccessAt,omitempty"`
-	LastOutcome         string     `json:"lastOutcome,omitempty"`
-	LastErrorKind       string     `json:"lastErrorKind,omitempty"`
-	LastErrorAt         *time.Time `json:"lastErrorAt,omitempty"`
-	ConsecutiveFailures int        `json:"consecutiveFailures"`
-	CreatedAt           time.Time  `json:"createdAt"`
-	UpdatedAt           time.Time  `json:"updatedAt"`
+	ProviderID          string                     `json:"providerId"`
+	Active              bool                       `json:"active"`
+	OriginID            string                     `json:"originId"`
+	DestinationID       string                     `json:"destinationId"`
+	BookingSlug         string                     `json:"bookingSlug,omitempty"`
+	GenderCode          string                     `json:"genderCode,omitempty"`
+	ConfigVersion       int64                      `json:"configVersion"`
+	NextDueAt           *time.Time                 `json:"nextDueAt,omitempty"`
+	LastAttemptAt       *time.Time                 `json:"lastAttemptAt,omitempty"`
+	LastSuccessAt       *time.Time                 `json:"lastSuccessAt,omitempty"`
+	LastOutcome         string                     `json:"lastOutcome,omitempty"`
+	LastErrorKind       string                     `json:"lastErrorKind,omitempty"`
+	LastErrorAt         *time.Time                 `json:"lastErrorAt,omitempty"`
+	ConsecutiveFailures int                        `json:"consecutiveFailures"`
+	Selections          []monitorSelectionResponse `json:"selections"`
+	CreatedAt           time.Time                  `json:"createdAt"`
+	UpdatedAt           time.Time                  `json:"updatedAt"`
+}
+
+type monitorSelectionResponse struct {
+	JourneyKey       string     `json:"journeyKey"`
+	OfferingKey      string     `json:"offeringKey"`
+	JourneyNativeID  string     `json:"journeyNativeId,omitempty"`
+	OfferingNativeID string     `json:"offeringNativeId,omitempty"`
+	TrainNumber      string     `json:"trainNumber,omitempty"`
+	Operator         string     `json:"operator,omitempty"`
+	OriginName       string     `json:"originName,omitempty"`
+	DestinationName  string     `json:"destinationName,omitempty"`
+	DepartureAt      *time.Time `json:"departureAt,omitempty"`
+	ArrivalAt        *time.Time `json:"arrivalAt,omitempty"`
+	WagonID          string     `json:"wagonId,omitempty"`
+	WagonName        string     `json:"wagonName,omitempty"`
+	ClassName        string     `json:"className,omitempty"`
+	CompartmentType  string     `json:"compartmentType,omitempty"`
 }
 
 type monitorListResponse struct {
@@ -323,6 +360,7 @@ func (m monitorRequest) toDomain() domain.MonitorInput {
 			DestinationID: candidate.DestinationID,
 			BookingSlug:   candidate.BookingSlug,
 			GenderCode:    candidate.GenderCode,
+			Selections:    selectionRequestsToDomain(candidate.Selections),
 		})
 	}
 	return domain.MonitorInput{
@@ -398,12 +436,19 @@ func (p monitorPatchRequest) toDomain(current domain.Monitor) domain.MonitorInpu
 		} else if found {
 			genderCode = previous.GenderCode
 		}
+		var selections []provider.SelectedOption
+		if candidate.Selections != nil {
+			selections = selectionRequestsToDomain(*candidate.Selections)
+		} else if found {
+			selections = selectionRowsToOptions(previous.Selections)
+		}
 		input.Providers = append(input.Providers, domain.ProviderInput{
 			ProviderID:    providerID,
 			OriginID:      originID,
 			DestinationID: destinationID,
 			BookingSlug:   bookingSlug,
 			GenderCode:    genderCode,
+			Selections:    selections,
 		})
 	}
 	return input
@@ -418,6 +463,7 @@ func monitorInputFromMonitor(monitor domain.Monitor) domain.MonitorInput {
 			DestinationID: target.DestinationID,
 			BookingSlug:   target.BookingSlug,
 			GenderCode:    target.GenderCode,
+			Selections:    selectionRowsToOptions(target.Selections),
 		})
 	}
 	return domain.MonitorInput{
@@ -430,6 +476,70 @@ func monitorInputFromMonitor(monitor domain.Monitor) domain.MonitorInput {
 		Infants:         monitor.Infants,
 		Providers:       providers,
 	}
+}
+
+func selectionRequestsToDomain(input []monitorSelectionRequest) []provider.SelectedOption {
+	if len(input) == 0 {
+		return nil
+	}
+	result := make([]provider.SelectedOption, 0, len(input))
+	for _, item := range input {
+		result = append(result, provider.SelectedOption{
+			JourneyKey:       item.JourneyKey,
+			OfferingKey:      item.OfferingKey,
+			JourneyNativeID:  item.JourneyNativeID,
+			OfferingNativeID: item.OfferingNativeID,
+			TrainNumber:      item.TrainNumber,
+			Operator:         item.Operator,
+			OriginName:       item.OriginName,
+			DestinationName:  item.DestinationName,
+			DepartureAt:      utcOptional(item.DepartureAt),
+			ArrivalAt:        utcOptional(item.ArrivalAt),
+			WagonID:          item.WagonID,
+			WagonName:        item.WagonName,
+			ClassName:        item.ClassName,
+			CompartmentType:  item.CompartmentType,
+		})
+	}
+	return result
+}
+
+func selectionRowsToOptions(rows []domain.MonitorProviderSelection) []provider.SelectedOption {
+	if len(rows) == 0 {
+		return nil
+	}
+	result := make([]provider.SelectedOption, 0, len(rows))
+	for _, row := range rows {
+		result = append(result, row.Option)
+	}
+	return result
+}
+
+func selectionDTOs(rows []domain.MonitorProviderSelection) []monitorSelectionResponse {
+	if len(rows) == 0 {
+		return []monitorSelectionResponse{}
+	}
+	result := make([]monitorSelectionResponse, 0, len(rows))
+	for _, row := range rows {
+		option := row.Option
+		result = append(result, monitorSelectionResponse{
+			JourneyKey:       option.JourneyKey,
+			OfferingKey:      option.OfferingKey,
+			JourneyNativeID:  option.JourneyNativeID,
+			OfferingNativeID: option.OfferingNativeID,
+			TrainNumber:      option.TrainNumber,
+			Operator:         option.Operator,
+			OriginName:       option.OriginName,
+			DestinationName:  option.DestinationName,
+			DepartureAt:      utcOptional(option.DepartureAt),
+			ArrivalAt:        utcOptional(option.ArrivalAt),
+			WagonID:          option.WagonID,
+			WagonName:        option.WagonName,
+			ClassName:        option.ClassName,
+			CompartmentType:  option.CompartmentType,
+		})
+	}
+	return result
 }
 
 func monitorDTO(monitor domain.Monitor, now time.Time) monitorResponse {
@@ -472,6 +582,7 @@ func monitorProviderDTO(target domain.MonitorProvider) monitorProviderResponse {
 		LastErrorKind:       target.LastErrorKind,
 		LastErrorAt:         utcOptional(target.LastErrorAt),
 		ConsecutiveFailures: target.ConsecutiveFailures,
+		Selections:          selectionDTOs(target.Selections),
 		CreatedAt:           target.CreatedAt.UTC(),
 		UpdatedAt:           target.UpdatedAt.UTC(),
 	}

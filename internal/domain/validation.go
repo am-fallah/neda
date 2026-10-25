@@ -24,6 +24,10 @@ const (
 	// provider adapters own pattern/enum validation.
 	MaxBookingSlugLength = 256
 	MaxGenderCodeLength  = 64
+	// MaxSelectionsPerProvider bounds persisted train/class selections.
+	MaxSelectionsPerProvider = 50
+	MaxSelectionKeyLength    = 512
+	MaxSelectionTextLength   = 512
 )
 
 func normalizeMonitorInput(input MonitorInput, now time.Time, loc *time.Location, providers ProviderResolver) (MonitorInput, time.Time, error) {
@@ -125,6 +129,10 @@ func normalizeMonitorInput(input MonitorInput, now time.Time, loc *time.Location
 		if !ok || adapter == nil {
 			return MonitorInput{}, time.Time{}, validationError(field+".providerId", "provider is not registered", nil)
 		}
+		selections, err := normalizeSelections(candidate.Selections, adapter.Metadata().Capabilities.RequiresOptionSelection, field, normalized.DepartureDate, loc)
+		if err != nil {
+			return MonitorInput{}, time.Time{}, err
+		}
 		if err := adapter.ValidateConfig(provider.MonitorProviderConfig{
 			OriginID:      originID,
 			DestinationID: destinationID,
@@ -140,10 +148,93 @@ func normalizeMonitorInput(input MonitorInput, now time.Time, loc *time.Location
 			DestinationID: destinationID,
 			BookingSlug:   bookingSlug,
 			GenderCode:    genderCode,
+			Selections:    selections,
 		})
 	}
 
 	return normalized, expiresAt, nil
+}
+
+func normalizeSelections(input []provider.SelectedOption, required bool, field, departureDate string, loc *time.Location) ([]provider.SelectedOption, error) {
+	if len(input) == 0 {
+		if required {
+			return nil, validationError(field+".selections", "at least one train/class option is required", nil)
+		}
+		return nil, nil
+	}
+	if !required {
+		return nil, validationError(field+".selections", "this provider does not support option selection", nil)
+	}
+	if len(input) > MaxSelectionsPerProvider {
+		return nil, validationError(field+".selections", fmt.Sprintf("must contain at most %d options", MaxSelectionsPerProvider), nil)
+	}
+	seen := make(map[string]struct{}, len(input))
+	result := make([]provider.SelectedOption, 0, len(input))
+	for index, candidate := range input {
+		itemField := fmt.Sprintf("%s.selections[%d]", field, index)
+		option := provider.SelectedOption{
+			JourneyKey:       strings.TrimSpace(candidate.JourneyKey),
+			OfferingKey:      strings.TrimSpace(candidate.OfferingKey),
+			JourneyNativeID:  strings.TrimSpace(candidate.JourneyNativeID),
+			OfferingNativeID: strings.TrimSpace(candidate.OfferingNativeID),
+			TrainNumber:      strings.TrimSpace(candidate.TrainNumber),
+			Operator:         strings.TrimSpace(candidate.Operator),
+			OriginName:       strings.TrimSpace(candidate.OriginName),
+			DestinationName:  strings.TrimSpace(candidate.DestinationName),
+			WagonID:          strings.TrimSpace(candidate.WagonID),
+			WagonName:        strings.TrimSpace(candidate.WagonName),
+			ClassName:        strings.TrimSpace(candidate.ClassName),
+			CompartmentType:  strings.TrimSpace(candidate.CompartmentType),
+		}
+		if option.JourneyKey == "" {
+			return nil, validationError(itemField+".journeyKey", "is required", nil)
+		}
+		if option.OfferingKey == "" {
+			return nil, validationError(itemField+".offeringKey", "is required", nil)
+		}
+		if len(option.JourneyKey) > MaxSelectionKeyLength || len(option.OfferingKey) > MaxSelectionKeyLength {
+			return nil, validationError(itemField, "selection keys are too long", nil)
+		}
+		for _, value := range []string{
+			option.JourneyNativeID, option.OfferingNativeID, option.TrainNumber, option.Operator,
+			option.OriginName, option.DestinationName, option.WagonID, option.WagonName,
+			option.ClassName, option.CompartmentType,
+		} {
+			if len(value) > MaxSelectionTextLength {
+				return nil, validationError(itemField, "selection metadata is too long", nil)
+			}
+			if containsControl(value) {
+				return nil, validationError(itemField, "selection metadata must not contain control characters", nil)
+			}
+		}
+		key := option.JourneyKey + "\x00" + option.OfferingKey
+		if _, exists := seen[key]; exists {
+			return nil, validationError(itemField, "is a duplicate selection", nil)
+		}
+		seen[key] = struct{}{}
+		if candidate.DepartureAt != nil {
+			if candidate.DepartureAt.IsZero() {
+				return nil, validationError(itemField+".departureAt", "must not be zero", nil)
+			}
+			value := candidate.DepartureAt.UTC()
+			option.DepartureAt = &value
+		}
+		if candidate.ArrivalAt != nil {
+			if candidate.ArrivalAt.IsZero() {
+				return nil, validationError(itemField+".arrivalAt", "must not be zero", nil)
+			}
+			value := candidate.ArrivalAt.UTC()
+			option.ArrivalAt = &value
+		}
+		if option.DepartureAt != nil && loc != nil {
+			localDate := option.DepartureAt.In(loc).Format(dateLayout)
+			if localDate != departureDate {
+				return nil, validationError(itemField+".departureAt", "does not match the monitor departure date; re-run the MrBilit search", nil)
+			}
+		}
+		result = append(result, option)
+	}
+	return result, nil
 }
 
 func validationError(field, message string, cause error) error {

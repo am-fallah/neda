@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/am-fallah/neda/internal/domain"
+	"github.com/am-fallah/neda/internal/provider"
 )
 
 func storeMonitorFixture(t *testing.T) domain.Monitor {
@@ -521,4 +522,124 @@ func assertClosedEpisode(t *testing.T, db *sql.DB, episodeID int64, reason strin
 
 func formatTestTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func TestMonitorSelectionPersistenceAndVersioning(t *testing.T) {
+	st, sqlDB := newTestStore(t)
+	ctx := context.Background()
+	location, err := domain.TehranLocation()
+	if err != nil {
+		t.Fatalf("TehranLocation: %v", err)
+	}
+	departure := time.Date(2026, 11, 5, 11, 20, 0, 0, time.UTC)
+	fixture := storeMonitorFixture(t)
+	fixture.DepartureDate = "2026-11-05"
+	fixture.ExpiresAt, err = domain.DepartureExpiry(fixture.DepartureDate, location)
+	if err != nil {
+		t.Fatalf("DepartureExpiry: %v", err)
+	}
+	fixture.Providers = fixture.Providers[:1]
+	fixture.Providers[0].ProviderID = "mrbilit"
+	fixture.Providers[0].OriginID = "219"
+	fixture.Providers[0].DestinationID = "191"
+	fixture.Providers[0].BookingSlug = "yazd-mashhad"
+	fixture.Providers[0].Selections = []domain.MonitorProviderSelection{{
+		ConfigVersion: 1,
+		Option: provider.SelectedOption{
+			JourneyKey:       "id:9001",
+			OfferingKey:      "id:9102",
+			JourneyNativeID:  "9001",
+			OfferingNativeID: "9102",
+			TrainNumber:      "682",
+			Operator:         "Raja",
+			OriginName:       "Yazd",
+			DestinationName:  "Mashhad",
+			DepartureAt:      &departure,
+			WagonID:          "9202",
+			WagonName:        "Five-star Samen",
+			ClassName:        "Samen",
+			CompartmentType:  "4-person compartment",
+		},
+		CreatedAt: testNow,
+	}}
+
+	created, err := st.CreateMonitor(ctx, fixture)
+	if err != nil {
+		t.Fatalf("CreateMonitor: %v", err)
+	}
+	if len(created.Providers[0].Selections) != 1 || created.Providers[0].Selections[0].Option.JourneyKey != "id:9001" {
+		t.Fatalf("created selections = %+v", created.Providers[0].Selections)
+	}
+
+	input := monitorInputWithSelections(created)
+	input.Label = "Renamed"
+	labelResult, err := st.UpdateMonitor(ctx, created.ID, input, testNow.Add(time.Minute), testNow.Add(time.Minute+time.Second), location)
+	if err != nil {
+		t.Fatalf("label UpdateMonitor: %v", err)
+	}
+	if labelResult.Material || labelResult.Monitor.Providers[0].ConfigVersion != 1 {
+		t.Fatalf("label update = %+v", labelResult)
+	}
+	if len(labelResult.Monitor.Providers[0].Selections) != 1 {
+		t.Fatalf("label update lost selections")
+	}
+
+	input = monitorInputWithSelections(labelResult.Monitor)
+	input.Providers[0].Selections = []provider.SelectedOption{{
+		JourneyKey:       "id:9001",
+		OfferingKey:      "id:9105",
+		JourneyNativeID:  "9001",
+		OfferingNativeID: "9105",
+		TrainNumber:      "682",
+		Operator:         "Raja",
+		DepartureAt:      &departure,
+		WagonName:        "Four-star Sepehr",
+		ClassName:        "Sepehr",
+	}}
+	updated, err := st.UpdateMonitor(ctx, created.ID, input, testNow.Add(2*time.Minute), testNow.Add(2*time.Minute+time.Second), location)
+	if err != nil {
+		t.Fatalf("selection UpdateMonitor: %v", err)
+	}
+	if !updated.Material || updated.Monitor.Providers[0].ConfigVersion != 2 {
+		t.Fatalf("selection update = %+v", updated)
+	}
+	if got := updated.Monitor.Providers[0].Selections[0].Option.OfferingKey; got != "id:9105" {
+		t.Fatalf("updated selection = %q", got)
+	}
+	var oldCount, newCount int
+	if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitor_provider_selections WHERE config_version = 1`).Scan(&oldCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitor_provider_selections WHERE config_version = 2`).Scan(&newCount); err != nil {
+		t.Fatal(err)
+	}
+	if oldCount != 1 || newCount != 1 {
+		t.Fatalf("selection version counts = %d/%d", oldCount, newCount)
+	}
+	if err := st.DeleteMonitor(ctx, created.ID); err != nil {
+		t.Fatalf("DeleteMonitor: %v", err)
+	}
+	var remaining int
+	if err := sqlDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM monitor_provider_selections`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("selections after delete = %d", remaining)
+	}
+}
+
+func monitorInputWithSelections(monitor domain.Monitor) domain.MonitorInput {
+	input := storeInput(monitor)
+	for index := range input.Providers {
+		input.Providers[index].Selections = nil
+		for _, target := range monitor.Providers {
+			if target.ProviderID != input.Providers[index].ProviderID {
+				continue
+			}
+			for _, selection := range target.Selections {
+				input.Providers[index].Selections = append(input.Providers[index].Selections, selection.Option)
+			}
+		}
+	}
+	return input
 }

@@ -42,12 +42,30 @@ export interface LoginResponse {
   expiresAt: string;
 }
 
+export interface SelectedOption {
+  journeyKey: string;
+  offeringKey: string;
+  journeyNativeId?: string;
+  offeringNativeId?: string;
+  trainNumber?: string;
+  operator?: string;
+  originName?: string;
+  destinationName?: string;
+  departureAt?: string | null;
+  arrivalAt?: string | null;
+  wagonId?: string;
+  wagonName?: string;
+  className?: string;
+  compartmentType?: string;
+}
+
 export interface MonitorProviderInput {
   providerId: string;
   originId: string;
   destinationId: string;
   bookingSlug?: string;
   genderCode?: string;
+  selections?: SelectedOption[];
 }
 
 export interface MonitorCreateRequest {
@@ -87,6 +105,7 @@ export interface MonitorProvider {
   lastErrorKind?: string;
   lastErrorAt?: string | null;
   consecutiveFailures: number;
+  selections: SelectedOption[];
   createdAt: string;
   updatedAt: string;
 }
@@ -172,7 +191,61 @@ export interface ProviderCapabilities {
   requiresDestinationId?: boolean;
   supportsBookingUrl?: boolean;
   supportsGender?: boolean;
+  requiresOptionSelection?: boolean;
   maxPassengers?: number;
+}
+
+export interface PassengerCounts {
+  adults: number;
+  children: number;
+  infants: number;
+}
+
+export interface ProviderSearchRequest extends PassengerCounts {
+  url: string;
+}
+
+export interface ProviderSearchRoute {
+  originId: string;
+  destinationId: string;
+  originName: string;
+  destinationName: string;
+}
+
+export interface ProviderSearchClass {
+  offeringKey: string;
+  nativeId?: string;
+  wagonId?: string;
+  wagonName?: string;
+  className?: string;
+  compartmentType?: string;
+  capacity: number | null;
+  state: ObservationState;
+  reason?: string;
+}
+
+export interface ProviderSearchTrain {
+  journeyKey: string;
+  nativeId?: string;
+  trainNumber?: string;
+  operator?: string;
+  originName?: string;
+  destinationName?: string;
+  departureAt?: string | null;
+  arrivalAt?: string | null;
+  classes: ProviderSearchClass[];
+}
+
+export interface ProviderSearchResult {
+  url: string;
+  slug: string;
+  jalaliDate: string;
+  departureDate: string;
+  route: ProviderSearchRoute;
+  passengers: PassengerCounts;
+  trains: ProviderSearchTrain[];
+  warnings: string[];
+  observedAt: string;
 }
 
 export interface ProviderHealthEpisode {

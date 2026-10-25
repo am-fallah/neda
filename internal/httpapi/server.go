@@ -239,6 +239,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.privateAuth(http.HandlerFunc(s.handleProviders)).ServeHTTP(w, r)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/api/v1/providers/") && strings.HasSuffix(r.URL.Path, "/search") {
+		s.privateAuth(http.HandlerFunc(s.handleProviderSearch)).ServeHTTP(w, r)
+		return
+	}
 	if r.URL.Path == "/api/v1/events" || strings.HasPrefix(r.URL.Path, "/api/v1/events/") {
 		s.privateAuth(http.HandlerFunc(s.handleEvents)).ServeHTTP(w, r)
 		return
