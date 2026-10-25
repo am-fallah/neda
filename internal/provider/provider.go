@@ -102,10 +102,14 @@ func (e *Error) Unwrap() error {
 	return e.Err
 }
 
-// Capabilities describes provider-specific configuration needs.
+// Capabilities describes provider-specific configuration and UI needs.
+// Generic validation and presentation consult these flags; adapters remain
+// responsible for their own final validation and fail-closed behavior.
 type Capabilities struct {
 	RequiresOriginID        bool
 	RequiresDestinationID   bool
+	SupportsURLSearch       bool
+	SupportsPrice           bool
 	SupportsBookingURL      bool
 	SupportsGender          bool
 	RequiresOptionSelection bool
@@ -155,7 +159,9 @@ type CheckRequest struct {
 	Config        MonitorProviderConfig
 }
 
-// Price is provider-reported pricing in minor units when validated.
+// Price is a provider-reported amount. Amount is never scaled or converted.
+// Currency is empty until the provider's unit semantics are verified; callers
+// must not infer a unit from a bare amount.
 type Price struct {
 	Amount   int64
 	Currency string

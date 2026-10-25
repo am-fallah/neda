@@ -914,7 +914,7 @@ components:
       properties:
         url:
           type: string
-          description: Public MrBilit train search URL with a Jalali departureDate.
+          description: Provider-specific public search URL. For MrBilit, a train search URL with a Jalali departureDate.
         adults:
           type: integer
           minimum: 1
@@ -999,6 +999,14 @@ components:
           enum: [reservable, not_reservable, unknown]
         reason:
           type: string
+        priceAmount:
+          type: integer
+          format: int64
+          nullable: true
+          description: Positive provider-reported integer amount. Never scaled or converted.
+        priceCurrency:
+          type: string
+          description: Empty until the provider's currency unit is verified.
     ProviderSearchTrain:
       type: object
       required: [journeyKey, classes]
@@ -1410,6 +1418,10 @@ components:
         requiresOriginId:
           type: boolean
         requiresDestinationId:
+          type: boolean
+        supportsUrlSearch:
+          type: boolean
+        supportsPrice:
           type: boolean
         supportsBookingUrl:
           type: boolean

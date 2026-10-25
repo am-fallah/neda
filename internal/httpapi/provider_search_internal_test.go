@@ -81,7 +81,7 @@ func TestSearchErrorMappingAndLog(t *testing.T) {
 			logs.Reset()
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/api/v1/providers/mrbilit/search", nil)
-			server.writeSearchError(recorder, request, tc.err)
+			server.writeSearchError(recorder, request, provider.Metadata{ID: "mrbilit", DisplayName: "MrBilit"}, tc.err)
 
 			if recorder.Code != tc.wantStatus {
 				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tc.wantStatus, recorder.Body.String())

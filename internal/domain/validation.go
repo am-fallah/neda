@@ -100,13 +100,19 @@ func normalizeMonitorInput(input MonitorInput, now time.Time, loc *time.Location
 
 		originID := strings.TrimSpace(candidate.OriginID)
 		destinationID := strings.TrimSpace(candidate.DestinationID)
-		if originID == "" {
-			return MonitorInput{}, time.Time{}, validationError(field+".originId", "is required", nil)
+
+		adapter, ok := providers.Lookup(providerID)
+		if !ok || adapter == nil {
+			return MonitorInput{}, time.Time{}, validationError(field+".providerId", "provider is not registered", nil)
 		}
-		if destinationID == "" {
-			return MonitorInput{}, time.Time{}, validationError(field+".destinationId", "is required", nil)
+		capabilities := adapter.Metadata().Capabilities
+		if capabilities.RequiresOriginID && originID == "" {
+			return MonitorInput{}, time.Time{}, validationError(field+".originId", "is required by this provider", nil)
 		}
-		if originID == destinationID {
+		if capabilities.RequiresDestinationID && destinationID == "" {
+			return MonitorInput{}, time.Time{}, validationError(field+".destinationId", "is required by this provider", nil)
+		}
+		if originID != "" && destinationID != "" && originID == destinationID {
 			return MonitorInput{}, time.Time{}, validationError(field+".destinationId", "must differ from originId", nil)
 		}
 
@@ -125,11 +131,7 @@ func normalizeMonitorInput(input MonitorInput, now time.Time, loc *time.Location
 			return MonitorInput{}, time.Time{}, validationError(field+".genderCode", "must not contain control characters", nil)
 		}
 
-		adapter, ok := providers.Lookup(providerID)
-		if !ok || adapter == nil {
-			return MonitorInput{}, time.Time{}, validationError(field+".providerId", "provider is not registered", nil)
-		}
-		selections, err := normalizeSelections(candidate.Selections, adapter.Metadata().Capabilities.RequiresOptionSelection, field, normalized.DepartureDate, loc)
+		selections, err := normalizeSelections(candidate.Selections, capabilities.RequiresOptionSelection, field, normalized.DepartureDate, loc)
 		if err != nil {
 			return MonitorInput{}, time.Time{}, err
 		}

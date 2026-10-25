@@ -53,6 +53,31 @@ func (p acceptingProvider) Check(context.Context, provider.CheckRequest) (provid
 	return provider.Result{}, errors.New("accepting provider is only used for monitor tests")
 }
 
+type routeOptionalProvider struct {
+	id provider.ID
+}
+
+func (p routeOptionalProvider) Metadata() provider.Metadata {
+	return provider.Metadata{
+		ID:          p.id,
+		DisplayName: "Route-optional test provider",
+		TestOnly:    true,
+		Capabilities: provider.Capabilities{
+			RequiresOriginID:      false,
+			RequiresDestinationID: false,
+			MaxPassengers:         9,
+		},
+	}
+}
+
+func (p routeOptionalProvider) ValidateConfig(provider.MonitorProviderConfig) error {
+	return nil
+}
+
+func (p routeOptionalProvider) Check(context.Context, provider.CheckRequest) (provider.Result, error) {
+	return provider.Result{}, errors.New("route-optional provider is only used for monitor tests")
+}
+
 type serviceHarness struct {
 	svc       *domain.MonitorService
 	store     *store.Store
@@ -84,7 +109,7 @@ func newServiceHarness(t *testing.T) *serviceHarness {
 	if err != nil {
 		t.Fatalf("TehranLocation: %v", err)
 	}
-	registry, err := provider.NewRegistry(fake.New(), acceptingProvider{id: "stub"}, optionAcceptingProvider{id: "selection"})
+	registry, err := provider.NewRegistry(fake.New(), acceptingProvider{id: "stub"}, optionAcceptingProvider{id: "selection"}, routeOptionalProvider{id: "route-optional"})
 	if err != nil {
 		t.Fatalf("provider.NewRegistry: %v", err)
 	}
@@ -362,6 +387,32 @@ func TestMonitorServiceExpiredResumeRequiresFutureDate(t *testing.T) {
 	}
 	if !resumed.Enabled || resumed.Providers[0].NextDueAt == nil {
 		t.Fatalf("resumed = %+v", resumed)
+	}
+}
+
+func TestMonitorServiceHonorsProviderRouteCapabilities(t *testing.T) {
+	h := newServiceHarness(t)
+	input := fakeInput()
+	input.Providers = []domain.ProviderInput{{
+		ProviderID: "route-optional",
+	}}
+	created, err := h.svc.Create(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Create with route-optional provider: %v", err)
+	}
+	if len(created.Providers) != 1 {
+		t.Fatalf("providers = %+v", created.Providers)
+	}
+	if created.Providers[0].OriginID != "" || created.Providers[0].DestinationID != "" {
+		t.Fatalf("route IDs = %q/%q", created.Providers[0].OriginID, created.Providers[0].DestinationID)
+	}
+
+	required := input
+	required.Providers = []domain.ProviderInput{{
+		ProviderID: "stub",
+	}}
+	if _, err := h.svc.Create(context.Background(), required); !errors.Is(err, domain.ErrMonitorInvalid) {
+		t.Fatalf("missing required route IDs err = %v", err)
 	}
 }
 

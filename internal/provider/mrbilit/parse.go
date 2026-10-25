@@ -424,6 +424,7 @@ func mergeOfferings(existing, incoming []provider.OfferingObservation, warnings 
 			existing[index].State = provider.StateUnknown
 			existing[index].Reason = "duplicate_offering_key"
 			existing[index].Capacity = nil
+			existing[index].Offering.Price = nil
 			warnings.add("duplicate_offering_key")
 			continue
 		}
@@ -512,11 +513,16 @@ func parseOffering(raw json.RawMessage, passengers provider.Passengers) (provide
 	}
 	if offering.Price.Unexpected {
 		identityWarning = "unexpected_offer_price_type"
-	} else if offering.Price.Invalid {
+	} else if offering.Price.Invalid || (offering.Price.Valid && offering.Price.Value < 0) {
 		identityWarning = "invalid_offer_price"
 	}
-	// Price currency is not verified (Rial vs Toman), so keep Price absent.
-	// The numeric amount remains unparsed for decisions; see docs.
+	// The provider reports a numeric amount. Its currency and per-passenger
+	// basis are unverified, so preserve a positive amount without inventing a
+	// unit. Zero stays absent and is never rendered as a free fare.
+	if offering.Price.Valid && offering.Price.Value > 0 {
+		amount := offering.Price.Value
+		model.Price = &provider.Price{Amount: amount}
+	}
 	key, ok := offeringKey(model, offering.WagonID.Value, offering.CompartmentType.Value, offering.ShortTitle.Value)
 	if !ok {
 		return provider.OfferingObservation{}, false, identityWarning
@@ -595,7 +601,15 @@ func sameOfferingObservation(a, b provider.OfferingObservation) bool {
 		a.State == b.State &&
 		a.Reason == b.Reason &&
 		equalIntPointer(a.Capacity, b.Capacity) &&
+		equalPrice(a.Offering.Price, b.Offering.Price) &&
 		equalURL(a.BookingURL, b.BookingURL)
+}
+
+func equalPrice(a, b *provider.Price) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Amount == b.Amount && a.Currency == b.Currency
 }
 
 func equalURL(a, b *url.URL) bool {
