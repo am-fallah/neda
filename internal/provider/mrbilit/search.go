@@ -275,7 +275,20 @@ func (p *Provider) resolveRouteIDs(ctx context.Context, parsed searchURL) (strin
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", "", contextError(ctxErr)
 		}
-		return "", "", &provider.Error{Kind: provider.ErrNetwork, Op: "mrbilit.search.page", Err: errors.New("read failed")}
+		if isTimeoutError(err) {
+			return "", "", &provider.Error{
+				Kind:       provider.ErrTimeout,
+				Op:         "mrbilit.search.page.read",
+				StatusCode: response.StatusCode,
+				Err:        context.DeadlineExceeded,
+			}
+		}
+		return "", "", &provider.Error{
+			Kind:       provider.ErrNetwork,
+			Op:         "mrbilit.search.page.read",
+			StatusCode: response.StatusCode,
+			Err:        errors.New("read failed"),
+		}
 	}
 	if int64(len(body)) > searchPageMaxBytes {
 		return "", "", &provider.Error{Kind: provider.ErrInvalidResponse, Op: "mrbilit.search.page", Err: errors.New("page too large")}
