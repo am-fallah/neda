@@ -152,6 +152,7 @@ func (s *Server) writeSearchError(w http.ResponseWriter, r *http.Request, err er
 			"provider_id", "mrbilit",
 			"kind", string(providerErr.Kind),
 			"op", providerErr.Op,
+			"upstream_status", providerErr.StatusCode,
 		)
 		return
 	}

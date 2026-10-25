@@ -244,6 +244,49 @@ func TestSearchURLRedirectRejected(t *testing.T) {
 	}
 }
 
+func TestSearchURLPageTimeoutIsProviderTimeout(t *testing.T) {
+	page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	adapter := searchTestProvider(t, page, validSearchAPI(t, observedFixture(t)))
+	adapter.pageClient.Timeout = 25 * time.Millisecond
+
+	started := time.Now()
+	_, err := adapter.SearchURL(context.Background(), provider.SearchRequest{
+		URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+		Passengers: provider.Passengers{Adults: 1},
+	})
+	if time.Since(started) > time.Second {
+		t.Fatalf("page timeout took %v", time.Since(started))
+	}
+	var providerErr *provider.Error
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %v, want provider error", err)
+	}
+	if providerErr.Kind != provider.ErrTimeout || providerErr.Op != "mrbilit.search.page" || providerErr.StatusCode != 0 {
+		t.Fatalf("error = %+v, want timeout with no upstream status", providerErr)
+	}
+}
+
+func TestSearchURLPageHTTP504IsNotTimeout(t *testing.T) {
+	page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusGatewayTimeout)
+	})
+	adapter := searchTestProvider(t, page, validSearchAPI(t, observedFixture(t)))
+
+	_, err := adapter.SearchURL(context.Background(), provider.SearchRequest{
+		URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+		Passengers: provider.Passengers{Adults: 1},
+	})
+	var providerErr *provider.Error
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %v, want provider error", err)
+	}
+	if providerErr.Kind != provider.ErrHTTPStatus || providerErr.StatusCode != http.StatusGatewayTimeout {
+		t.Fatalf("error = %+v, want upstream 504", providerErr)
+	}
+}
+
 func TestSearchURLRouteMismatchIsInvalid(t *testing.T) {
 	fixture := strings.Replace(string(observedFixture(t)), `"from": 219`, `"from": 220`, 1)
 	adapter := searchTestProvider(t,
