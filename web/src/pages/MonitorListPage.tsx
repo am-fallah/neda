@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/layout/PageHeader";
 import { MonitorCard } from "@/components/monitors/MonitorCard";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, NativeSelect } from "@/components/ui/input";
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ interface MonitorListData {
 }
 
 const STATUS_OPTIONS: Array<{ value: "" | MonitorStatus; label: string }> = [
-  { value: "", label: "All" },
+  { value: "", label: "All statuses" },
   { value: "active", label: "Active" },
   { value: "paused", label: "Paused" },
   { value: "expired", label: "Expired" },
@@ -76,16 +76,6 @@ export function MonitorListPage() {
       });
   }, [data?.monitors, query, status]);
 
-  const counts = useMemo(() => {
-    const monitors = data?.monitors ?? [];
-    return {
-      "": monitors.length,
-      active: monitors.filter((monitor) => monitor.status === "active").length,
-      paused: monitors.filter((monitor) => monitor.status === "paused").length,
-      expired: monitors.filter((monitor) => monitor.status === "expired").length,
-    } satisfies Record<"" | MonitorStatus, number>;
-  }, [data?.monitors]);
-
   function updateFilter(next: { status?: string; q?: string }) {
     const params = new URLSearchParams(searchParams);
     if (next.status !== undefined) {
@@ -124,14 +114,12 @@ export function MonitorListPage() {
   const total = data?.monitors.length ?? 0;
   const hasFilters = Boolean(status || query);
   const noProviders = (data?.providers.length ?? 0) === 0;
-  const activeCount = counts.active;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        eyebrow="Workspace"
         title="Monitors"
-        description="Each monitor tracks one route and departure date across one or more providers. Monitoring runs on the server, independent of this browser."
+        description="Each monitor tracks one route and departure date across one or more providers. Monitoring runs on the server."
         actions={
           <>
             <Button
@@ -169,8 +157,8 @@ export function MonitorListPage() {
         </Alert>
       ) : null}
 
-      <div className="flex flex-col gap-3 rounded-lg border bg-card p-2.5 shadow-xs sm:flex-row sm:items-center">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="relative flex-1">
           <label htmlFor="monitor-search" className="sr-only">
             Search monitors
           </label>
@@ -184,36 +172,25 @@ export function MonitorListPage() {
             placeholder="Search label or route"
             value={query}
             onChange={(event) => updateFilter({ q: event.target.value })}
-            className="h-10 border-transparent bg-muted/45 pl-9 hover:border-input focus-visible:bg-card sm:h-9"
+            className="pl-9"
           />
         </div>
-        <div
-          className="flex flex-wrap items-center gap-1"
-          role="group"
-          aria-label="Filter by status"
-        >
-          {STATUS_OPTIONS.map((option) => {
-            const selected = status === option.value;
-            return (
-              <button
-                key={option.value || "all"}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => updateFilter({ status: option.value })}
-                className={cn(
-                  "inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium transition-[background-color,color,border-color] duration-150 max-sm:min-h-11 motion-reduce:transition-none",
-                  selected
-                    ? "border-primary/25 bg-accent text-accent-foreground"
-                    : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
-                )}
-              >
+        <div>
+          <label htmlFor="monitor-status-filter" className="sr-only">
+            Filter by status
+          </label>
+          <NativeSelect
+            id="monitor-status-filter"
+            value={status}
+            onChange={(event) => updateFilter({ status: event.target.value })}
+            className="sm:w-44"
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value || "all"} value={option.value}>
                 {option.label}
-                <span className="font-mono text-[0.65rem] tabular-nums opacity-70">
-                  {counts[option.value]}
-                </span>
-              </button>
-            );
-          })}
+              </option>
+            ))}
+          </NativeSelect>
         </div>
         {hasFilters ? (
           <Button
@@ -221,22 +198,16 @@ export function MonitorListPage() {
             variant="ghost"
             size="sm"
             onClick={() => setSearchParams({}, { replace: true })}
-            className="justify-start sm:justify-center"
           >
             <FilterX aria-hidden="true" />
-            Clear
+            Clear filters
           </Button>
         ) : null}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground" aria-live="polite">
-          Showing {filtered.length} of {total} monitor{total === 1 ? "" : "s"}.
-        </p>
-        <p className="font-mono text-[0.65rem] tracking-wide text-muted-foreground uppercase">
-          {activeCount} active
-        </p>
-      </div>
+      <p className="text-xs text-muted-foreground" aria-live="polite">
+        Showing {filtered.length} of {total} monitor{total === 1 ? "" : "s"}.
+      </p>
 
       {total === 0 ? (
         <EmptyState
@@ -269,7 +240,7 @@ export function MonitorListPage() {
         />
       ) : (
         <div
-          className="grid gap-3 md:grid-cols-2"
+          className={cn("grid gap-4", "md:grid-cols-2")}
           aria-live="polite"
         >
           {filtered.map((monitor) => (

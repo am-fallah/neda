@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowDown,
   FilterX,
   History,
@@ -45,7 +46,6 @@ import {
 } from "@/components/ui/table";
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { formatTehranTimestamp } from "@/lib/dates";
 
 const PAGE_SIZE = 25;
@@ -81,80 +81,13 @@ function FilterLabel({
   children: React.ReactNode;
 }) {
   return (
-    <label
-      htmlFor={htmlFor}
-      className="eyebrow mb-1.5 block text-[0.6rem]"
-    >
+    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium">
       {children}
     </label>
   );
 }
 
-function DeliveryCards({ deliveries }: { deliveries: DeliveryRecord[] }) {
-  return (
-    <ul className="divide-y" aria-label="Delivery history">
-      {deliveries.map((delivery) => (
-        <li key={delivery.id} className="space-y-2.5 p-3.5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <DeliveryStatusBadge status={delivery.status} />
-            <span className="text-xs">
-              <DeliveryChannelLabel channel={delivery.channel} />
-            </span>
-          </div>
-          <Link
-            to={`/events/${encodeURIComponent(delivery.eventId)}`}
-            className="inline-flex flex-wrap items-center gap-2 rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          >
-            <EventKindBadge kind={delivery.eventKind} />
-            <span className="font-mono text-[0.65rem] break-all text-muted-foreground">
-              {delivery.eventId}
-            </span>
-          </Link>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-            <div>
-              <dt className="eyebrow text-[0.58rem]">Event time</dt>
-              <dd className="mt-0.5 font-mono text-[0.7rem] text-muted-foreground">
-                <time dateTime={delivery.eventOccurredAt}>
-                  {formatTehranTimestamp(delivery.eventOccurredAt)}
-                </time>
-              </dd>
-            </div>
-            <div>
-              <dt className="eyebrow text-[0.58rem]">Attempts</dt>
-              <dd className="mt-0.5 font-mono tabular-nums">
-                {delivery.attemptCount}
-              </dd>
-            </div>
-            <div>
-              <dt className="eyebrow text-[0.58rem]">Sent</dt>
-              <dd className="mt-0.5 font-mono text-[0.7rem] text-muted-foreground">
-                {formatTehranTimestamp(delivery.sentAt)}
-              </dd>
-            </div>
-            <div>
-              <dt className="eyebrow text-[0.58rem]">Next attempt</dt>
-              <dd className="mt-0.5 font-mono text-[0.7rem] text-muted-foreground">
-                {formatTehranTimestamp(delivery.nextAttemptAt)}
-              </dd>
-            </div>
-            {delivery.lastErrorKind ? (
-              <div className="col-span-2">
-                <dt className="eyebrow text-[0.58rem]">Error</dt>
-                <dd className="mt-0.5 font-mono text-[0.7rem] break-all text-muted-foreground">
-                  {delivery.lastErrorKind}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function DeliveryHistoryTable({ deliveries }: { deliveries: DeliveryRecord[] }) {
-  const wide = useMediaQuery("(min-width: 900px)");
-  if (!wide) return <DeliveryCards deliveries={deliveries} />;
   return (
     <Table>
       <TableHeader>
@@ -189,23 +122,23 @@ function DeliveryHistoryTable({ deliveries }: { deliveries: DeliveryRecord[] }) 
                 </span>
               </Link>
             </TableCell>
-            <TableCell className="min-w-40 whitespace-nowrap font-mono text-[0.7rem] text-muted-foreground">
+            <TableCell className="min-w-40 whitespace-nowrap text-muted-foreground">
               <time dateTime={delivery.eventOccurredAt}>
                 {formatTehranTimestamp(delivery.eventOccurredAt)}
               </time>
             </TableCell>
-            <TableCell className="font-mono tabular-nums">
+            <TableCell className="tabular-nums">
               {delivery.attemptCount}
             </TableCell>
-            <TableCell className="whitespace-nowrap font-mono text-[0.7rem] text-muted-foreground">
+            <TableCell className="whitespace-nowrap text-muted-foreground">
               {formatTehranTimestamp(delivery.sentAt)}
             </TableCell>
-            <TableCell className="whitespace-nowrap font-mono text-[0.7rem] text-muted-foreground">
+            <TableCell className="whitespace-nowrap text-muted-foreground">
               {formatTehranTimestamp(delivery.nextAttemptAt)}
             </TableCell>
             <TableCell className="text-muted-foreground">
               {delivery.lastErrorKind ? (
-                <span className="font-mono text-[0.7rem]">
+                <span className="font-mono text-xs">
                   {delivery.lastErrorKind}
                 </span>
               ) : (
@@ -401,9 +334,8 @@ export function HistoryPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        eyebrow="Activity"
         title="History"
         description="Durable availability and provider-health events, plus per-channel notification delivery status. Historical events are not current availability."
         actions={
@@ -431,7 +363,7 @@ export function HistoryPage() {
       />
 
       <Tabs value={tab} onValueChange={switchTab}>
-        <TabsList aria-label="History sections" className="w-full sm:w-fit">
+        <TabsList aria-label="History sections">
           <TabsTrigger value="events">
             <History aria-hidden="true" />
             Events
@@ -442,323 +374,313 @@ export function HistoryPage() {
           </TabsTrigger>
         </TabsList>
 
-        {tab === "events" ? (
-          <TabsContent value="events" className="space-y-4">
-            <Card className="gap-0 py-0">
-              <CardContent className="grid gap-3 p-3 sm:grid-cols-3">
-                <div>
-                  <FilterLabel htmlFor="event-kind">Event type</FilterLabel>
-                  <NativeSelect
-                    id="event-kind"
-                    value={kind}
-                    onChange={(event) => updateParam("kind", event.target.value)}
-                  >
-                    {EVENT_KINDS.map((option) => (
-                      <option key={option.value || "all"} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                <div>
-                  <FilterLabel htmlFor="event-monitor">Monitor</FilterLabel>
-                  <NativeSelect
-                    id="event-monitor"
-                    value={monitorId}
-                    onChange={(event) =>
-                      updateParam("monitorId", event.target.value)
-                    }
-                    disabled={options.loading || options.error !== null}
-                  >
-                    <option value="">All monitors</option>
-                    {options.data?.monitors.map((monitor) => (
-                      <option key={monitor.id} value={monitor.id}>
-                        {monitor.label}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                <div>
-                  <FilterLabel htmlFor="event-provider">Provider</FilterLabel>
-                  <NativeSelect
-                    id="event-provider"
-                    value={providerId}
-                    onChange={(event) =>
-                      updateParam("providerId", event.target.value)
-                    }
-                    disabled={options.loading || options.error !== null}
-                  >
-                    <option value="">All providers</option>
-                    {options.data?.providers.map((provider) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.displayName}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                {eventsHaveFilters ? (
-                  <div className="sm:col-span-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearEventsFilters}
-                    >
-                      <FilterX aria-hidden="true" />
-                      Clear filters
-                    </Button>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            {eventsLoading ? (
-              <LoadingState rows={3} label="Loading events" />
-            ) : eventsError ? (
-              <ErrorState
-                error={eventsError}
-                title="Could not load events"
-                onRetry={() => setEventsRefreshKey((key) => key + 1)}
-              />
-            ) : events.length === 0 ? (
-              <EmptyState
-                icon={History}
-                title={
-                  eventsHaveFilters
-                    ? "No events match these filters"
-                    : "No events yet"
-                }
-                description={
-                  eventsHaveFilters
-                    ? "Adjust the event type, monitor, or provider filter."
-                    : "Availability transitions and provider-health events will appear here."
-                }
-                action={
-                  eventsHaveFilters ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={clearEventsFilters}
-                    >
-                      Clear filters
-                    </Button>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <div className="space-y-3" aria-live="polite">
-                <div className="overflow-hidden rounded-lg border bg-card">
-                  {events.map((event) => (
-                    <div
-                      key={event.id}
-                      className="border-b last:border-b-0"
-                    >
-                      <EventListItem event={event} framed={false} />
-                      {event.monitorId ? (
-                        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 border-t bg-surface-raised/60 px-3.5 py-2 text-[0.7rem] text-muted-foreground">
-                          <span>Monitor:</span>
-                          <Link
-                            to={`/monitors/${encodeURIComponent(event.monitorId)}`}
-                            className="font-medium text-primary underline-offset-4 hover:underline"
-                          >
-                            {monitorMap.get(event.monitorId)?.label ??
-                              event.monitorLabel ??
-                              event.monitorId}
-                          </Link>
-                          {event.providerId ? (
-                            <>
-                              <span aria-hidden="true">·</span>
-                              <span>
-                                {providerMap.get(event.providerId)?.displayName ??
-                                  event.providerId}
-                              </span>
-                            </>
-                          ) : null}
-                        </p>
-                      ) : null}
-                    </div>
+      {tab === "events" ? (
+        <TabsContent value="events" className="space-y-4">
+          <Card>
+            <CardContent className="grid gap-3 py-4 sm:grid-cols-3">
+              <div>
+                <FilterLabel htmlFor="event-kind">Event type</FilterLabel>
+                <NativeSelect
+                  id="event-kind"
+                  value={kind}
+                  onChange={(event) => updateParam("kind", event.target.value)}
+                >
+                  {EVENT_KINDS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    Showing {events.length} loaded event
-                    {events.length === 1 ? "" : "s"}
-                    {eventsCursor ? " · more available" : ""}.
-                  </p>
-                  {eventsCursor ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void loadMoreEvents()}
-                      disabled={eventsLoadingMore}
-                    >
-                      {eventsLoadingMore ? (
-                        <Loader2 className="animate-spin" aria-hidden="true" />
-                      ) : (
-                        <ArrowDown aria-hidden="true" />
-                      )}
-                      {eventsLoadingMore ? "Loading…" : "Load more events"}
-                    </Button>
-                  ) : null}
-                </div>
+                </NativeSelect>
               </div>
-            )}
-          </TabsContent>
-        ) : (
-          <TabsContent value="deliveries" className="space-y-4">
-            <Card className="gap-0 py-0">
-              <CardContent className="grid gap-3 p-3 sm:grid-cols-4">
-                <div>
-                  <FilterLabel htmlFor="delivery-channel">Channel</FilterLabel>
-                  <NativeSelect
-                    id="delivery-channel"
-                    value={channel}
-                    onChange={(event) => updateParam("channel", event.target.value)}
+              <div>
+                <FilterLabel htmlFor="event-monitor">Monitor</FilterLabel>
+                <NativeSelect
+                  id="event-monitor"
+                  value={monitorId}
+                  onChange={(event) =>
+                    updateParam("monitorId", event.target.value)
+                  }
+                  disabled={options.loading || options.error !== null}
+                >
+                  <option value="">All monitors</option>
+                  {options.data?.monitors.map((monitor) => (
+                    <option key={monitor.id} value={monitor.id}>
+                      {monitor.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div>
+                <FilterLabel htmlFor="event-provider">Provider</FilterLabel>
+                <NativeSelect
+                  id="event-provider"
+                  value={providerId}
+                  onChange={(event) =>
+                    updateParam("providerId", event.target.value)
+                  }
+                  disabled={options.loading || options.error !== null}
+                >
+                  <option value="">All providers</option>
+                  {options.data?.providers.map((provider) => (
+                    <option key={provider.id} value={provider.id}>
+                      {provider.displayName}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              {eventsHaveFilters ? (
+                <div className="sm:col-span-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearEventsFilters}
                   >
-                    {CHANNELS.map((option) => (
-                      <option key={option.value || "all"} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeSelect>
+                    <FilterX aria-hidden="true" />
+                    Clear filters
+                  </Button>
                 </div>
-                <div>
-                  <FilterLabel htmlFor="delivery-status">Status</FilterLabel>
-                  <NativeSelect
-                    id="delivery-status"
-                    value={status}
-                    onChange={(event) => updateParam("status", event.target.value)}
+              ) : null}
+            </CardContent>
+          </Card>
+
+          {eventsLoading ? (
+            <LoadingState rows={3} label="Loading events" />
+          ) : eventsError ? (
+            <ErrorState
+              error={eventsError}
+              title="Could not load events"
+              onRetry={() => setEventsRefreshKey((key) => key + 1)}
+            />
+          ) : events.length === 0 ? (
+            <EmptyState
+              icon={History}
+              title={
+                eventsHaveFilters
+                  ? "No events match these filters"
+                  : "No events yet"
+              }
+              description={
+                eventsHaveFilters
+                  ? "Adjust the event type, monitor, or provider filter."
+                  : "Availability transitions and provider-health events will appear here."
+              }
+              action={
+                eventsHaveFilters ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearEventsFilters}
                   >
-                    {DELIVERY_STATUSES.map((option) => (
-                      <option key={option.value || "all"} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                <div>
-                  <FilterLabel htmlFor="delivery-kind">Event type</FilterLabel>
-                  <NativeSelect
-                    id="delivery-kind"
-                    value={deliveryKind}
-                    onChange={(event) =>
-                      updateParam("deliveryKind", event.target.value)
-                    }
-                  >
-                    {EVENT_KINDS.map((option) => (
-                      <option key={option.value || "all"} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </NativeSelect>
-                </div>
-                <div className="flex items-end">
-                  {deliveriesHaveFilters ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={clearDeliveryFilters}
-                    >
-                      <FilterX aria-hidden="true" />
-                      Clear filters
-                    </Button>
-                  ) : null}
-                </div>
-                {eventIdFilter ? (
-                  <div className="sm:col-span-4">
-                    <Badge variant="outline" className="gap-2 py-1">
-                      Filtered to event{" "}
-                      <code className="font-mono">{eventIdFilter}</code>
-                      <button
-                        type="button"
-                        className="underline underline-offset-2"
-                        onClick={() => updateParam("eventId", "")}
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="space-y-3" aria-live="polite">
+              {events.map((event) => (
+                <div key={event.id} className="space-y-1">
+                  <EventListItem event={event} />
+                  {event.monitorId ? (
+                    <p className="px-1 text-xs text-muted-foreground">
+                      Monitor:{" "}
+                      <Link
+                        to={`/monitors/${encodeURIComponent(event.monitorId)}`}
+                        className="text-primary underline underline-offset-4 hover:text-primary/80"
                       >
-                        Clear
-                      </button>
-                    </Badge>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
-
-            <Alert variant="info">
-              <Send aria-hidden="true" />
-              <AlertTitle>Delivery status is not detection</AlertTitle>
-              <AlertDescription>
-                Queued, sending, retry-scheduled, failed, and skipped deliveries
-                are not delivered notifications. Only “Sent” means the channel
-                accepted the message.
-              </AlertDescription>
-            </Alert>
-
-            {deliveriesLoading ? (
-              <LoadingState rows={3} label="Loading deliveries" />
-            ) : deliveriesError ? (
-              <ErrorState
-                error={deliveriesError}
-                title="Could not load deliveries"
-                onRetry={() => setDeliveriesRefreshKey((key) => key + 1)}
-              />
-            ) : deliveries.length === 0 ? (
-              <EmptyState
-                icon={Send}
-                title={
-                  deliveriesHaveFilters
-                    ? "No deliveries match these filters"
-                    : "No deliveries yet"
-                }
-                description={
-                  deliveriesHaveFilters
-                    ? "Adjust the channel, status, or event type filter."
-                    : "Notification deliveries appear here after events are detected and queued."
-                }
-                action={
-                  deliveriesHaveFilters ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={clearDeliveryFilters}
-                    >
-                      Clear filters
-                    </Button>
-                  ) : undefined
-                }
-              />
-            ) : (
-              <div className="space-y-3">
-                <div className="overflow-hidden rounded-lg border bg-card">
-                  <DeliveryHistoryTable deliveries={deliveries} />
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">
-                    Showing {deliveries.length} loaded deliver
-                    {deliveries.length === 1 ? "y" : "ies"}
-                    {deliveriesCursor ? " · more available" : ""}.
-                  </p>
-                  {deliveriesCursor ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void loadMoreDeliveries()}
-                      disabled={deliveriesLoadingMore}
-                    >
-                      {deliveriesLoadingMore ? (
-                        <Loader2 className="animate-spin" aria-hidden="true" />
-                      ) : (
-                        <ArrowDown aria-hidden="true" />
-                      )}
-                      {deliveriesLoadingMore ? "Loading…" : "Load more deliveries"}
-                    </Button>
+                        {monitorMap.get(event.monitorId)?.label ??
+                          event.monitorLabel ??
+                          event.monitorId}
+                      </Link>
+                      {event.providerId ? (
+                        <>
+                          {" "}
+                          · Provider:{" "}
+                          {providerMap.get(event.providerId)?.displayName ??
+                            event.providerId}
+                        </>
+                      ) : null}
+                    </p>
                   ) : null}
                 </div>
+              ))}
+              <p className="text-xs text-muted-foreground">
+                Showing {events.length} loaded event
+                {events.length === 1 ? "" : "s"}
+                {eventsCursor ? " · more available" : ""}.
+              </p>
+              {eventsCursor ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadMoreEvents()}
+                  disabled={eventsLoadingMore}
+                >
+                  {eventsLoadingMore ? (
+                    <Loader2 className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowDown aria-hidden="true" />
+                  )}
+                  {eventsLoadingMore ? "Loading…" : "Load more events"}
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </TabsContent>
+      ) : (
+        <TabsContent value="deliveries" className="space-y-4">
+          <Card>
+            <CardContent className="grid gap-3 py-4 sm:grid-cols-4">
+              <div>
+                <FilterLabel htmlFor="delivery-channel">Channel</FilterLabel>
+                <NativeSelect
+                  id="delivery-channel"
+                  value={channel}
+                  onChange={(event) => updateParam("channel", event.target.value)}
+                >
+                  {CHANNELS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
               </div>
-            )}
-          </TabsContent>
-        )}
+              <div>
+                <FilterLabel htmlFor="delivery-status">Status</FilterLabel>
+                <NativeSelect
+                  id="delivery-status"
+                  value={status}
+                  onChange={(event) => updateParam("status", event.target.value)}
+                >
+                  {DELIVERY_STATUSES.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div>
+                <FilterLabel htmlFor="delivery-kind">Event type</FilterLabel>
+                <NativeSelect
+                  id="delivery-kind"
+                  value={deliveryKind}
+                  onChange={(event) =>
+                    updateParam("deliveryKind", event.target.value)
+                  }
+                >
+                  {EVENT_KINDS.map((option) => (
+                    <option key={option.value || "all"} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+              <div className="flex items-end">
+                {deliveriesHaveFilters ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearDeliveryFilters}
+                  >
+                    <FilterX aria-hidden="true" />
+                    Clear filters
+                  </Button>
+                ) : null}
+              </div>
+              {eventIdFilter ? (
+                <div className="sm:col-span-4">
+                  <Badge variant="outline" className="gap-2">
+                    Filtered to event{" "}
+                    <code className="font-mono">{eventIdFilter}</code>
+                    <button
+                      type="button"
+                      className="underline underline-offset-2"
+                      onClick={() => updateParam("eventId", "")}
+                    >
+                      Clear
+                    </button>
+                  </Badge>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Alert variant="info">
+            <AlertTriangle aria-hidden="true" />
+            <AlertTitle>Delivery status is not detection</AlertTitle>
+            <AlertDescription>
+              Queued, sending, retry-scheduled, failed, and skipped deliveries
+              are not delivered notifications. Only “Sent” means the channel
+              accepted the message.
+            </AlertDescription>
+          </Alert>
+
+          {deliveriesLoading ? (
+            <LoadingState rows={3} label="Loading deliveries" />
+          ) : deliveriesError ? (
+            <ErrorState
+              error={deliveriesError}
+              title="Could not load deliveries"
+              onRetry={() => setDeliveriesRefreshKey((key) => key + 1)}
+            />
+          ) : deliveries.length === 0 ? (
+            <EmptyState
+              icon={Send}
+              title={
+                deliveriesHaveFilters
+                  ? "No deliveries match these filters"
+                  : "No deliveries yet"
+              }
+              description={
+                deliveriesHaveFilters
+                  ? "Adjust the channel, status, or event type filter."
+                  : "Notification deliveries appear here after events are detected and queued."
+              }
+              action={
+                deliveriesHaveFilters ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={clearDeliveryFilters}
+                  >
+                    Clear filters
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="space-y-3">
+              <Card>
+                <CardContent className="py-2">
+                  <DeliveryHistoryTable deliveries={deliveries} />
+                </CardContent>
+              </Card>
+              <p className="text-xs text-muted-foreground">
+                Showing {deliveries.length} loaded deliver
+                {deliveries.length === 1 ? "y" : "ies"}
+                {deliveriesCursor ? " · more available" : ""}.
+              </p>
+              {deliveriesCursor ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadMoreDeliveries()}
+                  disabled={deliveriesLoadingMore}
+                >
+                  {deliveriesLoadingMore ? (
+                    <Loader2 className="animate-spin" aria-hidden="true" />
+                  ) : (
+                    <ArrowDown aria-hidden="true" />
+                  )}
+                  {deliveriesLoadingMore ? "Loading…" : "Load more deliveries"}
+                </Button>
+              ) : null}
+            </div>
+          )}
+        </TabsContent>
+      )}
       </Tabs>
     </div>
   );

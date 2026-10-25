@@ -1,6 +1,5 @@
 import {
   AlertTriangle,
-  ArrowUpRight,
   CheckCircle2,
   Clock3,
   Info,
@@ -12,17 +11,14 @@ import type { Monitor, ProviderInfo } from "@/api/types";
 import { DateDisplay } from "@/components/JalaliDatePicker";
 import { MonitorStatusBadge, TestOnlyBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
-import {
-  activeProviders,
-  summarizeMonitorChecks,
-  type Tone,
-} from "@/lib/monitorSummary";
+import { activeProviders, summarizeMonitorChecks, type Tone } from "@/lib/monitorSummary";
 import { formatTehranTimestamp } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 function toneIcon(tone: Tone) {
   switch (tone) {
     case "destructive":
+      return AlertTriangle;
     case "warning":
       return AlertTriangle;
     case "success":
@@ -34,38 +30,18 @@ function toneIcon(tone: Tone) {
   }
 }
 
-function toneClasses(tone: Tone): { text: string; rail: string; surface: string } {
+function toneClass(tone: Tone): string {
   switch (tone) {
     case "destructive":
-      return {
-        text: "text-destructive",
-        rail: "bg-destructive",
-        surface: "bg-destructive/5",
-      };
+      return "text-destructive";
     case "warning":
-      return {
-        text: "text-warning-foreground dark:text-warning",
-        rail: "bg-warning",
-        surface: "bg-warning/5",
-      };
+      return "text-warning-foreground dark:text-warning";
     case "success":
-      return {
-        text: "text-success",
-        rail: "bg-success",
-        surface: "bg-success/5",
-      };
+      return "text-success";
     case "muted":
-      return {
-        text: "text-muted-foreground",
-        rail: "bg-muted-foreground/40",
-        surface: "bg-muted/30",
-      };
+      return "text-muted-foreground";
     default:
-      return {
-        text: "text-muted-foreground",
-        rail: "bg-info",
-        surface: "bg-info/5",
-      };
+      return "text-muted-foreground";
   }
 }
 
@@ -78,7 +54,6 @@ export function MonitorCard({
 }) {
   const summary = summarizeMonitorChecks(monitor);
   const SummaryIcon = toneIcon(summary.tone);
-  const tone = toneClasses(summary.tone);
   const providers = activeProviders(monitor);
   const nextDue = providers
     .map((provider) => provider.nextDueAt)
@@ -89,103 +64,74 @@ export function MonitorCard({
     .filter((value): value is string => Boolean(value))
     .sort()
     .at(-1);
-  const passengerCount =
-    monitor.adults + monitor.children + monitor.infants;
 
   return (
     <Link
       to={`/monitors/${encodeURIComponent(monitor.id)}`}
-      className="group relative flex min-w-0 flex-col gap-3 overflow-hidden rounded-[10px] border bg-card py-4 pr-4 pl-5 shadow-xs transition-[border-color,background-color] duration-150 hover:border-primary/30 hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none sm:pr-5 sm:pl-6 motion-reduce:transition-none"
+      className="group flex flex-col gap-3 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
-      <span
-        className={cn("absolute inset-y-0 left-0 w-0.5", tone.rail)}
-        aria-hidden="true"
-      />
-
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h2 className="min-w-0 text-[0.9375rem] font-semibold tracking-[-0.01em] break-words">
-              {monitor.label}
-            </h2>
+            <h2 className="truncate text-base font-semibold">{monitor.label}</h2>
             <MonitorStatusBadge status={monitor.status} />
           </div>
-          <p className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-muted-foreground">
-            <TrainFront className="size-3.5 shrink-0" aria-hidden="true" />
-            <bdi dir="auto" className="min-w-0 break-words">
-              {monitor.originName}
-            </bdi>
-            <span aria-hidden="true" className="text-muted-foreground/60">
-              →
-            </span>
-            <bdi dir="auto" className="min-w-0 break-words">
-              {monitor.destinationName}
-            </bdi>
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+            <TrainFront className="size-3.5" aria-hidden="true" />
+            {monitor.originName} → {monitor.destinationName}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-sm text-muted-foreground">
             <DateDisplay value={monitor.departureDate} />
           </p>
         </div>
-        <ArrowUpRight
-          className="size-4 shrink-0 text-muted-foreground/60 transition-colors group-hover:text-foreground"
-          aria-hidden="true"
-        />
+        <Badge variant="outline">
+          {monitor.adults + monitor.children + monitor.infants} passenger
+          {monitor.adults + monitor.children + monitor.infants === 1 ? "" : "s"}
+        </Badge>
       </div>
 
-      <div className={cn("flex items-start gap-2 rounded-md px-2.5 py-2", tone.surface)}>
-        <SummaryIcon
-          className={cn("mt-0.5 size-3.5 shrink-0", tone.text)}
-          aria-hidden="true"
-        />
-        <div className="min-w-0">
-          <p className={cn("text-[0.8125rem] font-medium", tone.text)}>
-            {summary.title}
-          </p>
-          <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-            {summary.detail}
-          </p>
+      <div className={cn("flex items-start gap-2 text-sm", toneClass(summary.tone))}>
+        <SummaryIcon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+        <div>
+          <p className="font-medium">{summary.title}</p>
+          <p className="text-xs text-muted-foreground">{summary.detail}</p>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline">
-          {passengerCount} passenger{passengerCount === 1 ? "" : "s"}
-        </Badge>
+      <div className="flex flex-wrap gap-1.5">
         {providers.length === 0 ? (
           <Badge variant="warning">No active providers</Badge>
         ) : (
           providers.map((provider) => {
             const info = providerMap.get(provider.providerId);
             return (
-              <span key={provider.providerId} className="inline-flex items-center gap-1">
-                <Badge variant="outline">
-                  {info?.displayName ?? provider.providerId}
-                </Badge>
+              <Badge key={provider.providerId} variant="outline" className="gap-1">
+                {info?.displayName ?? provider.providerId}
                 {info?.testOnly ? <TestOnlyBadge /> : null}
-              </span>
+              </Badge>
             );
           })
         )}
       </div>
 
-      <dl className="mt-auto grid grid-cols-2 gap-x-4 gap-y-1.5 border-t pt-3 font-mono text-[0.65rem] text-muted-foreground">
-        <div className="min-w-0">
-          <dt className="text-[0.6rem] tracking-wide uppercase">Last attempt</dt>
-          <dd className="mt-0.5 break-words">
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
+        <div>
+          <dt className="inline">Last attempt: </dt>
+          <dd className="inline">
             <time dateTime={lastAttempt ?? undefined}>
               {lastAttempt ? formatTehranTimestamp(lastAttempt) : "Never"}
             </time>
           </dd>
         </div>
-        <div className="min-w-0">
-          <dt className="text-[0.6rem] tracking-wide uppercase">Next check</dt>
-          <dd className="mt-0.5 break-words">
+        <div>
+          <dt className="inline">Next check: </dt>
+          <dd className="inline">
             {monitor.status === "active" && nextDue
               ? formatTehranTimestamp(nextDue)
               : "Not scheduled"}
           </dd>
         </div>
-        <div className="col-span-2 flex items-center gap-1.5 pt-0.5">
+        <div className="flex items-center gap-1">
           <Clock3 className="size-3" aria-hidden="true" />
           <dt className="sr-only">Last update</dt>
           <dd>

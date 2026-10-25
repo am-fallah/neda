@@ -628,161 +628,101 @@ export function SettingsPage() {
 
   if (!settings) return null;
 
-  const sections = [
-    {
-      id: "monitoring",
-      label: "Monitoring",
-      detail: `Every ${Math.round(settings.pollIntervalSeconds / 60)} min`,
-    },
-    {
-      id: "telegram",
-      label: "Telegram",
-      detail: settings.telegram.configured ? "Configured" : "Not configured",
-    },
-    {
-      id: "push",
-      label: "Browser Push",
-      detail: settings.pushEnabled ? "Enabled" : "Paused",
-    },
-    { id: "security", label: "Security", detail: "Password" },
-    { id: "appearance", label: "Appearance", detail: "Theme" },
-  ] as const;
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        eyebrow="System"
         title="Settings"
         description="Non-secret application settings and encrypted notification configuration. Stored secrets are never shown again."
       />
 
-      <div className="grid items-start gap-5 xl:grid-cols-[13rem_minmax(0,1fr)]">
-        <aside
-          aria-label="Settings navigation"
-          className="min-w-0 xl:sticky xl:top-6"
-        >
-          <nav
-            aria-label="Settings sections"
-            className="flex gap-1 overflow-x-auto rounded-lg border bg-card p-1 xl:block xl:space-y-1 xl:overflow-visible xl:border-0 xl:bg-transparent xl:p-0"
-          >
-            <p className="eyebrow hidden px-2.5 pb-1 text-[0.6rem] xl:block">
-              Sections
-            </p>
-            {sections.map((section) => (
-              <a
-                key={section.id}
-                href={`#${section.id}`}
-                className="flex min-h-10 shrink-0 items-center justify-between gap-2 rounded-md px-2.5 text-[0.8125rem] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none max-sm:min-h-11"
-              >
-                <span>{section.label}</span>
-                <span className="hidden font-mono text-[0.65rem] text-muted-foreground xl:inline">
-                  {section.detail}
-                </span>
-              </a>
-            ))}
-          </nav>
-          <div className="mt-4 hidden rounded-lg border bg-surface-raised p-3 xl:block">
-            <p className="eyebrow text-[0.6rem]">Save model</p>
-            <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-              Each section saves independently. A failed save keeps the current
-              value and shows an inline error.
-            </p>
-          </div>
-        </aside>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings2 className="size-4" aria-hidden="true" />
+            Monitoring
+          </CardTitle>
+          <CardDescription>
+            Global polling interval for all active monitors. The server enforces
+            the 60–3600 second bounds.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PollingIntervalForm settings={settings} onUpdated={setSettings} />
+        </CardContent>
+      </Card>
 
-        <div className="min-w-0 space-y-4">
-          <Card id="monitoring" className="scroll-mt-24 gap-0 py-0">
-            <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-              <CardTitle className="flex items-center gap-2">
-                <Settings2 className="size-4" aria-hidden="true" />
-                Monitoring
-              </CardTitle>
-              <CardDescription>
-                Global polling interval for all active monitors. The server
-                enforces the 60–3600 second bounds.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 py-4 sm:px-5">
-              <PollingIntervalForm settings={settings} onUpdated={setSettings} />
-            </CardContent>
-          </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <MessageCircle className="size-4" aria-hidden="true" />
+            Telegram
+          </CardTitle>
+          <CardDescription>
+            Configure the bot token and chat ID for availability and
+            provider-health notifications. Credentials are encrypted at rest.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TelegramForm settings={settings} onUpdated={setSettings} />
+        </CardContent>
+      </Card>
 
-          <Card id="telegram" className="scroll-mt-24 gap-0 py-0">
-            <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-              <CardTitle className="flex items-center gap-2">
-                <MessageCircle className="size-4" aria-hidden="true" />
-                Telegram
-              </CardTitle>
-              <CardDescription>
-                Configure the bot token and chat ID for availability and
-                provider-health notifications. Credentials are encrypted at
-                rest.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 py-4 sm:px-5">
-              <TelegramForm settings={settings} onUpdated={setSettings} />
-            </CardContent>
-          </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BellRing className="size-4" aria-hidden="true" />
+            Browser Push
+          </CardTitle>
+          <CardDescription>
+            Real server-side Web Push through a service worker. Permission is
+            requested only when you enable this browser explicitly. Telegram and
+            Push are independent channels.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PushSettings settings={settings} onUpdated={setSettings} />
+        </CardContent>
+      </Card>
 
-          <Card id="push" className="scroll-mt-24 gap-0 py-0">
-            <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-              <CardTitle className="flex items-center gap-2">
-                <BellRing className="size-4" aria-hidden="true" />
-                Browser Push
-              </CardTitle>
-              <CardDescription>
-                Real server-side Web Push through a service worker. Permission
-                is requested only when you enable this browser explicitly.
-                Telegram and Push are independent channels.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 py-4 sm:px-5">
-              <PushSettings settings={settings} onUpdated={setSettings} />
-            </CardContent>
-          </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <LockKeyhole className="size-4" aria-hidden="true" />
+            Security
+          </CardTitle>
+          <CardDescription>
+            Change the owner password. Other sessions are revoked on success.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PasswordForm />
+        </CardContent>
+      </Card>
 
-          <Card id="security" className="scroll-mt-24 gap-0 py-0">
-            <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-              <CardTitle className="flex items-center gap-2">
-                <LockKeyhole className="size-4" aria-hidden="true" />
-                Security
-              </CardTitle>
-              <CardDescription>
-                Change the owner password. Other sessions are revoked on
-                success.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 py-4 sm:px-5">
-              <PasswordForm />
-            </CardContent>
-          </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <SunMoon className="size-4" aria-hidden="true" />
+            Appearance
+          </CardTitle>
+          <CardDescription>
+            Light, dark, or follow the system preference. The choice is stored in
+            this browser only.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AppearanceForm />
+        </CardContent>
+      </Card>
 
-          <Card id="appearance" className="scroll-mt-24 gap-0 py-0">
-            <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-              <CardTitle className="flex items-center gap-2">
-                <SunMoon className="size-4" aria-hidden="true" />
-                Appearance
-              </CardTitle>
-              <CardDescription>
-                Light, dark, or follow the system preference. The choice is
-                stored in this browser only.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="px-4 py-4 sm:px-5">
-              <AppearanceForm />
-            </CardContent>
-          </Card>
-
-          <p className="px-1 text-xs leading-relaxed text-muted-foreground">
-            Last loaded settings for polling every{" "}
-            <span className="font-medium text-foreground">
-              {settings.pollIntervalSeconds} seconds
-            </span>
-            . No secret, subscription endpoint, or ciphertext is included in
-            this page.
-          </p>
-        </div>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        Last loaded settings for polling every{" "}
+        <span className="font-medium text-foreground">
+          {settings.pollIntervalSeconds} seconds
+        </span>
+        . No secret, subscription endpoint, or ciphertext is included in this
+        page.
+      </p>
     </div>
   );
 }

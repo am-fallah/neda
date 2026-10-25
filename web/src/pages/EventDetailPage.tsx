@@ -6,7 +6,6 @@ import type { EventRecord, ProviderInfo } from "@/api/types";
 import { BookingLink } from "@/components/BookingLink";
 import { ProviderPrice } from "@/components/ProviderPrice";
 import { DeliveryTable } from "@/components/events/DeliveryTable";
-import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorState } from "@/components/layout/ErrorState";
 import { LoadingState } from "@/components/layout/LoadingState";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -38,16 +37,14 @@ interface EventData {
 function DetailRow({
   label,
   children,
-  className,
 }: {
   label: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <div className={className}>
-      <dt className="eyebrow text-[0.6rem]">{label}</dt>
-      <dd className="mt-1 text-sm">{children}</dd>
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 text-sm">{children}</dd>
     </div>
   );
 }
@@ -70,7 +67,6 @@ export function EventDetailPage() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <Breadcrumbs items={[{ label: "History", to: "/events" }, { label: "Event detail" }]} />
         <PageHeader title="Event detail" description="Loading event…" />
         <LoadingState rows={3} label="Loading event" />
       </div>
@@ -80,14 +76,13 @@ export function EventDetailPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <Breadcrumbs items={[{ label: "History", to: "/events" }, { label: "Event detail" }]} />
         <PageHeader title="Event detail" />
         <ErrorState
           error={error}
           title={error.status === 404 ? "Event not found" : "Could not load the event"}
           onRetry={refresh}
         />
-        <Button asChild variant="outline" className="w-fit">
+        <Button asChild variant="outline">
           <Link to="/events">
             <ArrowLeft aria-hidden="true" />
             Back to history
@@ -105,12 +100,9 @@ export function EventDetailPage() {
   const fullyDelivered = isFullyDelivered(event.deliverySummary);
 
   return (
-    <div className="space-y-5">
-      <Breadcrumbs
-        items={[{ label: "History", to: "/events" }, { label: "Event detail" }]}
-      />
+    <div className="space-y-6">
       <PageHeader
-        eyebrow="Event record"
+        eyebrow="History"
         title={
           event.kind === "availability"
             ? "Availability event"
@@ -149,169 +141,114 @@ export function EventDetailPage() {
         </AlertDescription>
       </Alert>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <Card>
-          <CardHeader>
-            <CardTitle>Event details</CardTitle>
-            <CardDescription>
-              Recorded facts and identifiers for this detection.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-              <DetailRow label="Provider">{providerName}</DetailRow>
-              <DetailRow label="Occurred">
-                <time dateTime={event.occurredAt}>
-                  {formatTehranTimestamp(event.occurredAt)}
-                </time>
+      <Card>
+        <CardHeader>
+          <CardTitle>Event details</CardTitle>
+          <CardDescription>
+            Event ID <code className="font-mono">{event.id}</code>
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
+            <DetailRow label="Provider">{providerName}</DetailRow>
+            <DetailRow label="Occurred">
+              <time dateTime={event.occurredAt}>
+                {formatTehranTimestamp(event.occurredAt)}
+              </time>
+            </DetailRow>
+            <DetailRow label="Recorded">
+              <time dateTime={event.createdAt}>
+                {formatTehranTimestamp(event.createdAt)}
+              </time>
+            </DetailRow>
+            {event.monitorLabel || event.monitorId ? (
+              <DetailRow label="Monitor">
+                {event.monitorId ? (
+                  <Link
+                    to={`/monitors/${encodeURIComponent(event.monitorId)}`}
+                    className="text-primary underline underline-offset-4 hover:text-primary/80"
+                  >
+                    {event.monitorLabel ?? event.monitorId}
+                  </Link>
+                ) : (
+                  (event.monitorLabel ?? "—")
+                )}
               </DetailRow>
-              <DetailRow label="Recorded">
-                <time dateTime={event.createdAt}>
-                  {formatTehranTimestamp(event.createdAt)}
-                </time>
-              </DetailRow>
-              {event.monitorLabel || event.monitorId ? (
-                <DetailRow label="Monitor">
-                  {event.monitorId ? (
-                    <Link
-                      to={`/monitors/${encodeURIComponent(event.monitorId)}`}
-                      className="font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      {event.monitorLabel ?? event.monitorId}
-                    </Link>
+            ) : null}
+
+            {event.kind === "availability" ? (
+              <>
+                <DetailRow label="State">
+                  <Badge variant="success">Reservable at detection</Badge>
+                </DetailRow>
+                <DetailRow label="Route">
+                  {event.originName || event.destinationName
+                    ? `${event.originName ?? "?"} → ${event.destinationName ?? "?"}`
+                    : "—"}
+                </DetailRow>
+                <DetailRow label="Train">
+                  {event.trainNumber || "Unknown"}
+                  {event.operator ? ` · ${event.operator}` : ""}
+                </DetailRow>
+                <DetailRow label="Class">
+                  {[event.wagonName, event.className]
+                    .filter(Boolean)
+                    .join(" · ") || "Unknown"}
+                </DetailRow>
+                <DetailRow label="Departure">
+                  {event.departureAt ? (
+                    <time dateTime={event.departureAt}>
+                      {formatTehranTimestamp(event.departureAt)}
+                    </time>
                   ) : (
-                    (event.monitorLabel ?? "—")
+                    "Time unavailable"
                   )}
                 </DetailRow>
-              ) : null}
-
-              {event.kind === "availability" ? (
-                <>
-                  <DetailRow label="State">
-                    <Badge variant="success">Reservable at detection</Badge>
-                  </DetailRow>
-                  <DetailRow label="Route">
-                    {event.originName || event.destinationName ? (
-                      <>
-                        <bdi dir="auto">{event.originName ?? "?"}</bdi>
-                        <span aria-hidden="true"> → </span>
-                        <bdi dir="auto">{event.destinationName ?? "?"}</bdi>
-                      </>
-                    ) : (
-                      "—"
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Train">
-                    {event.trainNumber || "Unknown"}
-                    {event.operator ? (
-                      <span className="text-muted-foreground"> · {event.operator}</span>
-                    ) : null}
-                  </DetailRow>
-                  <DetailRow label="Class">
-                    <bdi dir="auto">
-                      {[event.wagonName, event.className]
-                        .filter(Boolean)
-                        .join(" · ") || "Unknown"}
-                    </bdi>
-                  </DetailRow>
-                  <DetailRow label="Departure">
-                    {event.departureAt ? (
-                      <time dateTime={event.departureAt}>
-                        {formatTehranTimestamp(event.departureAt)}
-                      </time>
-                    ) : (
-                      "Time unavailable"
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Arrival">
-                    {event.arrivalAt ? (
-                      <time dateTime={event.arrivalAt}>
-                        {formatTehranTimestamp(event.arrivalAt)}
-                      </time>
-                    ) : (
-                      "Time unavailable"
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Price">
-                    {event.priceAmount !== null &&
-                    event.priceAmount !== undefined ? (
-                      <ProviderPrice
-                        amount={event.priceAmount}
-                        currency={event.priceCurrency}
-                        emptyLabel="—"
-                        showUnverifiedMarker
-                      />
-                    ) : (
-                      "—"
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Booking">
-                    <BookingLink url={event.bookingUrl} />
-                  </DetailRow>
-                </>
-              ) : (
-                <>
-                  <DetailRow label="Error category">
-                    {event.errorKind ? (
-                      <code className="font-mono text-xs">{event.errorKind}</code>
-                    ) : (
-                      "—"
-                    )}
-                  </DetailRow>
-                  <DetailRow label="Failure count">
-                    {event.failureCount ?? "—"}
-                  </DetailRow>
-                  <DetailRow label="Episode">{event.episodeId ?? "—"}</DetailRow>
-                </>
-              )}
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Delivery summary</CardTitle>
-            <CardDescription>
-              Detection and delivery are separate outcomes.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Badge variant={deliverySummaryTone(event.deliverySummary)}>
-              {deliverySummaryText(event.deliverySummary)}
-            </Badge>
-            <dl className="space-y-2.5 text-sm">
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Attempted</dt>
-                <dd className="font-mono tabular-nums">
-                  {event.deliverySummary.attempted}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Sent</dt>
-                <dd className="font-mono tabular-nums">
-                  {event.deliverySummary.sent}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Pending</dt>
-                <dd className="font-mono tabular-nums">
-                  {event.deliverySummary.pending +
-                    event.deliverySummary.retryScheduled}
-                </dd>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <dt className="text-muted-foreground">Failed</dt>
-                <dd className="font-mono tabular-nums">
-                  {event.deliverySummary.failed}
-                </dd>
-              </div>
-            </dl>
-            <p className="border-t pt-3 font-mono text-[0.65rem] break-all text-muted-foreground">
-              Event ID {event.id}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+                <DetailRow label="Arrival">
+                  {event.arrivalAt ? (
+                    <time dateTime={event.arrivalAt}>
+                      {formatTehranTimestamp(event.arrivalAt)}
+                    </time>
+                  ) : (
+                    "Time unavailable"
+                  )}
+                </DetailRow>
+                <DetailRow label="Price">
+                  {event.priceAmount !== null &&
+                  event.priceAmount !== undefined ? (
+                    <ProviderPrice
+                      amount={event.priceAmount}
+                      currency={event.priceCurrency}
+                      emptyLabel="—"
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </DetailRow>
+                <DetailRow label="Booking">
+                  <BookingLink url={event.bookingUrl} />
+                </DetailRow>
+              </>
+            ) : (
+              <>
+                <DetailRow label="Error category">
+                  {event.errorKind ? (
+                    <code className="font-mono text-xs">{event.errorKind}</code>
+                  ) : (
+                    "—"
+                  )}
+                </DetailRow>
+                <DetailRow label="Failure count">
+                  {event.failureCount ?? "—"}
+                </DetailRow>
+                <DetailRow label="Episode">
+                  {event.episodeId ?? "—"}
+                </DetailRow>
+              </>
+            )}
+          </dl>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
@@ -348,7 +285,7 @@ export function EventDetailPage() {
             <DeliveryTable deliveries={event.deliveries} />
           )}
 
-          <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+          <div className="flex flex-wrap gap-2 border-t pt-4">
             <Button asChild variant="outline" size="sm">
               <Link
                 to={`/events?tab=deliveries&eventId=${encodeURIComponent(event.id)}`}

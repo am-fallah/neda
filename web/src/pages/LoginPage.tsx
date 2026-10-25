@@ -1,15 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Eye,
-  EyeOff,
-  KeyRound,
-  LockKeyhole,
-  Server,
-  Terminal,
-  TrainFront,
-} from "lucide-react";
+import { AlertTriangle, KeyRound, Terminal } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { isApiError } from "@/api/client";
 import { useAuth } from "@/auth/AuthProvider";
@@ -21,106 +11,11 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { cn } from "@/lib/utils";
-
-function BrandMark() {
-  return (
-    <div className="flex items-center gap-3">
-      <span
-        aria-hidden="true"
-        className="relative flex size-10 items-center justify-center rounded-lg bg-primary font-mono text-sm font-semibold text-primary-foreground"
-      >
-        N
-        <span className="absolute inset-x-2.5 bottom-1.5 h-px bg-primary-foreground/35" />
-      </span>
-      <div className="leading-tight">
-        <p className="text-sm font-semibold tracking-[-0.01em]">Neda</p>
-        <p className="eyebrow text-[0.58rem] tracking-[0.14em]">
-          Train operations
-        </p>
-      </div>
-    </div>
-  );
-}
-
-function AuthStory() {
-  const points = [
-    {
-      icon: Server,
-      title: "Server-side checks",
-      body: "Monitoring keeps running after this browser closes.",
-    },
-    {
-      icon: TrainFront,
-      title: "Exact fare options",
-      body: "Watch specific wagons, classes, and provider offerings.",
-    },
-    {
-      icon: CheckCircle2,
-      title: "Honest state",
-      body: "Reservable, not reservable, and unknown stay distinct.",
-    },
-  ];
-  return (
-    <aside className="relative hidden min-h-dvh w-[44%] flex-col justify-between overflow-hidden bg-primary px-10 py-10 text-primary-foreground lg:flex dark:bg-card dark:text-foreground xl:px-14">
-      <div className="flex items-center gap-3">
-        <span
-          aria-hidden="true"
-          className="relative flex size-10 items-center justify-center rounded-lg bg-primary-foreground/10 font-mono text-sm font-semibold ring-1 ring-primary-foreground/20 dark:bg-primary/15 dark:ring-primary/30"
-        >
-          N
-          <span className="absolute inset-x-2.5 bottom-1.5 h-px bg-primary-foreground/40 dark:bg-primary/40" />
-        </span>
-        <div className="leading-tight">
-          <p className="text-sm font-semibold tracking-[-0.01em]">Neda</p>
-          <p className="font-mono text-[0.58rem] tracking-[0.16em] text-primary-foreground/80 dark:text-muted-foreground uppercase">
-            Train operations
-          </p>
-        </div>
-      </div>
-
-      <div className="max-w-md">
-        <p className="font-mono text-[0.65rem] tracking-[0.16em] text-primary-foreground/80 dark:text-muted-foreground uppercase">
-          Availability monitoring
-        </p>
-        <p className="mt-4 text-[2.35rem] leading-[1.08] font-semibold tracking-[-0.035em] text-balance">
-          Know when seats open. Not after they do.
-        </p>
-        <p className="mt-4 max-w-sm text-sm leading-relaxed text-primary-foreground/85 dark:text-muted-foreground">
-          A private operations console for train availability: explicit states,
-          exact fare options, and notification delivery you can audit.
-        </p>
-        <div className="mt-8 h-px w-20 bg-primary-foreground/25 dark:bg-border" />
-        <ul className="mt-8 space-y-4">
-          {points.map((point) => {
-            const Icon = point.icon;
-            return (
-              <li key={point.title} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 dark:border-border dark:bg-muted">
-                  <Icon className="size-3.5" aria-hidden="true" />
-                </span>
-                <div>
-                  <p className="text-sm font-medium">{point.title}</p>
-                  <p className="mt-0.5 text-xs leading-relaxed text-primary-foreground/80 dark:text-muted-foreground">
-                    {point.body}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-
-      <p className="flex items-center gap-2 font-mono text-[0.6rem] tracking-[0.12em] text-primary-foreground/80 dark:text-muted-foreground uppercase">
-        <LockKeyhole className="size-3" aria-hidden="true" />
-        Private single-user workspace
-      </p>
-    </aside>
-  );
-}
 
 export function LoginPage() {
   useDocumentTitle("Sign in");
@@ -134,7 +29,6 @@ export function LoginPage() {
       : "/";
 
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState("");
   const [fieldError, setFieldError] = useState("");
@@ -220,24 +114,32 @@ export function LoginPage() {
 
   return (
     <AuthShell>
-      <Card className="w-full max-w-md gap-0 py-0 shadow-[var(--shadow-overlay)] sm:py-0">
-        <CardHeader className="gap-4 border-b px-5 py-5 sm:px-6">
-          <div className="lg:hidden">
-            <BrandMark />
+      <Card className="w-full max-w-md gap-6 py-7">
+        <CardHeader className="px-7">
+          <div className="mb-3 flex items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className="flex size-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground"
+            >
+              N
+            </span>
+            <div>
+              <p className="text-sm font-semibold">Neda</p>
+              <p className="text-xs text-muted-foreground">
+                Train availability monitor
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="eyebrow text-[0.6rem]">Owner access</p>
-            <h1 className="mt-1.5 text-xl leading-tight font-semibold tracking-[-0.015em]">
-              {showSetup ? "Set up your password" : "Sign in"}
-            </h1>
-            <CardDescription className="mt-1">
-              {showSetup
-                ? "Neda has no default password. Create one from the server terminal before signing in."
-                : "Private, single-user dashboard. Enter the owner password to continue."}
-            </CardDescription>
-          </div>
+          <CardTitle className="text-xl">
+            {showSetup ? "Set up your password" : "Sign in"}
+          </CardTitle>
+          <CardDescription>
+            {showSetup
+              ? "Neda has no default password. Create one from the server terminal before signing in."
+              : "Private, single-user dashboard. Enter the owner password to continue."}
+          </CardDescription>
         </CardHeader>
-        <CardContent className="px-5 py-5 sm:px-6">
+        <CardContent className="px-7">
           {showSetup ? (
             <div className="space-y-4">
               <Alert variant="warning">
@@ -263,7 +165,7 @@ export function LoginPage() {
               >
                 I have set the password
               </Button>
-              <p className="text-xs leading-relaxed text-muted-foreground">
+              <p className="text-xs text-muted-foreground">
                 After setup, reload this page and sign in. No credentials are
                 exposed through the web interface.
               </p>
@@ -277,52 +179,30 @@ export function LoginPage() {
                   <AlertDescription>{formError}</AlertDescription>
                 </Alert>
               ) : null}
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <Label htmlFor="password">Password</Label>
-                <div className="relative">
-                  <Input
-                    ref={passwordRef}
-                    id="password"
-                    name="password"
-                    type={showPassword ? "text" : "password"}
-                    autoComplete="current-password"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    value={password}
-                    onChange={(event) => {
-                      setPassword(event.target.value);
-                      setFieldError("");
-                    }}
-                    aria-invalid={fieldError ? true : undefined}
-                    aria-describedby={fieldError ? "password-error" : undefined}
-                    disabled={submitting || retrySeconds > 0}
-                    className={cn(
-                      "h-11 pr-12 text-base",
-                      fieldError && "border-destructive",
-                    )}
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    className="absolute top-1/2 right-1 size-9 -translate-y-1/2 max-sm:size-10"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    aria-pressed={showPassword}
-                    disabled={submitting || retrySeconds > 0}
-                  >
-                    {showPassword ? (
-                      <EyeOff aria-hidden="true" />
-                    ) : (
-                      <Eye aria-hidden="true" />
-                    )}
-                  </Button>
-                </div>
+                <Input
+                  ref={passwordRef}
+                  id="password"
+                  name="password"
+                  type="password"
+                  autoComplete="current-password"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={password}
+                  onChange={(event) => {
+                    setPassword(event.target.value);
+                    setFieldError("");
+                  }}
+                  aria-invalid={fieldError ? true : undefined}
+                  aria-describedby={fieldError ? "password-error" : undefined}
+                  disabled={submitting || retrySeconds > 0}
+                  className={cn("h-10", fieldError && "border-destructive")}
+                />
                 {fieldError ? (
                   <p
                     id="password-error"
-                    role="alert"
                     className="text-xs font-medium text-destructive"
                   >
                     {fieldError}
@@ -332,7 +212,6 @@ export function LoginPage() {
               <Button
                 type="submit"
                 className="w-full"
-                size="lg"
                 disabled={submitting || retrySeconds > 0}
               >
                 <KeyRound aria-hidden="true" />
@@ -342,11 +221,7 @@ export function LoginPage() {
                     ? `Try again in ${retrySeconds}s`
                     : "Sign in"}
               </Button>
-              <p className="flex items-start gap-2 text-xs leading-relaxed text-muted-foreground">
-                <LockKeyhole
-                  className="mt-0.5 size-3.5 shrink-0"
-                  aria-hidden="true"
-                />
+              <p className="text-center text-xs text-muted-foreground">
                 Sessions use an HttpOnly cookie. No password or token is stored
                 in this browser.
               </p>
@@ -360,21 +235,18 @@ export function LoginPage() {
 
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex min-h-dvh bg-background">
-      <AuthStory />
-      <main className="relative flex min-h-dvh flex-1 items-center justify-center px-4 py-10 sm:px-6">
-        <div
-          aria-hidden="true"
-          className="surface-grid pointer-events-none absolute inset-0 opacity-[0.35] [mask-image:radial-gradient(ellipse_at_center,black,transparent_75%)]"
-        />
-        <div className="relative z-10 flex w-full max-w-md flex-col items-center gap-4">
-          {children}
-          <p className="max-w-sm text-center text-xs leading-relaxed text-muted-foreground">
-            Monitoring runs on the server and continues while this browser is
-            closed.
-          </p>
-        </div>
-      </main>
+    <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-background px-4 py-10">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_10%,color-mix(in_oklab,var(--primary)_14%,transparent),transparent_45%),radial-gradient(circle_at_80%_90%,color-mix(in_oklab,var(--info)_10%,transparent),transparent_40%)]"
+      />
+      <div className="relative z-10 flex w-full max-w-md flex-col items-center gap-4">
+        {children}
+        <p className="text-center text-xs text-muted-foreground">
+          Monitoring runs on the server and continues while this browser is
+          closed.
+        </p>
+      </div>
     </div>
   );
 }

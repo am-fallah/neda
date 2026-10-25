@@ -41,16 +41,6 @@ function renderPage(url = "/events") {
 
 describe("HistoryPage", () => {
   beforeEach(() => {
-    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
-      matches: query.includes("min-width"),
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }) as MediaQueryList);
     eventsMock.mockReset();
     deliveriesMock.mockReset();
     monitorsMock.mockReset();
