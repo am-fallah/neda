@@ -7,7 +7,6 @@ interface EmptyStateProps {
   title: string;
   description?: ReactNode;
   action?: ReactNode;
-  framed?: boolean;
   className?: string;
 }
 
@@ -16,32 +15,29 @@ export function EmptyState({
   title,
   description,
   action,
-  framed = true,
   className,
 }: EmptyStateProps) {
   return (
     <div
       className={cn(
-        "flex flex-col items-start justify-center gap-3 px-1 py-6 text-left sm:px-2",
-        framed &&
-          "rounded-lg border border-dashed bg-surface-raised px-5 py-8 sm:px-6",
+        "flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed bg-card/50 px-6 py-12 text-center",
         className,
       )}
     >
       {Icon ? (
-        <span className="flex size-9 items-center justify-center rounded-lg border bg-card text-muted-foreground shadow-xs">
-          <Icon className="size-4" aria-hidden="true" />
+        <span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Icon className="size-5" aria-hidden="true" />
         </span>
       ) : null}
       <div className="space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
+        <p className="font-medium">{title}</p>
         {description ? (
-          <div className="max-w-xl text-[0.8125rem] leading-relaxed text-muted-foreground">
+          <div className="mx-auto max-w-md text-sm text-muted-foreground">
             {description}
           </div>
         ) : null}
       </div>
-      {action ? <div className="pt-1">{action}</div> : null}
+      {action}
     </div>
   );
 }

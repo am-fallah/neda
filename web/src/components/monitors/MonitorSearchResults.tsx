@@ -158,7 +158,7 @@ function SelectionCheckbox({
   }, [indeterminate]);
 
   return (
-    <label className="relative -m-2 flex size-10 shrink-0 items-center justify-center max-sm:size-11">
+    <label className="relative -m-2 flex size-8 shrink-0 items-center justify-center">
       <input
         ref={ref}
         type="checkbox"
@@ -167,19 +167,19 @@ function SelectionCheckbox({
         aria-label={label}
         onChange={onChange}
         className={cn(
-          "peer size-[18px] cursor-pointer appearance-none rounded border border-input bg-card transition-colors checked:border-primary checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
+          "peer size-4 cursor-pointer appearance-none rounded border border-muted-foreground/70 bg-background transition-colors checked:border-primary checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50",
           indeterminate && "border-primary bg-primary",
         )}
       />
       {indeterminate ? (
         <Minus
-          className="pointer-events-none absolute size-3.5 text-primary-foreground"
+          className="pointer-events-none absolute size-3 text-primary-foreground"
           strokeWidth={3}
           aria-hidden="true"
         />
       ) : (
         <Check
-          className="pointer-events-none absolute size-3.5 text-primary-foreground opacity-0 peer-checked:opacity-100"
+          className="pointer-events-none absolute size-3 text-primary-foreground opacity-0 peer-checked:opacity-100"
           strokeWidth={3}
           aria-hidden="true"
         />
@@ -367,11 +367,6 @@ function WagonRow({
               unknown={wagon.summary.unknownCount}
               optionCount={wagon.summary.optionCount}
             />
-            {selectionState === "all" ? (
-              <Badge variant="secondary" className="font-normal">
-                Selected
-              </Badge>
-            ) : null}
             {selectionState === "partial" ? (
               <Badge variant="secondary" className="font-normal">
                 {selectedCount} of {selectionWagon.offerings.length} selected
@@ -434,8 +429,8 @@ function JourneySection({
   ) => void;
 }) {
   return (
-      <section className="border-t first:border-t-0">
-      <header className="flex flex-col gap-2 border-b bg-surface-raised/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <section className="border-t first:border-t-0">
+      <header className="flex flex-col gap-2 bg-muted/15 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">
             <bdi dir="auto">{journeyTitle(journey.train)}</bdi>
@@ -587,7 +582,7 @@ export function MonitorSearchResults({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2 shadow-xs">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-y py-2.5">
         <StateCounts view={view} />
         <div className="flex flex-wrap items-center gap-2">
           <MonitorPriceFilter
@@ -606,10 +601,10 @@ export function MonitorSearchResults({
             onClear={onClearPrice}
           />
           <label className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="eyebrow text-[0.6rem]">Sort</span>
+            <span>Sort</span>
             <NativeSelect
               aria-label="Sort search results"
-              className="h-9 w-36 bg-card text-xs max-sm:h-11"
+              className="h-8 w-36 bg-background text-xs"
               value={sort}
               onChange={(event) =>
                 onSortChange(event.target.value as SearchSort)
@@ -682,7 +677,7 @@ export function MonitorSearchResults({
           </Button>
         </div>
       ) : groups.length > 0 ? (
-        <div className="overflow-hidden rounded-[10px] border bg-card shadow-xs">
+        <div className="overflow-hidden rounded-lg border bg-card">
           {groups.map((journey) => (
             <JourneySection
               key={journey.key}

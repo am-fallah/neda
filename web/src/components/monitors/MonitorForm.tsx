@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { AlertTriangle, Loader2, Save } from "lucide-react";
 import { Link } from "react-router-dom";
 import { isApiError } from "@/api/client";
@@ -8,7 +8,6 @@ import { TestOnlyBadge } from "@/components/status";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ErrorSummary } from "@/components/ui/error-summary";
 import { FormField, fieldProps } from "@/components/ui/form-field";
 import { Input, Label } from "@/components/ui/input";
 import {
@@ -48,47 +47,6 @@ function formFieldID(key: string, providers: ProviderInfo[]): string {
   return key;
 }
 
-function errorLabel(key: string): string {
-  if (key.startsWith("providerConfigs.")) {
-    const field = key.split(".").at(-1);
-    switch (field) {
-      case "originId":
-        return "Provider origin ID";
-      case "destinationId":
-        return "Provider destination ID";
-      case "bookingSlug":
-        return "Booking slug";
-      case "genderCode":
-        return "Gender code";
-      default:
-        return "Provider field";
-    }
-  }
-  if (key.startsWith("provider.")) return "Provider selection";
-  switch (key) {
-    case "label":
-      return "Monitor label";
-    case "originName":
-      return "Origin name";
-    case "destinationName":
-      return "Destination name";
-    case "departureDate":
-      return "Departure date";
-    case "adults":
-      return "Adults";
-    case "children":
-      return "Children";
-    case "infants":
-      return "Infants";
-    case "passengers":
-      return "Passengers";
-    case "providers":
-      return "Providers";
-    default:
-      return "Field";
-  }
-}
-
 export function MonitorForm({
   mode,
   initialValues,
@@ -101,25 +59,11 @@ export function MonitorForm({
   const [errors, setErrors] = useState<MonitorFormErrors>({});
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const errorSummaryRef = useRef<HTMLDivElement>(null);
   const minDate = todayInTehran();
   const providerMap = useMemo(
     () => new Map(providers.map((provider) => [provider.id, provider])),
     [providers],
   );
-  const errorItems = useMemo(
-    () =>
-      Object.entries(errors).map(([key, message]) => ({
-        fieldId: formFieldID(key, providers),
-        label: errorLabel(key),
-        message,
-      })),
-    [errors, providers],
-  );
-
-  function focusErrorSummary() {
-    window.setTimeout(() => errorSummaryRef.current?.focus(), 0);
-  }
 
   function update<K extends keyof MonitorFormValues>(
     key: K,
@@ -202,7 +146,6 @@ export function MonitorForm({
           Object.keys(clientErrors).length === 1 ? "" : "s"
         } before saving.`,
       );
-      focusErrorSummary();
       focusFirstError(clientErrors);
       return;
     }
@@ -225,7 +168,6 @@ export function MonitorForm({
           setFormError(
             "The server rejected some values. Review the highlighted fields.",
           );
-          focusErrorSummary();
           focusFirstError(serverErrors);
         } else {
           setFormError(caught.message);
@@ -241,14 +183,8 @@ export function MonitorForm({
   const totalPassengers = values.adults + values.children + values.infants;
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="space-y-4">
-      {errorItems.length > 0 ? (
-        <ErrorSummary
-          title="Check the highlighted fields"
-          items={errorItems}
-          summaryRef={errorSummaryRef}
-        />
-      ) : formError ? (
+    <form onSubmit={handleSubmit} noValidate className="space-y-6">
+      {formError ? (
         <Alert variant="destructive">
           <AlertTriangle aria-hidden="true" />
           <AlertTitle>Check the form</AlertTitle>
@@ -267,12 +203,11 @@ export function MonitorForm({
         </Alert>
       ) : null}
 
-      <Card className="gap-0 py-0">
-        <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-          <p className="eyebrow text-[0.6rem]">01 · Journey</p>
-          <CardTitle className="mt-1">Route and departure</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Route and departure</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4 px-4 py-4 sm:px-5">
+        <CardContent className="space-y-4">
           <FormField
             id="label"
             label="Monitor label"
@@ -344,12 +279,11 @@ export function MonitorForm({
         </CardContent>
       </Card>
 
-      <Card className="gap-0 py-0">
-        <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-          <p className="eyebrow text-[0.6rem]">02 · Passengers</p>
-          <CardTitle className="mt-1">Passengers</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Passengers</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 px-4 py-4 sm:px-5">
+        <CardContent className="space-y-3">
           <div className="grid gap-4 sm:grid-cols-3">
             <FormField
               id="adults"
@@ -418,12 +352,11 @@ export function MonitorForm({
         </CardContent>
       </Card>
 
-      <Card className="gap-0 py-0">
-        <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
-          <p className="eyebrow text-[0.6rem]">03 · Sources</p>
-          <CardTitle className="mt-1">Providers</CardTitle>
+      <Card>
+        <CardHeader>
+          <CardTitle>Providers</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 px-4 py-4 sm:px-5">
+        <CardContent className="space-y-3">
           {providers.length === 0 ? (
             <Alert variant="warning">
               <AlertTriangle aria-hidden="true" />
@@ -647,11 +580,7 @@ export function MonitorForm({
         <Button asChild variant="outline">
           <Link to={cancelTo}>Cancel</Link>
         </Button>
-        <Button
-          type="submit"
-          disabled={submitting || providers.length === 0}
-          className="max-sm:w-full"
-        >
+        <Button type="submit" disabled={submitting || providers.length === 0}>
           {submitting ? (
             <Loader2 className="animate-spin" aria-hidden="true" />
           ) : (

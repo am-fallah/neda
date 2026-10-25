@@ -7,14 +7,14 @@ const alertVariants = cva(
   {
     variants: {
       variant: {
-        default: "border-border bg-card text-card-foreground",
+        default: "bg-card text-card-foreground",
         destructive:
-          "border-destructive/35 bg-destructive/5 text-destructive [&>svg]:text-destructive",
+          "border-destructive/40 bg-destructive/5 text-destructive [&>svg]:text-destructive",
         warning:
-          "border-warning/40 bg-warning/10 text-warning-foreground [&>svg]:text-warning dark:text-warning",
+          "border-warning/50 bg-warning/10 text-warning-foreground dark:text-warning",
         success:
-          "border-success/35 bg-success/5 text-success [&>svg]:text-success",
-        info: "border-info/30 bg-info/5 text-foreground [&>svg]:text-info",
+          "border-success/40 bg-success/5 text-success dark:text-success",
+        info: "border-info/40 bg-info/5 text-foreground [&>svg]:text-info",
       },
     },
     defaultVariants: {
@@ -43,7 +43,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="alert-title"
       className={cn(
-        "col-start-2 min-h-4 font-semibold tracking-[-0.01em]",
+        "col-start-2 min-h-4 font-medium tracking-tight",
         className,
       )}
       {...props}
@@ -56,7 +56,7 @@ function AlertDescription({ className, ...props }: React.ComponentProps<"div">) 
     <div
       data-slot="alert-description"
       className={cn(
-        "col-start-2 text-[0.8125rem] leading-relaxed text-muted-foreground [&_p]:leading-relaxed [&_p+p]:mt-1",
+        "col-start-2 grid justify-items-start gap-1 text-sm text-muted-foreground [&_p]:leading-relaxed",
         className,
       )}
       {...props}

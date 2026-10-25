@@ -230,7 +230,7 @@ function SearchContextBar({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-9 max-sm:h-11"
+          className="h-9"
           onClick={onEdit}
         >
           <PencilLine data-icon="inline-start" aria-hidden="true" />
@@ -265,7 +265,7 @@ function StaleNotice({ onSearch }: { onSearch: () => void }) {
         type="button"
         variant="outline"
         size="sm"
-        className="h-9 w-fit shrink-0 max-sm:h-11"
+        className="h-9 w-fit shrink-0"
         onClick={onSearch}
       >
         <RotateCcw aria-hidden="true" />
@@ -894,7 +894,7 @@ export function MrBilitSearchForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-9 w-fit shrink-0 max-sm:h-11"
+                className="h-9 w-fit shrink-0"
                 onClick={handleEditSearch}
               >
                 Change search
@@ -918,7 +918,7 @@ export function MrBilitSearchForm({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="mt-1 h-9 w-fit max-sm:h-11"
+                className="mt-1 h-9 w-fit"
                 onClick={handleEditSearch}
               >
                 Change search
@@ -969,7 +969,7 @@ export function MrBilitSearchForm({
       </div>
 
       {summaryResult && selectedWagonCount > 0 && !stale ? (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur xl:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur xl:hidden">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
             <span className="text-xs text-muted-foreground">
               {selectedWagonCount} wagon

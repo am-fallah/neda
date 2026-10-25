@@ -24,33 +24,23 @@ export function FormField({
   const descriptionId = description ? `${id}-description` : undefined;
   const errorId = error ? `${id}-error` : undefined;
   return (
-    <div className={cn("space-y-2", className)}>
+    <div className={cn("space-y-1.5", className)}>
       <Label htmlFor={id}>
         {label}
         {required ? (
-          <>
-            <span className="text-destructive" aria-hidden="true">
-              *
-            </span>
-            <span className="sr-only"> (required)</span>
-          </>
+          <span className="text-destructive" aria-hidden="true">
+            *
+          </span>
         ) : null}
       </Label>
       {children}
       {description ? (
-        <p
-          id={descriptionId}
-          className="text-xs leading-relaxed text-muted-foreground"
-        >
+        <p id={descriptionId} className="text-xs text-muted-foreground">
           {description}
         </p>
       ) : null}
       {error ? (
-        <p
-          id={errorId}
-          role="alert"
-          className="text-xs leading-relaxed font-medium text-destructive"
-        >
+        <p id={errorId} className="text-xs font-medium text-destructive">
           {error}
         </p>
       ) : null}

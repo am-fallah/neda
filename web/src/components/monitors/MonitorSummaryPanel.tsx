@@ -183,20 +183,19 @@ export function MonitorSummaryPanel({
     <Card
       id="monitor-summary"
       aria-busy={submitting}
-      className="scroll-mt-24 gap-0 overflow-hidden rounded-[10px] py-0 shadow-xs xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:overscroll-contain"
+      className="scroll-mt-24 gap-0 overflow-hidden rounded-lg py-0 shadow-none xl:sticky xl:top-6 xl:max-h-[calc(100dvh-3rem)] xl:overflow-y-auto xl:overscroll-contain"
     >
-      <CardHeader className="border-b bg-surface-raised/55 px-4 py-3.5 sm:px-5">
+      <CardHeader className="border-b px-5 py-4">
         <div>
-          <p className="eyebrow text-[0.6rem]">Review &amp; create</p>
-          <CardTitle className="mt-1 text-base" role="heading" aria-level={2}>
+          <CardTitle className="text-base" role="heading" aria-level={2}>
             Review
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="mt-1">
             Name the monitor and confirm the wagons to watch.
           </CardDescription>
         </div>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4 px-4 py-4 sm:px-5">
+      <CardContent className="flex flex-col gap-5 px-5 py-5">
         {!result ? (
           searching ? (
             <div className="flex flex-col gap-3">
@@ -250,7 +249,7 @@ export function MonitorSummaryPanel({
                 type="text"
                 name="monitor-label"
                 autoComplete="off"
-                className="h-10 max-sm:h-11"
+                className="h-10"
                 maxLength={100}
                 value={label}
                 onChange={(event) => onLabelChange(event.target.value)}
