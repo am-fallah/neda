@@ -78,7 +78,7 @@ Jobs and important state survive restarts. Monitoring runs in the backend withou
 
 A manual stop is the same as a reversible pause/disable in v1. There is no separate terminal `stopped` state unless planning identifies a compelling need and the owner approves it. Jobs expire automatically after the end of their departure day under the timezone policy in Section 12. Provider failures never permanently stop a job.
 
-**V1 filter scope:** no custom filters by train number, departure-time window, wagon/class, or price unless the owner explicitly adds them during planning. Notify for every confirmed reservable inventory offering that matches the monitor's route, departure date, provider, and passenger request.
+**V1 filter scope (amended by the owner on 2026-10-25):** no custom filters by train number or departure-time window. The New Monitor search now supports a **view-only price filter** and **wagon-level selection grouping**; these are search presentation controls, not persisted monitor criteria. Selecting a wagon selects all current underlying offerings for that wagon, while retaining the exact offering keys. Offerings that appear in later searches or polling are never added automatically. The price filter never changes, removes, or silently clears a selection, and prices are never a monitor criterion. Notify for every confirmed reservable inventory offering that matches the monitor's route, departure date, provider, and passenger request.
 
 ## 4. Baseline technology and implementation choices
 

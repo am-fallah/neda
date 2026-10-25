@@ -33,7 +33,7 @@ The product is not a booking engine. It detects and reports availability and, wh
 
 - Multi-user accounts, registration, billing, roles, or SaaS operation.
 - A curated city catalogue or city search.
-- Custom filters by train number, departure-time window, wagon/class, or price.
+- Custom filters by train number or departure-time window. The New Monitor search includes a view-only price filter and wagon-level selection grouping; these do not become persistent monitor criteria.
 - Automatic ticket purchase, seat selection, payment, or credential harvesting.
 - Cross-provider inventory aggregation, canonical journey merging, or suppressed duplicate notifications across providers.
 - Price history, seat maps, analytics dashboards, or mobile native apps.
@@ -161,6 +161,19 @@ Safe default:
 - Adding a future real provider should require implementing/registering an adapter, not rewriting scheduler, state-transition, or notification logic.
 - No generic plugin framework, reflection registration, dynamic code loading, or speculative abstraction layers.
 - Provider-specific request/response parsing, reservability interpretation, and booking-URL logic stay inside the adapter. The core engine consumes normalized outcomes only.
+
+### 3.5.1 New Monitor hierarchy and price view (approved 2026-10-25)
+
+- The default results presentation is **train → wagon group → fare/offering detail**. A wagon is a display grouping derived from provider identity and physical attributes; it is not a new persisted availability unit.
+- The default selectable unit is a **wagon group**. Selecting it persists every current underlying offering key under that wagon. Users can expand the group and select individual offerings for partial monitoring. Partial selections are shown explicitly.
+- Grouping uses actual provider identities. Similar names, prices, or availability states never establish equivalence. Entries that share a wagon identity but conflict on physical attributes remain separate. Every exact offering identity and per-offering state is retained.
+- A wagon-level availability summary is derived conservatively: any reservable child is shown as reservable; otherwise any unknown child keeps the group unknown; only an entirely decisive NotReservable group is shown as not reservable. The summary never turns Unknown into confirmed unavailability.
+- Offerings that appear in future searches or polling are **not** added automatically; only the offering keys selected at creation are monitored.
+- Price is a provider-reported integer amount. The implementation does not invent a currency, per-passenger basis, tax treatment, or total. Zero, missing, negative, fractional, and malformed values are treated as unavailable price observations, never as free or cheapest.
+- The price filter is a **view-only discovery tool** over the current search snapshot. It cannot invalidate the search, change selection identity, clear a selection, or alter the monitor-create payload. Unpriced offerings are distinguishable and can be explicitly included; they are excluded by default while a price range is active.
+- Sorting and filtering do not modify the monitor payload. The payload remains the exact selected offering keys and their metadata.
+- Unverified prices are not included in Telegram or Push notifications. Price display in the dashboard is explicitly qualified until its unit and semantics are verified.
+- Notification behavior remains per offering. Wagon-level selection may therefore produce one event per underlying offering; no notification aggregation is introduced.
 
 ### 3.6 Notifications
 
@@ -439,7 +452,7 @@ Not required in v1. If added as polish (P2), it must respect the same in-flight 
 | A-26 | VAPID subject, public domain, and HTTPS setup are available. | REQUIRES OWNER INPUT | Push cannot be production-tested without them. The implementation is complete and locally tested; no real Push send was authorized. |
 | A-27 | Telegram bot token/chat ID will be supplied later via the dashboard, not chat. | REQUIRES OWNER INPUT | Never ask for the token in chat or commit it. |
 | A-28 | Live MrBilit validation target route/date and permission will be supplied. | **VERIFIED 2026-10-25** | Owner supplied Yazd→Mashhad, 2026-11-05, and authorized bounded reads; two unauthenticated GETs executed within budget. See `docs/MRBILIT_LIVE_VALIDATION.md`. |
-| A-29 | V1 has no custom train/time/class/price filters. | VERIFIED (brief) | Do not add filter UI/API. |
+| A-29 | V1 has no custom filters by train number or departure-time window. A view-only New Monitor price filter and wagon-level selection grouping are approved. | **VERIFIED (owner amendment 2026-10-25)** | The price filter must never alter selection identity or the monitor payload; it is not a notification criterion. Wagon selection persists the exact current offering keys and does not discover future offerings. |
 | A-30 | Single-user, password-protected dashboard; no registration. | VERIFIED (brief) | No multi-tenant design. |
 | A-31 | Polling default/bounds (300s; 60–3600s). | VERIFIED (brief) | Enforce server-side. |
 | A-32 | Deployment must not occur without a separate approved plan. | VERIFIED (brief) | `GATE-004`. |

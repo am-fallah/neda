@@ -10,7 +10,9 @@
 3. Confirm or edit the passenger counts. Standard MrBilit URLs often omit
    default counts; the page reads present values and applies MrBilit's URL
    defaults for omitted ones. Choose **Find trains**.
-4. Review normalized trains/classes and select one or more exact options.
+4. Review the train and its distinct wagon groups. Selecting a wagon tracks all
+   of its current fare/offering entries; expand a wagon to select individual
+   offerings when narrower monitoring is needed.
 5. Confirm the monitor label, route, date, passengers, global polling interval,
    and Telegram/Push status.
 6. Choose **Create monitor**.
@@ -36,13 +38,32 @@ Only the selected train/class options are tracked.
   active navigation, and portaled overlays. Other routes keep the global
   theme. Semantic success/warning/destructive colors remain for availability
   and delivery meaning.
-- **Results use a single hierarchy instead of nested cards.** Journeys are
-  grouped by identity; a family header names the class/wagon/compartment and
-  repeated offerings appear as individual `Option` rows under it. Every
-  distinct `offeringKey` remains separately selectable. Unavailable classes
-  remain selectable, unknown states stay distinctly unknown, and selection is
-  shown with both the checkbox and a visible `Selected` label. There is no
-  group-level select-all control.
+- **Results use a train → wagon → offering hierarchy instead of nested
+  cards.** A train appears once; each distinct wagon group is one primary row.
+  The default checkbox selects every current underlying offering under that
+  wagon. Expanding the wagon shows the fare/offering entries and permits exact
+  or partial selection. Every distinct `offeringKey` remains persisted and
+  separately tracked. Similar names, prices, or availability states never
+  establish equivalence; conflicting wagon attributes remain separate. A
+  wagon summary shows reservable if any child is reservable, otherwise unknown
+  if any child is unknown, and not reservable only when all children are
+  decisive negatives. Future offerings are not added automatically.
+- **Price is a qualified search-time observation.** The MrBilit adapter
+  preserves a positive numeric `price` as a provider-reported amount without
+  currency. Zero, missing, negative, fractional, invalid, and unexpected
+  values remain unavailable. The UI never shows zero as a price and never
+  invents a currency, per-passenger basis, or total. Until Rial/Toman is
+  verified, amounts are shown with an explicit qualification and omitted from
+  notifications.
+- **Price filtering and sorting are view-only.** The results toolbar supports a
+  minimum/maximum provider-amount filter and departure/lowest-known-price
+  sorting. Filtering operates on individual offerings, hides unpriced entries
+  by default only while a range is active, displays how many are hidden, and
+  provides an explicit include control. Filtering never clears or changes the
+  selection, never changes offering identity or the monitor payload, and never
+  invalidates the search. A selected offering hidden by the filter remains
+  selected and is still monitored. Filtering yielding no rows is distinct from
+  a successful empty train result.
 - **Changing the URL or passenger counts invalidates the previous search.**
   In-flight responses are aborted and ignored through a revision guard, prior
   selections are cleared, stale results are disabled, and creation is blocked
@@ -155,7 +176,9 @@ The implementation checks are recorded in the task tracker and final PR report.
 - The public page's embedded `urlParams` is not a documented API contract; the
   resolver fails closed if the page format changes.
 - Native train/class ID stability is unknown; fallback matching is conservative.
-- Price currency remains unverified, so price is omitted.
+- Price currency and per-passenger basis remain unverified. A positive numeric
+  amount is preserved without a currency; notifications omit it. `sellType`
+  semantics also remain unverified and are not used for equivalence.
 - Optional API parameters (`genderCode`, `exclusive`, `availableStatus`) remain
   omitted until verified.
 - Capacity semantics for children/infants remain provisional.
