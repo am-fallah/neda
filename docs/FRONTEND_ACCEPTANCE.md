@@ -27,7 +27,7 @@ Design system: `design-system/neda/MASTER.md` (UI/UX Pro Max `--design-system`, 
 | Runtime/page errors | PASS | No page errors on audited flows. Expected mocked 4xx/5xx responses were isolated to their error-state scenarios. |
 | Command checks | PASS | `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` (161 tests/19 files), `npm run build`; `make check`, `make race`. |
 
-Remaining manual acceptance for the owner: human screen-reader/zoom review, real Telegram/Push delivery, real provider monitoring, and deployment. Screenshots and the synthetic review server are intentionally outside the repository.
+PR [#44](https://github.com/am-fallah/neda/pull/44); Go CI [40219787846](https://github.com/am-fallah/neda/actions/runs/40219787846), frontend [40219787978](https://github.com/am-fallah/neda/actions/runs/40219787978), and Docker CI [40219787966](https://github.com/am-fallah/neda/actions/runs/40219787966) passed. Remaining manual acceptance for the owner: human screen-reader/zoom review, real Telegram/Push delivery, real provider monitoring, and deployment. Screenshots and the synthetic review server are intentionally outside the repository.
 
 ## Preconditions
 
