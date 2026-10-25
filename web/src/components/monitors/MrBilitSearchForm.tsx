@@ -3,8 +3,10 @@ import {
   AlertTriangle,
   ArrowRight,
   Info,
+  PencilLine,
   RotateCcw,
   TrainFront,
+  Users,
 } from "lucide-react";
 import { isApiError } from "@/api/client";
 import { providersApi } from "@/api/endpoints";
@@ -19,8 +21,10 @@ import type {
   Settings,
 } from "@/api/types";
 import { DateDisplay } from "@/components/JalaliDatePicker";
-import { EmptyState } from "@/components/layout/EmptyState";
-import { MonitorCreateStepper, type MonitorCreateStep } from "@/components/monitors/MonitorCreateStepper";
+import {
+  MonitorCreateStepper,
+  type MonitorCreateStep,
+} from "@/components/monitors/MonitorCreateStepper";
 import {
   MonitorSearchPanel,
   type SearchErrorDisplay,
@@ -43,6 +47,7 @@ import {
   searchInputSignature,
   selectionKey,
   toSelectedOption,
+  type PassengerSource,
   type SearchInputs,
   type SearchWarningSummary,
   type UrlPassengerResult,
@@ -54,8 +59,6 @@ interface MrBilitSearchFormProps {
   pushConfig: PushConfig;
   onSubmit: (payload: MonitorCreateRequest) => Promise<void>;
 }
-
-type PassengerSource = "url" | "manual";
 
 type FocusTarget =
   | "url"
@@ -166,44 +169,59 @@ function SearchContextBar({
   const origin = resultOriginName(result);
   const destination = resultDestinationName(result);
   return (
-    <div className="rounded-xl border bg-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-col gap-1">
-          <p
-            dir="ltr"
-            className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-semibold"
-          >
-            <bdi dir="auto" className="min-w-0 break-words">
-              {origin}
-            </bdi>
-            {destination ? (
-              <>
-                <ArrowRight
-                  className="size-3.5 shrink-0 text-muted-foreground"
-                  aria-hidden="true"
-                />
-                <bdi dir="auto" className="min-w-0 break-words">
-                  {destination}
-                </bdi>
-              </>
-            ) : null}
-          </p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <DateDisplay value={result.departureDate} />
-            <span aria-hidden="true">·</span>
-            <span>{formatPassengerSummary(result.passengers)}</span>
-            <span aria-hidden="true">·</span>
-            <span>
-              {result.trains.length === 0
-                ? "No trains"
-                : `${result.trains.length} train${
-                    result.trains.length === 1 ? "" : "s"
-                  }`}
-            </span>
-            {stale ? <Badge variant="warning">Out of date</Badge> : null}
+    <div className="rounded-xl border bg-card/95 px-4 py-3 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-card/85 xl:sticky xl:top-4 xl:z-10">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+            <TrainFront className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p
+              dir="ltr"
+              className="flex min-w-0 flex-wrap items-center gap-1.5 text-sm font-semibold"
+            >
+              <bdi dir="auto" className="min-w-0 break-words">
+                {origin}
+              </bdi>
+              {destination ? (
+                <>
+                  <ArrowRight
+                    className="size-3.5 shrink-0 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <bdi dir="auto" className="min-w-0 break-words">
+                    {destination}
+                  </bdi>
+                </>
+              ) : null}
+            </p>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <DateDisplay value={result.departureDate} />
+              <span aria-hidden="true">·</span>
+              <span className="inline-flex items-center gap-1">
+                <Users className="size-3" aria-hidden="true" />
+                {formatPassengerSummary(result.passengers)}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>
+                {result.trains.length === 0
+                  ? "No trains"
+                  : `${result.trains.length} train${
+                      result.trains.length === 1 ? "" : "s"
+                    }`}
+              </span>
+              {stale ? <Badge variant="warning">Out of date</Badge> : null}
+            </div>
           </div>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-9"
+          onClick={onEdit}
+        >
+          <PencilLine data-icon="inline-start" aria-hidden="true" />
           Change search
         </Button>
       </div>
@@ -216,7 +234,7 @@ function StaleNotice({ onSearch }: { onSearch: () => void }) {
     <div
       id="search-stale-notice"
       role="status"
-      className="flex flex-col gap-3 rounded-xl border border-warning/40 bg-warning/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+      className="flex flex-col gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex items-start gap-2.5">
         <AlertTriangle
@@ -235,7 +253,7 @@ function StaleNotice({ onSearch }: { onSearch: () => void }) {
         type="button"
         variant="outline"
         size="sm"
-        className="w-fit shrink-0"
+        className="h-9 w-fit shrink-0"
         onClick={onSearch}
       >
         <RotateCcw aria-hidden="true" />
@@ -250,8 +268,8 @@ function ProviderNotes({ warnings }: { warnings: SearchWarningSummary }) {
     return null;
   }
   return (
-    <details className="rounded-xl border bg-card px-4 py-3 text-xs">
-      <summary className="flex cursor-pointer items-center gap-2 font-medium">
+    <details className="rounded-lg border border-dashed bg-muted/20 px-4 py-3 text-xs">
+      <summary className="flex w-fit cursor-pointer items-center gap-2 font-medium">
         <Info className="size-3.5 text-muted-foreground" aria-hidden="true" />
         Provider notes
         <span className="text-muted-foreground">
@@ -287,21 +305,27 @@ function SearchResultsSkeleton() {
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3 w-64 max-w-full" />
       </div>
-      {[0, 1].map((index) => (
-        <div key={index} className="rounded-xl border bg-card p-4">
-          <div className="flex items-start gap-3">
-            <Skeleton className="size-9 rounded-lg" />
-            <div className="flex flex-1 flex-col gap-2">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-3 w-48 max-w-full" />
-            </div>
-          </div>
-          <div className="mt-4 flex flex-col gap-2">
-            <Skeleton className="h-10 w-full rounded-lg" />
-            <Skeleton className="h-10 w-full rounded-lg" />
+      <div className="rounded-xl border bg-card p-4">
+        <div className="flex items-start gap-3">
+          <Skeleton className="size-9 rounded-lg" />
+          <div className="flex flex-1 flex-col gap-2">
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="h-3 w-48 max-w-full" />
           </div>
         </div>
-      ))}
+        <div className="mt-4 flex flex-col divide-y rounded-lg border">
+          {[0, 1, 2].map((index) => (
+            <div key={index} className="flex items-center gap-3 px-3 py-3.5">
+              <Skeleton className="size-4 rounded" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-3.5 w-36 max-w-full" />
+                <Skeleton className="h-3 w-52 max-w-full" />
+              </div>
+              <Skeleton className="h-5 w-16 rounded-full" />
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -318,7 +342,8 @@ export function MrBilitSearchForm({
   const [children, setChildren] = useState(0);
   const [infants, setInfants] = useState(0);
   const [passengerSource, setPassengerSource] =
-    useState<PassengerSource>("manual");
+    useState<PassengerSource>("default");
+  const [passengerEditorOpen, setPassengerEditorOpen] = useState(false);
   const [result, setResult] = useState<ProviderSearchResult | null>(null);
   const [lastSearchSignature, setLastSearchSignature] = useState<string | null>(
     null,
@@ -416,28 +441,60 @@ export function MrBilitSearchForm({
       setAdults(parsed.counts.adults);
       setChildren(parsed.counts.children);
       setInfants(parsed.counts.infants);
-      setPassengerSource("url");
-    } else {
-      setPassengerSource("manual");
+      setPassengerSource(
+        parsed.defaultedKeys.length > 0 ? "url-defaults" : "url",
+      );
+      setPassengerEditorOpen(false);
+      setFieldErrors((current) => {
+        if (
+          !current.adults &&
+          !current.children &&
+          !current.infants &&
+          !current.passengers
+        ) {
+          return current;
+        }
+        const nextErrors = { ...current };
+        delete nextErrors.adults;
+        delete nextErrors.children;
+        delete nextErrors.infants;
+        delete nextErrors.passengers;
+        return nextErrors;
+      });
+    } else if (parsed.status === "absent") {
+      if (passengerSource !== "manual") {
+        setAdults(1);
+        setChildren(0);
+        setInfants(0);
+        setPassengerSource("default");
+        setPassengerEditorOpen(false);
+      }
     }
     invalidateSearch();
+  }
+
+  function handleTogglePassengerEditor() {
+    setPassengerEditorOpen((open) => !open);
   }
 
   function handleAdultsChange(value: number) {
     setAdults(value);
     setPassengerSource("manual");
+    setPassengerEditorOpen(true);
     invalidateSearch();
   }
 
   function handleChildrenChange(value: number) {
     setChildren(value);
     setPassengerSource("manual");
+    setPassengerEditorOpen(true);
     invalidateSearch();
   }
 
   function handleInfantsChange(value: number) {
     setInfants(value);
     setPassengerSource("manual");
+    setPassengerEditorOpen(true);
     invalidateSearch();
   }
 
@@ -447,8 +504,22 @@ export function MrBilitSearchForm({
     const errors = passengerErrors(adults, children, infants);
     if (!currentUrl) {
       errors.url = "Paste a MrBilit train search URL.";
+    } else if (
+      urlPassenger.status === "invalid" &&
+      passengerSource !== "manual"
+    ) {
+      errors.passengers =
+        "Fix the passenger counts in the URL or edit them manually.";
     }
     if (Object.keys(errors).length > 0) {
+      if (
+        errors.adults ||
+        errors.children ||
+        errors.infants ||
+        errors.passengers
+      ) {
+        setPassengerEditorOpen(true);
+      }
       setFieldErrors(errors);
       setSearchError(null);
       setSearchExpanded(true);
@@ -456,6 +527,7 @@ export function MrBilitSearchForm({
       return;
     }
     if (!passengerCountsValid({ adults, children, infants })) {
+      setPassengerEditorOpen(true);
       setFieldErrors({ passengers: "Passengers must be between 1 and 9 total." });
       setSearchError(null);
       setSearchExpanded(true);
@@ -511,6 +583,14 @@ export function MrBilitSearchForm({
       if (isApiError(caught)) {
         setFieldErrors(caught.fields);
         setSearchError(searchErrorDisplay(caught));
+        if (
+          caught.fields.adults ||
+          caught.fields.children ||
+          caught.fields.infants ||
+          caught.fields.passengers
+        ) {
+          setPassengerEditorOpen(true);
+        }
         if (caught.fields.url) {
           setPendingFocus("url");
         } else if (caught.fields.adults) {
@@ -665,7 +745,7 @@ export function MrBilitSearchForm({
   return (
     <div className="flex flex-col gap-6">
       <MonitorCreateStepper current={currentStep} />
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="flex min-w-0 flex-col gap-5">
           {searchExpanded || !result ? (
             <MonitorSearchPanel
@@ -674,6 +754,7 @@ export function MrBilitSearchForm({
               children={children}
               infants={infants}
               passengerSource={passengerSource}
+              passengerEditorOpen={passengerEditorOpen}
               urlPassenger={urlPassenger}
               fieldErrors={fieldErrors}
               searching={searching}
@@ -682,6 +763,7 @@ export function MrBilitSearchForm({
               onAdultsChange={handleAdultsChange}
               onChildrenChange={handleChildrenChange}
               onInfantsChange={handleInfantsChange}
+              onTogglePassengerEditor={handleTogglePassengerEditor}
               onSearch={handleSearch}
             />
           ) : result ? (
@@ -698,25 +780,35 @@ export function MrBilitSearchForm({
           {searching ? (
             <SearchResultsSkeleton />
           ) : result && result.trains.length === 0 ? (
-            <div
-              id="search-results-heading"
-              tabIndex={-1}
-              className="scroll-mt-24 rounded-xl focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
-            >
-              <EmptyState
-                icon={TrainFront}
-                title="No trains returned"
-                description="MrBilit returned no trains for this route and date. This is a successful empty result, not a sold-out signal. Try another date or URL."
-                action={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={handleEditSearch}
+            <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
+                  <TrainFront className="size-4" aria-hidden="true" />
+                </span>
+                <div className="min-w-0">
+                  <h2
+                    id="search-results-heading"
+                    tabIndex={-1}
+                    className="scroll-mt-24 text-base font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
                   >
-                    Change search
-                  </Button>
-                }
-              />
+                    No trains returned
+                  </h2>
+                  <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                    MrBilit returned no trains for this route and date. This is
+                    a successful empty result, not a sold-out signal. Try
+                    another date or URL.
+                  </p>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 w-fit shrink-0"
+                onClick={handleEditSearch}
+              >
+                Change search
+              </Button>
             </div>
           ) : groups.length > 0 ? (
             <MonitorSearchResults
@@ -738,6 +830,8 @@ export function MrBilitSearchForm({
           createError={createError}
           submitting={submitting}
           stale={stale}
+          searching={searching}
+          emptyResult={Boolean(result && result.trains.length === 0)}
           settings={settings}
           pushConfig={pushConfig}
           onLabelChange={handleLabelChange}

@@ -7,7 +7,9 @@
 1. Open `http://localhost:<port>/monitors/new`.
 2. Paste a public MrBilit train search URL, for example:
    `https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24`
-3. Set passenger counts and choose **Find trains**.
+3. Confirm or edit the passenger counts. Standard MrBilit URLs often omit
+   default counts; the page reads present values and applies MrBilit's URL
+   defaults for omitted ones. Choose **Find trains**.
 4. Review normalized trains/classes and select one or more exact options.
 5. Confirm the monitor label, route, date, passengers, global polling interval,
    and Telegram/Push status.
@@ -18,29 +20,60 @@ Only the selected train/class options are tracked.
 
 ### New Monitor UI behavior (2026-10-25)
 
-- **Passenger prefill is conservative and PROVISIONAL.** The frontend reads
-  `adultCount`, `childCount`, and `infantCount` only when all three are present
-  once, are valid integers, and satisfy the existing adult/child/infant and
-  total-passenger bounds. Partial or invalid values are never guessed; the
-  explicit fields remain authoritative. Counts embedded in the resolved
-  MrBilit page are not used because they may be provider defaults. The search
-  request still sends the explicit passenger counts.
+- **Passenger handling is URL-first and transparent.** The frontend reads
+  `adultCount`, `childCount`, and `infantCount` from a supported MrBilit URL.
+  Any valid subset is applied; omitted values use MrBilit's own URL defaults.
+  Present-but-invalid, duplicated, empty, or out-of-bounds values are never
+  silently corrected. A URL with no passenger parameters is not treated as
+  extracted data: the page uses frontend defaults (`1 adult / 0 children /
+  0 infants`) and labels them as defaults. Counts appear in a compact summary;
+  the three-field editor is collapsed unless the user chooses to edit or the
+  URL values are invalid. The search request sends the explicit counts and the
+  monitor-create payload uses the counts echoed by that search.
+- **The New Monitor route uses a neutral palette across its shared shell.**
+  While `/monitors/new` is mounted, a route-scoped body class applies neutral
+  primary, accent, and focus-ring tokens to the page content, sidebar brand,
+  active navigation, and portaled overlays. Other routes keep the global
+  theme. Semantic success/warning/destructive colors remain for availability
+  and delivery meaning.
+- **Results use a single hierarchy instead of nested cards.** Journeys are
+  grouped by identity; a family header names the class/wagon/compartment and
+  repeated offerings appear as individual `Option` rows under it. Every
+  distinct `offeringKey` remains separately selectable. Unavailable classes
+  remain selectable, unknown states stay distinctly unknown, and selection is
+  shown with both the checkbox and a visible `Selected` label. There is no
+  group-level select-all control.
 - **Changing the URL or passenger counts invalidates the previous search.**
   In-flight responses are aborted and ignored through a revision guard, prior
   selections are cleared, stale results are disabled, and creation is blocked
   until a successful new search.
-- **Grouping is display-only.** Journeys remain distinct by `journeyKey`.
-  Classes are grouped under a strict wagon/class/compartment signature; each
-  distinct `offeringKey` remains an individually selectable option. Repeated
-  class names with different provider identity are not merged, and there is no
-  group-level select-all control.
 - **The generated label uses the URL route slug plus the Gregorian date** to
-  avoid bidi reordering in the text input. The summary still displays the
-  provider's route names and both Jalali and Gregorian dates. A manually edited
+  avoid bidi reordering in the text input. Provider route names and both Jalali
+  and Gregorian dates are shown in the search context bar. A manually edited
   label is preserved across later searches.
 - **Polling and notification settings are global.** The summary displays their
-  current status and links to Settings; it does not add per-monitor controls.
-  The backend search and monitor-create contracts are unchanged.
+  current status, labels the section global, and links to Settings; it does not
+  add per-monitor controls. The backend search and monitor-create contracts are
+  unchanged.
+
+### Observed MrBilit URL passenger semantics (2026-10-25)
+
+Public page/JavaScript inspection showed that MrBilit emits only non-default
+passenger values in its shareable train URLs and resolves omitted values as
+`adultCount = 1`, `childCount = 0`, `infantCount = 0`. The resolved SSR
+`urlParams` observed for representative URLs were:
+
+| URL query | Resolved `urlParams` |
+|---|---|
+| no passenger parameters | `1 / 0 / 0` |
+| `adultCount=2` | `2 / 0 / 0` |
+| `adultCount=2&childCount=1` | `2 / 1 / 0` |
+| `adultCount=3&childCount=2&infantCount=1` | `3 / 2 / 1` |
+
+This is URL interpretation only: it is not availability evidence, and the
+backend still receives explicit counts in the search request body. The public
+page/JS is not a formal provider contract, so the long-term behavior remains
+`PROVISIONAL` and is covered by deterministic fixtures/tests.
 
 ## Local setup
 

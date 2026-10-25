@@ -59,12 +59,15 @@
 }
 
 /*
- * The New Monitor page is the first page in the neutral redesign. Keep the
- * override scoped so the rest of the dashboard keeps its current theme until
- * those pages are redesigned separately.
+ * The New Monitor route uses a neutral palette for both its content and the
+ * shared application shell. The body class is applied only while that route is
+ * mounted, so other pages keep the global theme. Semantic status colors
+ * (success, warning, destructive) remain available for availability and
+ * delivery meaning.
  */
-.monitor-create {
-  --radius: 0.5rem;
+.monitor-create,
+body.monitor-create-page {
+  --radius: 0.625rem;
   --primary: var(--foreground);
   --primary-foreground: var(--background);
   --accent: var(--secondary);
@@ -72,8 +75,20 @@
   --ring: oklch(0.55 0 0);
 }
 
-.dark .monitor-create {
+.dark .monitor-create,
+.dark body.monitor-create-page {
   --ring: oklch(0.72 0 0);
+}
+
+.monitor-create input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.monitor-create input[type="number"]::-webkit-outer-spin-button,
+.monitor-create input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
 }
 
 @theme inline {

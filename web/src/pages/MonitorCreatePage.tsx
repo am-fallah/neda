@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { AlertTriangle, FlaskConical } from "lucide-react";
+import { AlertTriangle, ChevronRight, FlaskConical } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { monitorsApi, providersApi, pushApi, settingsApi } from "@/api/endpoints";
@@ -46,25 +46,40 @@ function MonitorCreateSkeleton() {
         <Skeleton className="size-6 rounded-full" />
         <Skeleton className="h-3 w-16" />
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="rounded-xl border bg-card p-5 sm:p-6">
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="mt-2 h-3 w-80 max-w-full" />
-          <Skeleton className="mt-6 h-3 w-28" />
-          <Skeleton className="mt-2 h-10 w-full" />
-          <Skeleton className="mt-2 h-3 w-64 max-w-full" />
-          <div className="mt-6 grid gap-3 border-t pt-5 sm:grid-cols-3">
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
-            <Skeleton className="h-10 w-full" />
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-3 w-80 max-w-full" />
+            </div>
+          </div>
+          <div className="mt-6 flex flex-col gap-2">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-3 w-64 max-w-full" />
+          </div>
+          <div className="mt-5 flex items-center gap-3 rounded-xl border bg-muted/20 px-4 py-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-3.5 w-40" />
+              <Skeleton className="h-3 w-56 max-w-full" />
+            </div>
+            <Skeleton className="h-8 w-28 rounded-md" />
           </div>
           <div className="mt-5 flex justify-end border-t pt-5">
             <Skeleton className="h-10 w-32" />
           </div>
         </div>
         <div className="rounded-xl border bg-card p-5">
-          <Skeleton className="h-5 w-36" />
-          <Skeleton className="mt-2 h-3 w-56 max-w-full" />
+          <div className="flex items-start gap-3">
+            <Skeleton className="size-9 rounded-lg" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-5 w-32" />
+              <Skeleton className="h-3 w-56 max-w-full" />
+            </div>
+          </div>
           <div className="mt-6 flex flex-col gap-3">
             <Skeleton className="h-4 w-full" />
             <Skeleton className="h-4 w-5/6" />
@@ -109,16 +124,38 @@ export function MonitorCreatePage() {
   const testProviders = providers.filter((provider) => provider.testOnly);
 
   return (
-    <div className="monitor-create flex flex-col gap-6">
-      <PageHeader
-        title="New monitor"
-        description="Paste a MrBilit search URL, choose the exact classes to watch, and review the route, passengers, and delivery settings before creating it."
-        actions={
-          <Button asChild variant="outline">
-            <Link to="/monitors">Cancel</Link>
-          </Button>
-        }
-      />
+    <div className="monitor-create flex flex-col gap-6 pb-8">
+      <div className="flex flex-col gap-3">
+        <nav aria-label="Breadcrumb">
+          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <li>
+              <Link
+                to="/monitors"
+                className="inline-flex rounded-sm py-1 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+              >
+                Monitors
+              </Link>
+            </li>
+            <li aria-hidden="true">
+              <ChevronRight className="size-3" />
+            </li>
+            <li>
+              <span aria-current="page" className="font-medium text-foreground">
+                New monitor
+              </span>
+            </li>
+          </ol>
+        </nav>
+        <PageHeader
+          title="New monitor"
+          description="Paste a MrBilit search URL, choose the classes to watch, and confirm the monitor."
+          actions={
+            <Button asChild variant="outline">
+              <Link to="/monitors">Cancel</Link>
+            </Button>
+          }
+        />
+      </div>
 
       {loading ? (
         <MonitorCreateSkeleton />
@@ -137,18 +174,18 @@ export function MonitorCreatePage() {
             onSubmit={handleSubmit}
           />
           {testProviders.length > 0 ? (
-            <details className="rounded-xl border bg-card/50 px-4 py-3">
-              <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs font-medium text-muted-foreground">
+            <details className="border-t pt-4">
+              <summary className="flex w-fit cursor-pointer flex-wrap items-center gap-2 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
                 <FlaskConical className="size-3.5" aria-hidden="true" />
                 Local test-provider flow
                 <TestOnlyBadge />
               </summary>
-              <p className="mt-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              <p className="mt-3 max-w-3xl text-xs leading-relaxed text-muted-foreground">
                 This deterministic fixture provider is available only in
                 development. It never contacts a real ticket source and is not
                 part of the MrBilit flow above.
               </p>
-              <div className="mt-4">
+              <div className="mt-4 rounded-xl border bg-muted/15 p-4">
                 <MonitorForm
                   mode="create"
                   initialValues={emptyMonitorForm()}

@@ -1,6 +1,6 @@
 # Neda Dashboard — Manual Acceptance Checklist
 
-**Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
+**Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** A separate New Monitor corrective audit was executed on 2026-10-25 against a production frontend build with mocked API/search fixtures and 0 axe violations across the states recorded below. The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
 
 ## Preconditions
 
@@ -37,29 +37,41 @@ Environment: production-style embedded frontend served by the Go binary on `127.
 
 **Not covered by the automated audit:** real Telegram save/test delivery, Web Push, production provider data, long-running polling, human screen-reader/zoom/contrast review, and the remaining error/empty permutations listed below. The automated audit does not replace human accessibility review.
 
-## New Monitor redesign audit (2026-10-25)
+## New Monitor corrective audit (2026-10-25)
 
-Environment: Vite development build, system Chrome through a temporary Playwright 1.64.1 install, private API and MrBilit-search responses mocked with deterministic fixtures. No backend database was read or changed; no live provider, Telegram, Push, or booking action occurred. Screenshots were reviewed at 1440×1000 and 390×844 in light and dark modes.
+Environment: production `vite preview` build, system Chrome through a temporary Playwright 1.64.1 install and axe-core 4.10.3. Private API and MrBilit-search responses were mocked with deterministic fixtures. No backend database was read or changed; no live provider, Telegram, Push, or booking action occurred. Screenshots were reviewed at widths 1440, 1280, 1024, 390, 360, and 320 in light and dark modes.
+
+This audit supersedes the earlier content-only review. It explicitly covers the shared shell, standard MrBilit URLs with omitted defaults, no-count URLs, manual edits, invalid values, and the full state set.
 
 | Check | Result | Evidence |
 |---|---|---|
-| Initial search state | PASS | Two-column desktop layout; neutral page-scoped accent; search panel, empty summary, and global delivery status render without console/page errors. |
-| URL passenger prefill | PASS | Complete valid `adultCount`/`childCount`/`infantCount` values prefill and are visibly marked as loaded from the URL; partial values show guidance and do not overwrite explicit counts. |
-| Journey/class-family grouping | PASS | Strict unit tests cover same journey, repeated class names with different wagons/compartments, duplicate journey keys, and exact offering positions. Unavailable options remain selectable. |
-| Exact selection and summary | PASS | Selecting two options updates the live count, label, selected list, and creation payload. The backend payload is unchanged in shape. |
-| Stale-search invalidation | PASS | Changing the URL clears selections, disables results and creation, shows a "Search settings changed" notice, and an aborted in-flight response is ignored. |
-| Loading state | PASS | Search button and skeleton status are announced; duplicate submission is guarded. |
-| Empty result | PASS | "No trains returned" explicitly says this is not a sold-out signal; creation is unavailable. |
+| Initial state — light/dark | PASS | Two-column layout at 1440/1280; page header, stepper, compact URL-first search card, empty confirmation panel, and global delivery status render without console/page errors. |
+| Page-wide neutral accent | PASS | Route-scoped body class plus content scope. Computed light `--primary` on `<body>` and `.monitor-create` is `oklch(21% .006 285)`; brand background and primary buttons use the same neutral; active nav and portaled menu hover use neutral secondary; dark values invert correctly. Other routes retain the global teal brand (`oklch(0.45 0.09 180)`). |
+| Standard URL passenger extraction | PASS | `adultCount=2&childCount=1` renders `2 adults · 1 child`, leaves the three-field editor collapsed, and sends `{adults: 2, children: 1, infants: 0}` in the search request. Omitted `infantCount` uses MrBilit's zero default. |
+| No-count URL fallback | PASS | A URL without passenger parameters shows clearly labelled `1 adult` defaults and sends `{adults: 1, children: 0, infants: 0}`; it does not claim extraction. |
+| Manual passenger edit | PASS | Opening the compact editor, changing a count, and searching sends the edited values; the monitor-create payload preserves the same counts. |
+| Invalid URL counts | PASS | Present-but-invalid values show a warning, are not applied, and open the editor; search is blocked until the URL is fixed or counts are edited manually. |
+| Journey/class-family grouping | PASS | Equivalent classes are grouped under one family header; distinct offerings remain individual `Option` rows; different wagons/compartments remain separate; unavailable options remain selectable; unknown remains distinct. |
+| Selection state | PASS | Selection uses a custom checkbox with a visible check, row emphasis, and an explicit `Selected` badge (not colour alone). Keyboard focus is visible on the checkbox. |
+| Exact selection and summary | PASS | Selecting two offerings updates the count, selected list, label, and payload. Captured create payload included exactly the two selected offerings and `adults: 2, children: 1, infants: 0`. |
+| Stale-search invalidation | PASS | Changing the URL clears selections, disables results and creation, shows "Search settings changed", and ignores an aborted in-flight response. |
+| Loading state | PASS | Search button and results skeleton announce progress; the confirmation panel also shows a searching state; duplicate submission is guarded. |
+| Empty result | PASS | Compact "No trains returned" block says this is a successful empty result, not a sold-out signal; confirmation panel says "No classes to review"; creation is unavailable. |
 | Search error | PASS | Provider failure shows an actionable error without implying unavailability; URL errors focus the URL field. |
 | Creation error | PASS | Summary-level error plus mapped selection field error; create action is re-enabled for retry. |
-| Label preservation | PASS | A manually edited label survives a subsequent search; the generated label uses the URL slug to avoid bidi reordering. |
-| Global delivery status | PASS | Polling interval is humanized; Telegram/Push state is read-only, labeled global, and links to Settings. |
-| Desktop light/dark | PASS | Success screenshots reviewed; neutral black primary in light and inverted neutral primary in dark; status colors remain semantic. |
-| Mobile 390 px | PASS | Search, grouped results, and summary stack cleanly; no horizontal overflow. Additional checks at 360 px and 320 px also pass. |
-| Axe WCAG 2 A/AA + 2.1 A/AA | PASS | 0 violations on initial, selected success, stale, empty, and error states in light mode; selected success also passes in dark mode and at 390 px. |
-| Console/page errors | PASS | No page errors and no unexpected console errors; the mocked provider-error scenario logged only the expected 502 resource status. |
+| Label preservation | PASS | A manually edited label survives a subsequent search; the generated label uses the URL slug and Gregorian date to avoid bidi reordering. |
+| Global delivery status | PASS | Polling interval is humanized; Telegram/Push status is read-only, labelled `Global`, and links to Settings; delivery status is also visible before search. |
+| Persian/English bidi | PASS | Persian route/operator/class/wagon/compartment values were rendered with `bdi` isolation; the route arrow, dates, capacities, and English labels remained readable and correctly ordered. |
+| Desktop layout | PASS | 1280px grid: `584px 352px` (results + summary); 1024px stacks to a `704px` single column. Summary rail is sticky only at `xl` and above; it does not dominate the results. |
+| Mobile layout | PASS | 390px, 360px, and 320px: search, grouped results, editor, selected options, delivery, and create action stack cleanly; no horizontal overflow at any width. |
+| Axe WCAG 2 A/AA + 2.1 A/AA | PASS | 0 violations on initial light/dark, selected success light/dark, searching, empty, invalid URL counts, provider error, stale, creation error, bidi, and 390/360/320px results. |
+| Console/page errors | PASS | No page errors or unexpected console errors on the audited flows; mocked provider-error/creation-error requests logged only their expected 502/422 resource statuses. |
 
-Remaining visual acceptance for the owner: confirm the neutral page-scoped accent, the journey/class-family density, the Persian/English bidi presentation, and the summary rail at the owner's preferred viewport. Human screen-reader and zoom review remain manual.
+One payload-only capture intentionally did not mock the post-create monitor-detail route; the resulting expected 404 after navigation was excluded from console-error assertions. The create request itself succeeded and its exact payload was captured.
+
+Reported gaps from the earlier review are closed: standard MrBilit URLs with omitted defaults now prefill without manual entry, and the neutral accent covers the shared shell, not only the content subtree.
+
+Remaining manual acceptance for the owner: human screen-reader/zoom review and final preference review of density, Persian/English typography, and the summary rail at the owner's viewport. Real Telegram/Push delivery, live provider monitoring, and production deployment remain out of scope for this audit.
 
 ## Authentication
 

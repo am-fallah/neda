@@ -97,13 +97,37 @@ describe("parsePassengerCountsFromUrl", () => {
     expect(parsed.counts).toBeUndefined();
   });
 
-  it("reports partial counts without applying them", () => {
+  it("applies MrBilit's omitted defaults for a standard adult-and-child URL", () => {
+    const parsed = parsePassengerCountsFromUrl(
+      "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&adultCount=2&childCount=1",
+    );
+    expect(parsed.status).toBe("applied");
+    expect(parsed.counts).toEqual({ adults: 2, children: 1, infants: 0 });
+    expect(parsed.presentKeys).toEqual(["adultCount", "childCount"]);
+    expect(parsed.defaultedKeys).toEqual(["infantCount"]);
+  });
+
+  it("uses the provider default of one adult when only child or infant counts are present", () => {
+    expect(
+      parsePassengerCountsFromUrl(
+        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&childCount=1",
+      ).counts,
+    ).toEqual({ adults: 1, children: 1, infants: 0 });
+    expect(
+      parsePassengerCountsFromUrl(
+        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&infantCount=1",
+      ).counts,
+    ).toEqual({ adults: 1, children: 0, infants: 1 });
+  });
+
+  it("applies an adult-only URL with zero children and infants", () => {
     const parsed = parsePassengerCountsFromUrl(
       "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24&adultCount=2",
     );
-    expect(parsed.status).toBe("partial");
-    expect(parsed.counts).toBeUndefined();
+    expect(parsed.status).toBe("applied");
+    expect(parsed.counts).toEqual({ adults: 2, children: 0, infants: 0 });
     expect(parsed.presentKeys).toEqual(["adultCount"]);
+    expect(parsed.defaultedKeys).toEqual(["childCount", "infantCount"]);
   });
 
   it.each([

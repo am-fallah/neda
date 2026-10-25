@@ -55,7 +55,7 @@ export function MonitorCreateStepper({
             </span>
             <span
               className={cn(
-                "truncate text-xs font-medium sm:text-sm",
+                "truncate text-[0.8rem] font-medium",
                 status === "current" && "text-foreground",
                 status === "complete" && "text-muted-foreground",
                 status === "upcoming" && "text-muted-foreground",

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   ChevronDown,
@@ -156,6 +156,18 @@ export function AppLayout() {
   const location = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const previousPath = useRef(location.pathname);
+  const newMonitorPage =
+    location.pathname.replace(/\/+$/, "") === "/monitors/new";
+
+  // Scope the neutral New Monitor palette to the page and its shared shell.
+  // Portaled overlays (menus) also inherit from body, so this keeps the whole
+  // route visually consistent without changing the rest of the dashboard.
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const className = "monitor-create-page";
+    document.body.classList.toggle(className, newMonitorPage);
+    return () => document.body.classList.remove(className);
+  }, [newMonitorPage]);
 
   useEffect(() => {
     if (previousPath.current !== location.pathname) {
