@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { eventsApi, providersApi } from "@/api/endpoints";
 import type { EventRecord, ProviderInfo } from "@/api/types";
 import { BookingLink } from "@/components/BookingLink";
+import { ProviderPrice } from "@/components/ProviderPrice";
 import { DeliveryTable } from "@/components/events/DeliveryTable";
 import { ErrorState } from "@/components/layout/ErrorState";
 import { LoadingState } from "@/components/layout/LoadingState";
@@ -215,10 +216,11 @@ export function EventDetailPage() {
                 <DetailRow label="Price">
                   {event.priceAmount !== null &&
                   event.priceAmount !== undefined ? (
-                    <>
-                      {event.priceAmount.toLocaleString("en-US")}{" "}
-                      {event.priceCurrency || ""}
-                    </>
+                    <ProviderPrice
+                      amount={event.priceAmount}
+                      currency={event.priceCurrency}
+                      emptyLabel="—"
+                    />
                   ) : (
                     "—"
                   )}

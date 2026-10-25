@@ -17,7 +17,7 @@ export function MonitorCreateStepper({
   return (
     <ol
       aria-label="Monitor creation progress"
-      className="flex w-full items-center gap-2 sm:gap-3"
+      className="flex w-full items-center gap-2 sm:gap-2.5"
     >
       {STEPS.map((step, index) => {
         const status =
@@ -38,7 +38,7 @@ export function MonitorCreateStepper({
             <span
               aria-hidden="true"
               className={cn(
-                "flex size-6 shrink-0 items-center justify-center rounded-full border text-[0.7rem] font-semibold transition-colors",
+                "flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.65rem] font-semibold transition-colors",
                 status === "current" &&
                   "border-primary bg-primary text-primary-foreground",
                 status === "complete" &&
@@ -73,7 +73,7 @@ export function MonitorCreateStepper({
             {index < STEPS.length - 1 ? (
               <span
                 aria-hidden="true"
-                className="h-px min-w-3 flex-1 bg-border"
+                className="h-px min-w-2 flex-1 bg-border"
               />
             ) : null}
           </li>

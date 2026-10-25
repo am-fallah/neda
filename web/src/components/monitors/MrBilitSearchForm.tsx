@@ -15,7 +15,6 @@ import type {
   ProviderInfo,
   ProviderSearchClass,
   ProviderSearchResult,
-  ProviderSearchTrain,
   PushConfig,
   SelectedOption,
   Settings,
@@ -31,30 +30,39 @@ import {
 } from "@/components/monitors/MonitorSearchPanel";
 import { MonitorSearchResults } from "@/components/monitors/MonitorSearchResults";
 import { MonitorSummaryPanel } from "@/components/monitors/MonitorSummaryPanel";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  defaultMonitorLabel,
-  describeSearchWarnings,
+  applySearchView,
+  countSelectedOutsideView,
   formatPassengerSummary,
   groupSearchTrains,
-  parsePassengerCountsFromUrl,
+  groupSelectedWagons,
+  parsePriceBound,
   passengerCountsValid,
-  resultDestinationName,
-  resultOriginName,
   searchInputSignature,
   selectionKey,
   toSelectedOption,
-  type PassengerSource,
+  wagonSelectionState,
   type SearchInputs,
+  type SearchJourneyGroup,
+  type SearchSort,
   type SearchWarningSummary,
+  type SearchWagonGroup,
+} from "@/lib/searchResults";
+import {
+  defaultMrBilitMonitorLabel,
+  describeMrBilitWarnings,
+  mrBilitDestinationName,
+  mrBilitOriginName,
+  parsePassengerCountsFromUrl,
+  type PassengerSource,
   type UrlPassengerResult,
-} from "@/lib/mrbilitSearch";
+} from "@/providers/mrbilit";
 
 interface MrBilitSearchFormProps {
-  providers: ProviderInfo[];
+  provider: ProviderInfo;
   settings: Settings;
   pushConfig: PushConfig;
   onSubmit: (payload: MonitorCreateRequest) => Promise<void>;
@@ -89,11 +97,14 @@ function focusElement(target: FocusTarget) {
   }
 }
 
-function searchErrorDisplay(caught: unknown): SearchErrorDisplay {
+function searchErrorDisplay(
+  caught: unknown,
+  providerName: string,
+): SearchErrorDisplay {
   if (!isApiError(caught)) {
     return {
       title: "Search failed",
-      message: "The MrBilit search could not be completed.",
+      message: `The ${providerName} search could not be completed.`,
     };
   }
   switch (caught.code) {
@@ -109,7 +120,7 @@ function searchErrorDisplay(caught: unknown): SearchErrorDisplay {
     case "route_resolution_failed":
       return { title: "Could not resolve this route", message: caught.message };
     case "provider_timeout":
-      return { title: "MrBilit timed out", message: caught.message };
+      return { title: `${providerName} timed out`, message: caught.message };
     case "provider_rate_limited":
       return { title: "Too many searches", message: caught.message };
     case "provider_configuration":
@@ -166,15 +177,16 @@ function SearchContextBar({
   stale: boolean;
   onEdit: () => void;
 }) {
-  const origin = resultOriginName(result);
-  const destination = resultDestinationName(result);
+  const origin = mrBilitOriginName(result);
+  const destination = mrBilitDestinationName(result);
   return (
-    <div className="rounded-xl border bg-card/95 px-4 py-3 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-card/85 xl:sticky xl:top-4 xl:z-10">
+    <div className="rounded-lg border bg-card/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/85 xl:sticky xl:top-4 xl:z-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
-            <TrainFront className="size-4" aria-hidden="true" />
-          </span>
+        <div className="flex min-w-0 items-start gap-2.5">
+          <TrainFront
+            className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+            aria-hidden="true"
+          />
           <div className="min-w-0">
             <p
               dir="ltr"
@@ -292,15 +304,15 @@ function ProviderNotes({ warnings }: { warnings: SearchWarningSummary }) {
   );
 }
 
-function SearchResultsSkeleton() {
+function SearchResultsSkeleton({ providerName }: { providerName: string }) {
   return (
     <div
       className="flex flex-col gap-4"
       role="status"
       aria-live="polite"
-      aria-label="Searching MrBilit"
+      aria-label={`Searching ${providerName}`}
     >
-      <span className="sr-only">Searching MrBilit…</span>
+      <span className="sr-only">Searching {providerName}…</span>
       <div className="flex flex-col gap-2">
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3 w-64 max-w-full" />
@@ -331,12 +343,12 @@ function SearchResultsSkeleton() {
 }
 
 export function MrBilitSearchForm({
-  providers,
+  provider,
   settings,
   pushConfig,
   onSubmit,
 }: MrBilitSearchFormProps) {
-  const mrbilit = providers.find((provider) => provider.id === "mrbilit");
+  const providerName = provider.displayName;
   const [url, setUrl] = useState("");
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
@@ -359,6 +371,10 @@ export function MrBilitSearchForm({
     null,
   );
   const [createError, setCreateError] = useState("");
+  const [priceMin, setPriceMin] = useState("");
+  const [priceMax, setPriceMax] = useState("");
+  const [includeUnpriced, setIncludeUnpriced] = useState(false);
+  const [sort, setSort] = useState<SearchSort>("departure");
   const [pendingFocus, setPendingFocus] = useState<FocusTarget | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const revisionRef = useRef(0);
@@ -381,14 +397,43 @@ export function MrBilitSearchForm({
     [result],
   );
   const warnings = useMemo(
-    () => (result ? describeSearchWarnings(result.warnings) : null),
+    () => (result ? describeMrBilitWarnings(result.warnings) : null),
     [result],
+  );
+  const minBound = parsePriceBound(priceMin);
+  const maxBound = parsePriceBound(priceMax);
+  let priceError: string | undefined;
+  if (minBound.invalid || maxBound.invalid) {
+    priceError = "Enter whole numbers without a currency or unit.";
+  } else if (
+    minBound.value !== null &&
+    maxBound.value !== null &&
+    minBound.value > maxBound.value
+  ) {
+    priceError = "Minimum price must not exceed maximum price.";
+  }
+  const activePriceFilter = priceError
+    ? false
+    : minBound.value !== null || maxBound.value !== null;
+  const view = useMemo(
+    () =>
+      applySearchView(groups, {
+        priceMin: priceError ? null : minBound.value,
+        priceMax: priceError ? null : maxBound.value,
+        includeUnpriced,
+        sort,
+      }),
+    [groups, priceError, minBound.value, maxBound.value, includeUnpriced, sort],
+  );
+  const selectedOutsideView = countSelectedOutsideView(
+    view.groups,
+    selected,
   );
   const selectedOptions = useMemo(() => {
     const options: SelectedOption[] = [];
     for (const journey of groups) {
-      for (const family of journey.families) {
-        for (const option of family.options) {
+      for (const wagon of journey.wagons) {
+        for (const option of wagon.offerings) {
           const value =
             selected[
               selectionKey(journey.train.journeyKey, option.offeringKey)
@@ -400,10 +445,14 @@ export function MrBilitSearchForm({
     return options;
   }, [groups, selected]);
   const selectedCount = selectedOptions.length;
+  const selectedWagonCount = useMemo(
+    () => groupSelectedWagons(groups, selected).length,
+    [groups, selected],
+  );
   const summaryResult =
     result && result.trains.length > 0 ? result : null;
   const hasSelectableOptions = groups.some(
-    (journey) => journey.optionCount > 0,
+    (journey) => journey.summary.optionCount > 0,
   );
   const currentStep: MonitorCreateStep =
     !hasSelectableOptions || stale ? 1 : selectedCount > 0 ? 3 : 2;
@@ -503,7 +552,7 @@ export function MrBilitSearchForm({
     const currentUrl = url.trim();
     const errors = passengerErrors(adults, children, infants);
     if (!currentUrl) {
-      errors.url = "Paste a MrBilit train search URL.";
+      errors.url = `Paste a ${providerName} train search URL.`;
     } else if (
       urlPassenger.status === "invalid" &&
       passengerSource !== "manual"
@@ -554,6 +603,9 @@ export function MrBilitSearchForm({
     setSearchError(null);
     setCreateError("");
     setSearchExpanded(true);
+    setPriceMin("");
+    setPriceMax("");
+    setIncludeUnpriced(false);
 
     const request: SearchInputs = {
       url: currentUrl,
@@ -563,7 +615,7 @@ export function MrBilitSearchForm({
     };
     try {
       const next = await providersApi.search(
-        "mrbilit",
+        provider.id,
         request,
         controller.signal,
       );
@@ -573,7 +625,7 @@ export function MrBilitSearchForm({
       setSearchExpanded(false);
       setSelected({});
       if (!labelEdited) {
-        setLabel(defaultMonitorLabel(next));
+        setLabel(defaultMrBilitMonitorLabel(next));
       }
       setPendingFocus("results");
     } catch (caught) {
@@ -582,7 +634,7 @@ export function MrBilitSearchForm({
       setLastSearchSignature(null);
       if (isApiError(caught)) {
         setFieldErrors(caught.fields);
-        setSearchError(searchErrorDisplay(caught));
+        setSearchError(searchErrorDisplay(caught, providerName));
         if (
           caught.fields.adults ||
           caught.fields.children ||
@@ -605,7 +657,7 @@ export function MrBilitSearchForm({
           setPendingFocus("search-error");
         }
       } else {
-        setSearchError(searchErrorDisplay(caught));
+        setSearchError(searchErrorDisplay(caught, providerName));
         setPendingFocus("search-error");
       }
     } finally {
@@ -616,21 +668,7 @@ export function MrBilitSearchForm({
     }
   }
 
-  function handleToggle(
-    train: ProviderSearchTrain,
-    option: ProviderSearchClass,
-  ) {
-    if (stale || searching || submitting) return;
-    const key = selectionKey(train.journeyKey, option.offeringKey);
-    setSelected((current) => {
-      const next = { ...current };
-      if (next[key]) {
-        delete next[key];
-      } else {
-        next[key] = toSelectedOption(train, option);
-      }
-      return next;
-    });
+  function clearSelectionErrors() {
     setFieldErrors((current) => {
       if (!current.selections) return current;
       const next = { ...current };
@@ -638,6 +676,68 @@ export function MrBilitSearchForm({
       return next;
     });
     setCreateError("");
+  }
+
+  function handleToggleWagon(
+    journey: SearchJourneyGroup,
+    wagon: SearchWagonGroup,
+  ) {
+    if (stale || searching || submitting) return;
+    const state = wagonSelectionState(
+      journey.train.journeyKey,
+      wagon,
+      selected,
+    );
+    setSelected((current) => {
+      const next = { ...current };
+      for (const offering of wagon.offerings) {
+        const key = selectionKey(
+          journey.train.journeyKey,
+          offering.offeringKey,
+        );
+        if (state === "all") {
+          delete next[key];
+        } else {
+          next[key] = toSelectedOption(journey.train, offering);
+        }
+      }
+      return next;
+    });
+    clearSelectionErrors();
+  }
+
+  function handleToggleOffering(
+    journey: SearchJourneyGroup,
+    option: ProviderSearchClass,
+  ) {
+    if (stale || searching || submitting) return;
+    const key = selectionKey(
+      journey.train.journeyKey,
+      option.offeringKey,
+    );
+    setSelected((current) => {
+      const next = { ...current };
+      if (next[key]) {
+        delete next[key];
+      } else {
+        next[key] = toSelectedOption(journey.train, option);
+      }
+      return next;
+    });
+    clearSelectionErrors();
+  }
+
+  function handleClearPrice() {
+    setPriceMin("");
+    setPriceMax("");
+    setIncludeUnpriced(false);
+  }
+
+  function handleReview() {
+    document
+      .getElementById("monitor-summary")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setPendingFocus("label");
   }
 
   function handleLabelChange(value: string) {
@@ -682,15 +782,15 @@ export function MrBilitSearchForm({
 
     const payload: MonitorCreateRequest = {
       label: label.trim(),
-      originName: resultOriginName(result),
-      destinationName: resultDestinationName(result),
+      originName: mrBilitOriginName(result),
+      destinationName: mrBilitDestinationName(result),
       departureDate: result.departureDate,
       adults: result.passengers.adults,
       children: result.passengers.children,
       infants: result.passengers.infants,
       providers: [
         {
-          providerId: "mrbilit",
+          providerId: provider.id,
           originId: result.route.originId,
           destinationId: result.route.destinationId,
           bookingSlug: result.slug,
@@ -730,25 +830,14 @@ export function MrBilitSearchForm({
     }
   }
 
-  if (!mrbilit) {
-    return (
-      <Alert variant="warning">
-        <AlertTriangle aria-hidden="true" />
-        <AlertTitle>MrBilit is not available</AlertTitle>
-        <AlertDescription>
-          MrBilit is registered only outside production in this build.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-6 pb-24 xl:pb-8">
       <MonitorCreateStepper current={currentStep} />
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="flex min-w-0 flex-col gap-5">
           {searchExpanded || !result ? (
             <MonitorSearchPanel
+              providerName={providerName}
               url={url}
               adults={adults}
               children={children}
@@ -778,25 +867,26 @@ export function MrBilitSearchForm({
           {warnings ? <ProviderNotes warnings={warnings} /> : null}
 
           {searching ? (
-            <SearchResultsSkeleton />
+            <SearchResultsSkeleton providerName={providerName} />
           ) : result && result.trains.length === 0 ? (
-            <div className="flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-4 rounded-lg border bg-card p-5 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-start gap-3">
-                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-muted/40 text-muted-foreground">
-                  <TrainFront className="size-4" aria-hidden="true" />
-                </span>
+                <TrainFront
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0">
                   <h2
                     id="search-results-heading"
                     tabIndex={-1}
-                    className="scroll-mt-24 text-base font-semibold focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+                    className="scroll-mt-24 text-lg font-semibold tracking-tight focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
                   >
                     No trains returned
                   </h2>
                   <p className="mt-1 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-                    MrBilit returned no trains for this route and date. This is
-                    a successful empty result, not a sold-out signal. Try
-                    another date or URL.
+                    {providerName} returned no trains for this route and date.
+                    This is a successful empty result, not a sold-out signal.
+                    Try another date or URL.
                   </p>
                 </div>
               </div>
@@ -810,12 +900,51 @@ export function MrBilitSearchForm({
                 Change search
               </Button>
             </div>
+          ) : result && result.trains.length > 0 && groups.length === 0 ? (
+            <div className="flex flex-col gap-2 rounded-lg border bg-card p-5">
+              <h2
+                id="search-results-heading"
+                tabIndex={-1}
+                className="scroll-mt-24 text-lg font-semibold tracking-tight focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
+              >
+                No fare options returned
+              </h2>
+              <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+                {providerName} returned the train but no usable fare or class
+                offerings. This is not a sold-out verdict. Try another search
+                or date.
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-1 h-9 w-fit"
+                onClick={handleEditSearch}
+              >
+                Change search
+              </Button>
+            </div>
           ) : groups.length > 0 ? (
             <MonitorSearchResults
-              groups={groups}
+              groups={view.groups}
+              allGroups={groups}
+              view={view}
               selected={selected}
               disabled={stale || submitting}
-              onToggle={handleToggle}
+              priceMin={priceMin}
+              priceMax={priceMax}
+              includeUnpriced={includeUnpriced}
+              priceError={priceError}
+              selectedOutsideView={selectedOutsideView}
+              sort={sort}
+              activePriceFilter={activePriceFilter}
+              onPriceMinChange={setPriceMin}
+              onPriceMaxChange={setPriceMax}
+              onIncludeUnpricedChange={setIncludeUnpriced}
+              onClearPrice={handleClearPrice}
+              onSortChange={setSort}
+              onToggleWagon={handleToggleWagon}
+              onToggleOffering={handleToggleOffering}
             />
           ) : null}
         </div>
@@ -838,6 +967,20 @@ export function MrBilitSearchForm({
           onCreate={handleCreate}
         />
       </div>
+
+      {summaryResult && selectedWagonCount > 0 && !stale ? (
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 px-4 py-3 backdrop-blur xl:hidden">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+            <span className="text-xs text-muted-foreground">
+              {selectedWagonCount} wagon
+              {selectedWagonCount === 1 ? "" : "s"} · {selectedCount} selected
+            </span>
+            <Button type="button" onClick={handleReview}>
+              Review &amp; create
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

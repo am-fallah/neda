@@ -21,6 +21,7 @@ import type {
   ProviderInfo,
 } from "@/api/types";
 import { BookingLink } from "@/components/BookingLink";
+import { ProviderPrice } from "@/components/ProviderPrice";
 import { DateDisplay } from "@/components/JalaliDatePicker";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { ErrorState } from "@/components/layout/ErrorState";
@@ -68,6 +69,11 @@ import {
   formatElapsed,
   formatTehranTimestamp,
 } from "@/lib/dates";
+import {
+  groupMonitorSelections,
+  monitorSelectionMeta,
+  monitorSelectionTitle,
+} from "@/lib/searchResults";
 import {
   latestCheck,
   summarizeMonitorChecks,
@@ -207,25 +213,39 @@ function ProviderTarget({
             >
               Selected options
             </h3>
-            <ul className="space-y-1 text-sm">
-              {target.selections.map((selection) => (
-                <li
-                  key={`${selection.journeyKey}:${selection.offeringKey}`}
-                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
-                >
-                  <span className="font-medium">
-                    Train {selection.trainNumber || selection.journeyNativeId || "unknown"}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {selection.wagonName || selection.className || selection.offeringNativeId}
-                  </span>
-                  {selection.departureAt ? (
-                    <span className="text-xs text-muted-foreground">
-                      {formatTehranTimestamp(selection.departureAt)}
+            <ul className="flex flex-col gap-1 text-sm">
+              {groupMonitorSelections(target.selections).map((group) => {
+                const first = group.selections[0];
+                const meta = monitorSelectionMeta(group);
+                return (
+                  <li
+                    key={group.key}
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-3 py-2"
+                  >
+                    <span className="font-medium">
+                      Train{" "}
+                      {group.trainNumber || first.journeyNativeId || "unknown"}
                     </span>
-                  ) : null}
-                </li>
-              ))}
+                    <span className="text-muted-foreground">
+                      {monitorSelectionTitle(group)}
+                    </span>
+                    {meta ? (
+                      <span className="text-xs text-muted-foreground">
+                        {meta}
+                      </span>
+                    ) : null}
+                    <span className="text-xs text-muted-foreground">
+                      {group.selections.length} fare option
+                      {group.selections.length === 1 ? "" : "s"}
+                    </span>
+                    {first.departureAt ? (
+                      <span className="text-xs text-muted-foreground">
+                        {formatTehranTimestamp(first.departureAt)}
+                      </span>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         ) : null}
@@ -377,12 +397,11 @@ function InventoryTable({
               <TableCell className="whitespace-nowrap">
                 {observation.priceAmount !== null &&
                 observation.priceAmount !== undefined ? (
-                  <>
-                    {observation.priceAmount.toLocaleString("en-US")}{" "}
-                    <span className="text-xs text-muted-foreground">
-                      {observation.priceCurrency || ""}
-                    </span>
-                  </>
+                  <ProviderPrice
+                    amount={observation.priceAmount}
+                    currency={observation.priceCurrency}
+                    emptyLabel="—"
+                  />
                 ) : (
                   "—"
                 )}

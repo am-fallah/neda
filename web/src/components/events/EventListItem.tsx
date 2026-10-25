@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { ArrowRight, Clock3 } from "lucide-react";
 import type { EventRecord } from "@/api/types";
+import { ProviderPrice } from "@/components/ProviderPrice";
 import { EventKindBadge } from "@/components/status";
 import { Badge } from "@/components/ui/badge";
 import { formatTehranTimestamp } from "@/lib/dates";
@@ -48,10 +49,10 @@ export function EventListItem({ event }: { event: EventRecord }) {
               <span>{[event.wagonName, event.className].filter(Boolean).join(" · ")}</span>
             ) : null}
             {event.priceAmount !== null && event.priceAmount !== undefined ? (
-              <span>
-                {event.priceAmount.toLocaleString("en-US")}{" "}
-                {event.priceCurrency || ""}
-              </span>
+              <ProviderPrice
+                amount={event.priceAmount}
+                currency={event.priceCurrency}
+              />
             ) : null}
           </>
         ) : (
