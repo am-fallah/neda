@@ -287,6 +287,199 @@ func TestSearchURLPageHTTP504IsNotTimeout(t *testing.T) {
 	}
 }
 
+type pageReadErrorTransport struct{}
+
+func (pageReadErrorTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		Status:        "200 OK",
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+		Body:          pageReadErrorBody{},
+		ContentLength: -1,
+	}, nil
+}
+
+type pageReadErrorBody struct{}
+
+func (pageReadErrorBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (pageReadErrorBody) Close() error             { return nil }
+
+type pageRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f pageRoundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+type pageContextBody struct {
+	ctx     context.Context
+	started chan<- struct{}
+}
+
+func (b *pageContextBody) Read([]byte) (int, error) {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-b.ctx.Done()
+	return 0, b.ctx.Err()
+}
+
+func (b *pageContextBody) Close() error { return nil }
+
+func TestSearchURLPageBodyReadTimeout(t *testing.T) {
+	headersFlushed := make(chan struct{})
+	page := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Error("page response writer does not support flushing")
+			return
+		}
+		flusher.Flush()
+		close(headersFlushed)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(3 * time.Second):
+		}
+	})
+	adapter := searchTestProvider(t, page, validSearchAPI(t, observedFixture(t)))
+	adapter.pageClient.Timeout = 200 * time.Millisecond
+
+	started := time.Now()
+	_, err := adapter.SearchURL(context.Background(), provider.SearchRequest{
+		URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+		Passengers: provider.Passengers{Adults: 1},
+	})
+	if elapsed := time.Since(started); elapsed > 3*time.Second {
+		t.Fatalf("page body-read timeout took %v", elapsed)
+	}
+	select {
+	case <-headersFlushed:
+	case <-time.After(time.Second):
+		t.Fatal("page headers were not flushed")
+	}
+	var providerErr *provider.Error
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %v, want provider error", err)
+	}
+	if providerErr.Kind != provider.ErrTimeout || providerErr.Op != "mrbilit.search.page.read" || providerErr.StatusCode != http.StatusOK {
+		t.Fatalf("error = %+v, want body-read timeout with status 200", providerErr)
+	}
+}
+
+func TestSearchURLPageBodyReadErrorIsNetwork(t *testing.T) {
+	adapter := searchTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected page request", http.StatusInternalServerError)
+	}), validSearchAPI(t, observedFixture(t)))
+	adapter.pageClient.Transport = pageReadErrorTransport{}
+
+	_, err := adapter.SearchURL(context.Background(), provider.SearchRequest{
+		URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+		Passengers: provider.Passengers{Adults: 1},
+	})
+	var providerErr *provider.Error
+	if !errors.As(err, &providerErr) {
+		t.Fatalf("error = %v, want provider error", err)
+	}
+	if providerErr.Kind != provider.ErrNetwork || providerErr.Op != "mrbilit.search.page.read" || providerErr.StatusCode != http.StatusOK {
+		t.Fatalf("error = %+v, want non-timeout body-read error with status 200", providerErr)
+	}
+}
+
+func TestSearchURLPageCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan struct{}, 1)
+	adapter := searchTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected page request", http.StatusInternalServerError)
+	}), validSearchAPI(t, observedFixture(t)))
+	adapter.pageClient.Transport = pageRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    http.StatusOK,
+			Header:        http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:          &pageContextBody{ctx: ctx, started: started},
+			ContentLength: -1,
+		}, nil
+	})
+	adapter.pageClient.Timeout = 5 * time.Second
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := adapter.SearchURL(ctx, provider.SearchRequest{
+			URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+			Passengers: provider.Passengers{Adults: 1},
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("page body read did not start")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		var providerErr *provider.Error
+		if !errors.As(err, &providerErr) {
+			t.Fatalf("error = %v, want provider error", err)
+		}
+		if providerErr.Kind != provider.ErrCanceled || providerErr.Op != "mrbilit.http" || providerErr.StatusCode != 0 {
+			t.Fatalf("error = %+v, want caller cancellation", providerErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SearchURL did not return after cancellation")
+	}
+}
+
+func TestSearchURLPageCallerDeadline(t *testing.T) {
+	started := make(chan struct{}, 1)
+	adapter := searchTestProvider(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unexpected page request", http.StatusInternalServerError)
+	}), validSearchAPI(t, observedFixture(t)))
+	adapter.pageClient.Timeout = 5 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	adapter.pageClient.Transport = pageRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			Status:        "200 OK",
+			StatusCode:    http.StatusOK,
+			Header:        http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:          &pageContextBody{ctx: ctx, started: started},
+			ContentLength: -1,
+		}, nil
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := adapter.SearchURL(ctx, provider.SearchRequest{
+			URL:        "https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-14",
+			Passengers: provider.Passengers{Adults: 1},
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("page body read did not start")
+	}
+	select {
+	case err := <-errCh:
+		var providerErr *provider.Error
+		if !errors.As(err, &providerErr) {
+			t.Fatalf("error = %v, want provider error", err)
+		}
+		if providerErr.Kind != provider.ErrTimeout || providerErr.Op != "mrbilit.http" || providerErr.StatusCode != 0 {
+			t.Fatalf("error = %+v, want caller deadline timeout", providerErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SearchURL did not return after caller deadline")
+	}
+}
+
 func TestSearchURLRouteMismatchIsInvalid(t *testing.T) {
 	fixture := strings.Replace(string(observedFixture(t)), `"from": 219`, `"from": 220`, 1)
 	adapter := searchTestProvider(t,

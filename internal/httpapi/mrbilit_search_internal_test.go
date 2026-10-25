@@ -10,7 +10,7 @@ import (
 	"github.com/am-fallah/neda/internal/provider"
 )
 
-func TestSearchErrorLogIncludesUpstreamStatus(t *testing.T) {
+func TestSearchErrorMappingAndLog(t *testing.T) {
 	server, logs := testServer(t, Config{}, &fakeReadiness{})
 	cases := []struct {
 		name         string
@@ -18,14 +18,16 @@ func TestSearchErrorLogIncludesUpstreamStatus(t *testing.T) {
 		wantStatus   int
 		wantCode     string
 		wantKind     string
+		wantOp       string
 		wantUpstream float64
 	}{
 		{
-			name:         "client timeout",
+			name:         "pre-header timeout",
 			err:          &provider.Error{Kind: provider.ErrTimeout, Op: "mrbilit.search.page"},
 			wantStatus:   http.StatusGatewayTimeout,
 			wantCode:     "provider_timeout",
 			wantKind:     "timeout",
+			wantOp:       "mrbilit.search.page",
 			wantUpstream: 0,
 		},
 		{
@@ -34,7 +36,44 @@ func TestSearchErrorLogIncludesUpstreamStatus(t *testing.T) {
 			wantStatus:   http.StatusBadGateway,
 			wantCode:     "provider_error",
 			wantKind:     "http_status",
+			wantOp:       "mrbilit.search.page",
 			wantUpstream: http.StatusGatewayTimeout,
+		},
+		{
+			name:         "body-read timeout",
+			err:          &provider.Error{Kind: provider.ErrTimeout, Op: "mrbilit.search.page.read", StatusCode: http.StatusOK},
+			wantStatus:   http.StatusGatewayTimeout,
+			wantCode:     "provider_timeout",
+			wantKind:     "timeout",
+			wantOp:       "mrbilit.search.page.read",
+			wantUpstream: http.StatusOK,
+		},
+		{
+			name:         "body-read network error",
+			err:          &provider.Error{Kind: provider.ErrNetwork, Op: "mrbilit.search.page.read", StatusCode: http.StatusOK},
+			wantStatus:   http.StatusBadGateway,
+			wantCode:     "provider_error",
+			wantKind:     "network",
+			wantOp:       "mrbilit.search.page.read",
+			wantUpstream: http.StatusOK,
+		},
+		{
+			name:         "caller deadline",
+			err:          &provider.Error{Kind: provider.ErrTimeout, Op: "mrbilit.http"},
+			wantStatus:   http.StatusGatewayTimeout,
+			wantCode:     "provider_timeout",
+			wantKind:     "timeout",
+			wantOp:       "mrbilit.http",
+			wantUpstream: 0,
+		},
+		{
+			name:         "caller cancellation",
+			err:          &provider.Error{Kind: provider.ErrCanceled, Op: "mrbilit.http"},
+			wantStatus:   http.StatusRequestTimeout,
+			wantCode:     "provider_canceled",
+			wantKind:     "canceled",
+			wantOp:       "mrbilit.http",
+			wantUpstream: 0,
 		},
 	}
 	for _, tc := range cases {
@@ -63,8 +102,8 @@ func TestSearchErrorLogIncludesUpstreamStatus(t *testing.T) {
 			if record["kind"] != tc.wantKind {
 				t.Fatalf("log kind = %v, want %q", record["kind"], tc.wantKind)
 			}
-			if record["op"] != "mrbilit.search.page" {
-				t.Fatalf("log op = %v, want mrbilit.search.page", record["op"])
+			if record["op"] != tc.wantOp {
+				t.Fatalf("log op = %v, want %s", record["op"], tc.wantOp)
 			}
 			upstream, ok := record["upstream_status"].(float64)
 			if !ok || upstream != tc.wantUpstream {
