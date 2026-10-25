@@ -3,81 +3,95 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Neda Design System — see design-system/neda/MASTER.md.
+ * Tokens are semantic; route components must not hardcode palette values.
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.002 90);
-  --foreground: oklch(0.21 0.006 285);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 285);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 285);
-  --primary: oklch(0.45 0.09 180);
-  --primary-foreground: oklch(0.985 0.002 90);
-  --secondary: oklch(0.96 0.004 95);
-  --secondary-foreground: oklch(0.31 0.008 285);
-  --muted: oklch(0.96 0.004 95);
-  --muted-foreground: oklch(0.5 0.01 285);
-  --accent: oklch(0.95 0.02 180);
-  --accent-foreground: oklch(0.3 0.05 180);
-  --destructive: oklch(0.55 0.2 25);
-  --destructive-foreground: oklch(0.985 0.002 90);
-  --border: oklch(0.9 0.005 95);
-  --input: oklch(0.9 0.005 95);
-  --ring: oklch(0.55 0.08 180);
-  --success: oklch(0.5 0.13 155);
-  --success-foreground: oklch(0.985 0.002 90);
-  --warning: oklch(0.68 0.14 75);
-  --warning-foreground: oklch(0.24 0.03 75);
-  --info: oklch(0.55 0.1 245);
+  --background: #f6f5f1;
+  --foreground: #19211f;
+  --card: #ffffff;
+  --card-foreground: #19211f;
+  --popover: #ffffff;
+  --popover-foreground: #19211f;
+  --primary: #0f5b50;
+  --primary-foreground: #f7fbf9;
+  --secondary: #ecefea;
+  --secondary-foreground: #26322e;
+  --muted: #eff1ec;
+  --muted-foreground: #5a6561;
+  --accent: #e2efe9;
+  --accent-foreground: #0b4a41;
+  --destructive: #b42318;
+  --destructive-foreground: #ffffff;
+  --border: #d7ded8;
+  --input: #7e8f87;
+  --ring: #0f5b50;
+  --success: #1b6b3a;
+  --success-foreground: #ffffff;
+  --warning: #8a5a00;
+  --warning-foreground: #3f2a00;
+  --info: #1f5fa8;
+  --info-foreground: #ffffff;
+  --rail: #b45f16;
+  --surface-raised: #fbfcfa;
+  --shadow-xs: 0 1px 2px rgb(16 24 20 / 0.04);
+  --shadow-overlay: 0 18px 48px rgb(16 24 20 / 0.16);
+  --motion-fast: 120ms;
+  --motion-base: 180ms;
+  --motion-surface: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .dark {
-  --background: oklch(0.17 0.005 285);
-  --foreground: oklch(0.95 0.002 90);
-  --card: oklch(0.21 0.006 285);
-  --card-foreground: oklch(0.95 0.002 90);
-  --popover: oklch(0.22 0.006 285);
-  --popover-foreground: oklch(0.95 0.002 90);
-  --primary: oklch(0.72 0.1 180);
-  --primary-foreground: oklch(0.18 0.02 180);
-  --secondary: oklch(0.27 0.006 285);
-  --secondary-foreground: oklch(0.92 0.003 90);
-  --muted: oklch(0.27 0.006 285);
-  --muted-foreground: oklch(0.72 0.008 285);
-  --accent: oklch(0.3 0.03 180);
-  --accent-foreground: oklch(0.9 0.02 180);
-  --destructive: oklch(0.65 0.18 25);
-  --destructive-foreground: oklch(0.16 0.01 25);
-  --border: oklch(0.32 0.006 285);
-  --input: oklch(0.34 0.006 285);
-  --ring: oklch(0.65 0.08 180);
-  --success: oklch(0.72 0.13 155);
-  --success-foreground: oklch(0.18 0.03 155);
-  --warning: oklch(0.8 0.13 80);
-  --warning-foreground: oklch(0.2 0.03 80);
-  --info: oklch(0.72 0.1 245);
+  --background: #101513;
+  --foreground: #e9efeb;
+  --card: #171d1b;
+  --card-foreground: #e9efeb;
+  --popover: #1a211e;
+  --popover-foreground: #e9efeb;
+  --primary: #72cdb8;
+  --primary-foreground: #06231e;
+  --secondary: #232c28;
+  --secondary-foreground: #e2eae6;
+  --muted: #232c28;
+  --muted-foreground: #a6b2ac;
+  --accent: #1d3832;
+  --accent-foreground: #b5e6d9;
+  --destructive: #f27a6d;
+  --destructive-foreground: #2a0a06;
+  --border: #2c3733;
+  --input: #5e6e66;
+  --ring: #83d6c4;
+  --success: #6aca8e;
+  --success-foreground: #06210f;
+  --warning: #f0c36a;
+  --warning-foreground: #2a1b00;
+  --info: #8bbdf4;
+  --info-foreground: #071c33;
+  --rail: #e39b5b;
+  --surface-raised: #1b2320;
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 0.18);
+  --shadow-overlay: 0 18px 48px rgb(0 0 0 / 0.45);
 }
 
 /*
- * The New Monitor route uses a neutral palette for both its content and the
- * shared application shell. The body class is applied only while that route is
- * mounted, so other pages keep the global theme. Semantic status colors
- * (success, warning, destructive) remain available for availability and
- * delivery meaning.
+ * Approved page-scoped neutral workflow (WEB-010..WEB-013). Semantic status
+ * colors stay available for availability, prices, and delivery meaning.
  */
 .monitor-create,
 body.monitor-create-page {
-  --radius: 0.625rem;
   --primary: var(--foreground);
   --primary-foreground: var(--background);
   --accent: var(--secondary);
   --accent-foreground: var(--foreground);
-  --ring: oklch(0.55 0 0);
+  --ring: #5a6561;
 }
 
 .dark .monitor-create,
 .dark body.monitor-create-page {
-  --ring: oklch(0.72 0 0);
+  --ring: #a6b2ac;
 }
 
 .monitor-create input[type="number"] {
@@ -116,13 +130,21 @@ body.monitor-create-page {
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-rail: var(--rail);
+  --color-surface-raised: var(--surface-raised);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --font-sans:
-    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+    "Fira Sans", "Vazirmatn Variable", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:
+    "Fira Code", "Vazirmatn Variable", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+  --font-display:
+    "Fira Sans", "Vazirmatn Variable", ui-sans-serif, system-ui, sans-serif;
 }
 
 @layer base {
@@ -132,6 +154,7 @@ body.monitor-create-page {
 
   html {
     scroll-behavior: smooth;
+    scroll-padding-top: 5.5rem;
   }
 
   body {
@@ -139,13 +162,45 @@ body.monitor-create-page {
     background-color: var(--background);
     color: var(--foreground);
     font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
+    font-synthesis-weight: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+    letter-spacing: -0.015em;
+  }
+
+  bdi,
+  [dir="rtl"] {
+    font-family: "Vazirmatn Variable", var(--font-sans);
+  }
+
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
   }
 
   :focus-visible {
     outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: color-mix(in oklab, var(--muted-foreground) 82%, transparent);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--muted-foreground) 35%, transparent)
+      transparent;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -157,5 +212,68 @@ body.monitor-create-page {
       scroll-behavior: auto !important;
       transition-duration: 0.01ms !important;
     }
+  }
+}
+
+@layer components {
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    line-height: 1.4;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-foreground);
+  }
+
+  .brand-rule {
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--rail) 0 14px,
+      transparent 14px 20px
+    );
+  }
+
+  .status-dot {
+    position: relative;
+    display: inline-block;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--success);
+  }
+
+  .status-dot::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: inherit;
+    border: 1px solid currentColor;
+    opacity: 0.35;
+    color: var(--success);
+  }
+
+  .surface-grid {
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--border) 65%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--border) 65%, transparent) 1px,
+        transparent 1px
+      );
+    background-size: 40px 40px;
+  }
+
+  .focus-inset {
+    outline: none;
+  }
+
+  .focus-inset:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: -2px;
   }
 }

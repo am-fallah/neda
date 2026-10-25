@@ -7,6 +7,7 @@ import type {
   MonitorDetail,
   ProviderInfo,
 } from "@/api/types";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorState } from "@/components/layout/ErrorState";
 import { LoadingState } from "@/components/layout/LoadingState";
 import { PageHeader } from "@/components/layout/PageHeader";
@@ -46,8 +47,19 @@ export function MonitorEditPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: "Monitors", to: "/monitors" },
+          {
+            label: data?.monitor.label ?? "Monitor",
+            to: `/monitors/${encodeURIComponent(id)}`,
+          },
+          { label: "Edit" },
+        ]}
+      />
       <PageHeader
+        eyebrow="Monitor configuration"
         title={data ? `Edit ${data.monitor.label}` : "Edit monitor"}
         description="Changing the route, date, passengers, or providers resets availability state. Label-only changes do not."
       />

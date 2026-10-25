@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { AlertTriangle, ChevronRight, FlaskConical } from "lucide-react";
+import { AlertTriangle, FlaskConical } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { monitorsApi, providersApi, pushApi, settingsApi } from "@/api/endpoints";
@@ -9,6 +9,7 @@ import type {
   PushConfig,
   Settings,
 } from "@/api/types";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { ErrorState } from "@/components/layout/ErrorState";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { MonitorForm } from "@/components/monitors/MonitorForm";
@@ -127,39 +128,20 @@ export function MonitorCreatePage() {
   const testProviders = providers.filter((provider) => provider.testOnly);
 
   return (
-    <div className="monitor-create flex flex-col gap-6 pb-8">
-      <div className="flex flex-col gap-3">
-        <nav aria-label="Breadcrumb">
-          <ol className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <li>
-              <Link
-                to="/monitors"
-                className="inline-flex rounded-sm py-1 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:outline-none"
-              >
-                Monitors
-              </Link>
-            </li>
-            <li aria-hidden="true">
-              <ChevronRight className="size-3" />
-            </li>
-            <li>
-              <span aria-current="page" className="font-medium text-foreground">
-                New monitor
-              </span>
-            </li>
-          </ol>
-        </nav>
-        <PageHeader
-          title="New monitor"
-          titleClassName="text-[1.75rem] leading-9 tracking-[-0.025em]"
-          description="Search the selected provider, choose the wagons or fare options to watch, and confirm the monitor."
-          actions={
-            <Button asChild variant="outline">
-              <Link to="/monitors">Cancel</Link>
-            </Button>
-          }
-        />
-      </div>
+    <div className="monitor-create flex flex-col gap-5 pb-8">
+      <Breadcrumbs
+        items={[{ label: "Monitors", to: "/monitors" }, { label: "New monitor" }]}
+      />
+      <PageHeader
+        eyebrow="Monitor setup"
+        title="New monitor"
+        description="Search the selected provider, choose the wagons or fare options to watch, and confirm the monitor."
+        actions={
+          <Button asChild variant="outline">
+            <Link to="/monitors">Cancel</Link>
+          </Button>
+        }
+      />
 
       {loading ? (
         <MonitorCreateSkeleton />

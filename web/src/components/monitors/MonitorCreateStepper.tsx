@@ -2,9 +2,9 @@ import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const STEPS = [
-  { id: 1, label: "Search" },
-  { id: 2, label: "Select" },
-  { id: 3, label: "Confirm" },
+  { id: 1, label: "Search", hint: "Find trains" },
+  { id: 2, label: "Select", hint: "Choose wagons" },
+  { id: 3, label: "Confirm", hint: "Review & create" },
 ] as const;
 
 export type MonitorCreateStep = (typeof STEPS)[number]["id"];
@@ -17,9 +17,9 @@ export function MonitorCreateStepper({
   return (
     <ol
       aria-label="Monitor creation progress"
-      className="flex w-full items-center gap-2 sm:gap-2.5"
+      className="grid w-full grid-cols-3 gap-2 rounded-lg border bg-card p-2 shadow-xs"
     >
-      {STEPS.map((step, index) => {
+      {STEPS.map((step) => {
         const status =
           step.id < current
             ? "complete"
@@ -31,18 +31,18 @@ export function MonitorCreateStepper({
             key={step.id}
             aria-current={status === "current" ? "step" : undefined}
             className={cn(
-              "flex min-w-0 items-center gap-2",
-              index < STEPS.length - 1 ? "flex-1" : "shrink-0",
+              "relative flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5",
+              status === "current" && "bg-accent/70",
             )}
           >
             <span
               aria-hidden="true"
               className={cn(
-                "flex size-5 shrink-0 items-center justify-center rounded-full border text-[0.65rem] font-semibold transition-colors",
+                "flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[0.65rem] font-semibold transition-colors",
                 status === "current" &&
                   "border-primary bg-primary text-primary-foreground",
                 status === "complete" &&
-                  "border-primary/20 bg-primary/5 text-primary",
+                  "border-primary/25 bg-primary/10 text-primary",
                 status === "upcoming" &&
                   "border-border bg-background text-muted-foreground",
               )}
@@ -53,29 +53,26 @@ export function MonitorCreateStepper({
                 step.id
               )}
             </span>
-            <span
-              className={cn(
-                "truncate text-[0.8rem] font-medium",
-                status === "current" && "text-foreground",
-                status === "complete" && "text-muted-foreground",
-                status === "upcoming" && "text-muted-foreground",
-              )}
-            >
-              <span className="sr-only">
-                {status === "complete"
-                  ? "Completed: "
-                  : status === "current"
-                    ? "Current step: "
-                    : "Upcoming: "}
-              </span>
-              {step.label}
-            </span>
-            {index < STEPS.length - 1 ? (
+            <span className="min-w-0">
               <span
-                aria-hidden="true"
-                className="h-px min-w-2 flex-1 bg-border"
-              />
-            ) : null}
+                className={cn(
+                  "block truncate text-[0.8rem] font-medium",
+                  status === "upcoming" && "text-muted-foreground",
+                )}
+              >
+                <span className="sr-only">
+                  {status === "complete"
+                    ? "Completed: "
+                    : status === "current"
+                      ? "Current step: "
+                      : "Upcoming: "}
+                </span>
+                {step.label}
+              </span>
+              <span className="hidden truncate text-[0.65rem] text-muted-foreground sm:block">
+                {step.hint}
+              </span>
+            </span>
           </li>
         );
       })}
