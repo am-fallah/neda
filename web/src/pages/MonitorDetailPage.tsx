@@ -23,6 +23,7 @@ import type {
 import { BookingLink } from "@/components/BookingLink";
 import { ProviderPrice } from "@/components/ProviderPrice";
 import { DateDisplay } from "@/components/JalaliDatePicker";
+import { Breadcrumbs } from "@/components/layout/Breadcrumbs";
 import { EmptyState } from "@/components/layout/EmptyState";
 import { ErrorState } from "@/components/layout/ErrorState";
 import { LoadingState } from "@/components/layout/LoadingState";
@@ -64,6 +65,7 @@ import {
 } from "@/components/ui/table";
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   formatDurationMs,
   formatElapsed,
@@ -106,10 +108,10 @@ function ProviderTarget({
   const summaryVariant = alertVariantForTone(summary.tone);
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="gap-0 overflow-hidden py-0">
+      <CardHeader className="border-b bg-surface-raised/55 px-4 py-3 sm:px-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <CardTitle className="flex flex-wrap items-center gap-2">
               {provider?.displayName ?? target.providerId}
               {provider?.testOnly ? <TestOnlyBadge /> : null}
@@ -117,9 +119,18 @@ function ProviderTarget({
                 {target.active ? "Active target" : "Removed target"}
               </Badge>
             </CardTitle>
-            <CardDescription>
-              Provider ID <code className="font-mono">{target.providerId}</code>{" "}
-              · config version {target.configVersion}
+            <CardDescription className="mt-1.5 flex flex-wrap items-center gap-1.5 font-mono text-[0.65rem]">
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                Provider {target.providerId}
+              </span>
+              <span className="rounded bg-muted px-1.5 py-0.5">
+                Config v{target.configVersion}
+              </span>
+              {target.lastAttemptAt ? (
+                <span className="text-muted-foreground">
+                  Last attempt {formatTehranTimestamp(target.lastAttemptAt)}
+                </span>
+              ) : null}
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -139,7 +150,7 @@ function ProviderTarget({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-5 px-4 py-4 sm:px-5">
         {!target.active ? (
           <Alert>
             <AlertTriangle aria-hidden="true" />
@@ -213,14 +224,14 @@ function ProviderTarget({
             >
               Selected options
             </h3>
-            <ul className="flex flex-col gap-1 text-sm">
+            <ul className="flex flex-col divide-y overflow-hidden rounded-lg border bg-card text-sm">
               {groupMonitorSelections(target.selections).map((group) => {
                 const first = group.selections[0];
                 const meta = monitorSelectionMeta(group);
                 return (
                   <li
                     key={group.key}
-                    className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-3 py-2"
+                    className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2.5"
                   >
                     <span className="font-medium">
                       Train{" "}
@@ -234,14 +245,17 @@ function ProviderTarget({
                         {meta}
                       </span>
                     ) : null}
-                    <span className="text-xs text-muted-foreground">
+                    <span className="ml-auto font-mono text-[0.65rem] text-muted-foreground">
                       {group.selections.length} fare option
                       {group.selections.length === 1 ? "" : "s"}
                     </span>
                     {first.departureAt ? (
-                      <span className="text-xs text-muted-foreground">
+                      <time
+                        dateTime={first.departureAt}
+                        className="w-full font-mono text-[0.65rem] text-muted-foreground"
+                      >
                         {formatTehranTimestamp(first.departureAt)}
-                      </span>
+                      </time>
                     ) : null}
                   </li>
                 );
@@ -314,87 +328,74 @@ function ProviderTarget({
   );
 }
 
-function InventoryTable({
+function InventoryCards({
   observations,
 }: {
   observations: InventoryObservation[];
 }) {
   return (
-    <div className="space-y-2">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>State</TableHead>
-            <TableHead>Journey</TableHead>
-            <TableHead>Offering</TableHead>
-            <TableHead>Departure</TableHead>
-            <TableHead>Price</TableHead>
-            <TableHead>Observed</TableHead>
-            <TableHead>Booking</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {observations.map((observation) => (
-            <TableRow key={`${observation.journeyKey}:${observation.offeringKey}`}>
-              <TableCell>
-                <div className="space-y-1">
-                  <ObservationStateBadge
-                    state={observation.state}
-                    missing={observation.missing}
-                  />
-                  {observation.lastReason ? (
-                    <p className="font-mono text-[0.7rem] text-muted-foreground">
-                      {observation.lastReason}
-                    </p>
-                  ) : null}
-                  {observation.missing ? (
-                    <p className="max-w-44 text-[0.7rem] text-muted-foreground">
-                      Not returned by the latest check; availability unknown.
-                    </p>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell>
-                <p className="font-medium">
-                  {observation.trainNumber
-                    ? `Train ${observation.trainNumber}`
-                    : "Train unknown"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {[observation.operator, observation.originName, observation.destinationName]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-                {observation.lastCapacity !== null &&
-                observation.lastCapacity !== undefined ? (
-                  <p className="text-xs text-muted-foreground">
-                    Capacity {observation.lastCapacity}
-                  </p>
-                ) : null}
-              </TableCell>
-              <TableCell>
-                <p>{observation.wagonName || "Wagon unknown"}</p>
-                <p className="text-xs text-muted-foreground">
-                  {observation.className || "Class unknown"}
-                </p>
-              </TableCell>
-              <TableCell className="min-w-44">
+    <ul className="space-y-2" aria-label="Observed inventory">
+      {observations.map((observation) => (
+        <li
+          key={`${observation.journeyKey}:${observation.offeringKey}`}
+          className="rounded-lg border bg-surface-raised p-3.5"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="font-medium">
+                {observation.trainNumber
+                  ? `Train ${observation.trainNumber}`
+                  : "Train unknown"}
+              </p>
+              <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1 text-xs text-muted-foreground">
+                <span>{observation.operator || "Operator unknown"}</span>
+                <span aria-hidden="true">·</span>
+                <bdi dir="auto" className="min-w-0 break-words">
+                  {observation.originName || "?"}
+                </bdi>
+                <span aria-hidden="true">→</span>
+                <bdi dir="auto" className="min-w-0 break-words">
+                  {observation.destinationName || "?"}
+                </bdi>
+              </p>
+            </div>
+            <ObservationStateBadge
+              state={observation.state}
+              missing={observation.missing}
+            />
+          </div>
+
+          <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-sm">
+            <bdi dir="auto">{observation.wagonName || "Wagon unknown"}</bdi>
+            <span aria-hidden="true" className="text-muted-foreground">
+              ·
+            </span>
+            <bdi dir="auto" className="text-muted-foreground">
+              {observation.className || "Class unknown"}
+            </bdi>
+          </p>
+
+          <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 text-xs">
+            <div className="min-w-0">
+              <dt className="eyebrow text-[0.58rem]">Departure</dt>
+              <dd className="mt-0.5">
                 {observation.departureAt ? (
                   <time dateTime={observation.departureAt}>
                     {formatTehranTimestamp(observation.departureAt)}
                   </time>
                 ) : (
-                  <span className="text-muted-foreground">
-                    Time unavailable
-                  </span>
+                  "Time unavailable"
                 )}
                 {observation.arrivalAt ? (
-                  <p className="text-xs text-muted-foreground">
+                  <span className="mt-0.5 block text-muted-foreground">
                     Arrives {formatTehranTimestamp(observation.arrivalAt)}
-                  </p>
+                  </span>
                 ) : null}
-              </TableCell>
-              <TableCell className="whitespace-nowrap">
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="eyebrow text-[0.58rem]">Price</dt>
+              <dd className="mt-0.5">
                 {observation.priceAmount !== null &&
                 observation.priceAmount !== undefined ? (
                   <ProviderPrice
@@ -405,22 +406,164 @@ function InventoryTable({
                 ) : (
                   "—"
                 )}
-              </TableCell>
-              <TableCell className="min-w-40">
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="eyebrow text-[0.58rem]">Observed</dt>
+              <dd className="mt-0.5">
                 <time dateTime={observation.lastObservedAt}>
                   {formatTehranTimestamp(observation.lastObservedAt)}
                 </time>
-                <p className="text-xs text-muted-foreground">
+                <span className="mt-0.5 block text-muted-foreground">
                   {formatElapsed(observation.lastObservedAt)}
-                </p>
-              </TableCell>
-              <TableCell>
+                </span>
+              </dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="eyebrow text-[0.58rem]">Booking</dt>
+              <dd className="mt-0.5">
                 <BookingLink url={observation.bookingUrl} compact />
-              </TableCell>
+              </dd>
+            </div>
+            {observation.lastCapacity !== null &&
+            observation.lastCapacity !== undefined ? (
+              <div>
+                <dt className="eyebrow text-[0.58rem]">Capacity</dt>
+                <dd className="mt-0.5 font-mono tabular-nums">
+                  {observation.lastCapacity}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+
+          {observation.lastReason ? (
+            <p className="mt-2 font-mono text-[0.65rem] break-all text-muted-foreground">
+              {observation.lastReason}
+            </p>
+          ) : null}
+          {observation.missing ? (
+            <p className="mt-1 text-[0.7rem] leading-relaxed text-warning-foreground dark:text-warning">
+              Not returned by the latest check; availability unknown.
+            </p>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function InventoryTable({
+  observations,
+}: {
+  observations: InventoryObservation[];
+}) {
+  const wide = useMediaQuery("(min-width: 1280px)");
+  return (
+    <div className="space-y-2">
+      {wide ? (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>State</TableHead>
+              <TableHead>Journey</TableHead>
+              <TableHead>Offering</TableHead>
+              <TableHead>Departure</TableHead>
+              <TableHead>Price</TableHead>
+              <TableHead>Observed</TableHead>
+              <TableHead>Booking</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {observations.map((observation) => (
+              <TableRow key={`${observation.journeyKey}:${observation.offeringKey}`}>
+                <TableCell>
+                  <div className="space-y-1">
+                    <ObservationStateBadge
+                      state={observation.state}
+                      missing={observation.missing}
+                    />
+                    {observation.lastReason ? (
+                      <p className="font-mono text-[0.7rem] text-muted-foreground">
+                        {observation.lastReason}
+                      </p>
+                    ) : null}
+                    {observation.missing ? (
+                      <p className="max-w-44 text-[0.7rem] text-muted-foreground">
+                        Not returned by the latest check; availability unknown.
+                      </p>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <p className="font-medium">
+                    {observation.trainNumber
+                      ? `Train ${observation.trainNumber}`
+                      : "Train unknown"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {[observation.operator, observation.originName, observation.destinationName]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  {observation.lastCapacity !== null &&
+                  observation.lastCapacity !== undefined ? (
+                    <p className="text-xs text-muted-foreground">
+                      Capacity {observation.lastCapacity}
+                    </p>
+                  ) : null}
+                </TableCell>
+                <TableCell>
+                  <p>{observation.wagonName || "Wagon unknown"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {observation.className || "Class unknown"}
+                  </p>
+                </TableCell>
+                <TableCell className="min-w-44">
+                  {observation.departureAt ? (
+                    <time dateTime={observation.departureAt}>
+                      {formatTehranTimestamp(observation.departureAt)}
+                    </time>
+                  ) : (
+                    <span className="text-muted-foreground">
+                      Time unavailable
+                    </span>
+                  )}
+                  {observation.arrivalAt ? (
+                    <p className="text-xs text-muted-foreground">
+                      Arrives {formatTehranTimestamp(observation.arrivalAt)}
+                    </p>
+                  ) : null}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {observation.priceAmount !== null &&
+                  observation.priceAmount !== undefined ? (
+                    <ProviderPrice
+                      amount={observation.priceAmount}
+                      currency={observation.priceCurrency}
+                      emptyLabel="—"
+                    />
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+                <TableCell className="min-w-40">
+                  <time dateTime={observation.lastObservedAt}>
+                    {formatTehranTimestamp(observation.lastObservedAt)}
+                  </time>
+                  <p className="text-xs text-muted-foreground">
+                    {formatElapsed(observation.lastObservedAt)}
+                  </p>
+                </TableCell>
+                <TableCell>
+                  <BookingLink url={observation.bookingUrl} compact />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      ) : (
+        <InventoryCards observations={observations} />
+      )}
       <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         <summary className="cursor-pointer font-medium">
           Diagnostic identifiers
@@ -437,7 +580,63 @@ function InventoryTable({
   );
 }
 
+function CheckRunCards({ checks }: { checks: CheckRun[] }) {
+  return (
+    <ul className="space-y-2" aria-label="Recent checks">
+      {checks.map((check) => (
+        <li key={check.id} className="rounded-lg border bg-surface-raised p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CheckOutcomeBadge outcome={check.outcome} />
+            <time
+              dateTime={check.startedAt}
+              className="font-mono text-[0.65rem] text-muted-foreground"
+            >
+              {formatTehranTimestamp(check.startedAt)}
+            </time>
+          </div>
+          <dl className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-2 border-t pt-2.5 text-xs">
+            <div>
+              <dt className="eyebrow text-[0.58rem]">Duration</dt>
+              <dd className="mt-0.5 font-mono tabular-nums">
+                {formatDurationMs(check.durationMs)}
+              </dd>
+            </div>
+            <div>
+              <dt className="eyebrow text-[0.58rem]">Result</dt>
+              <dd className="mt-0.5">
+                {check.reservableCount} reservable · {check.notReservableCount} not
+                · {check.unknownCount} unknown
+              </dd>
+            </div>
+            <div>
+              <dt className="eyebrow text-[0.58rem]">Journeys</dt>
+              <dd className="mt-0.5 font-mono tabular-nums">
+                {check.journeyCount}
+              </dd>
+            </div>
+            <div>
+              <dt className="eyebrow text-[0.58rem]">Offerings</dt>
+              <dd className="mt-0.5 font-mono tabular-nums">
+                {check.offeringCount}
+              </dd>
+            </div>
+            <div className="col-span-2">
+              <dt className="eyebrow text-[0.58rem]">Error</dt>
+              <dd className="mt-0.5 font-mono text-[0.7rem] break-all text-muted-foreground">
+                {check.errorKind || "—"}
+                {check.httpStatus ? ` · HTTP ${check.httpStatus}` : ""}
+              </dd>
+            </div>
+          </dl>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function CheckRunTable({ checks }: { checks: CheckRun[] }) {
+  const wide = useMediaQuery("(min-width: 1280px)");
+  if (!wide) return <CheckRunCards checks={checks} />;
   return (
     <Table>
       <TableHeader>
@@ -588,14 +787,22 @@ export function MonitorDetailPage() {
   const activeTargets = monitor.providers.filter((target) => target.active);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      <Breadcrumbs
+        items={[
+          { label: "Monitors", to: "/monitors" },
+          { label: monitor.label },
+        ]}
+      />
       <PageHeader
-        eyebrow="Monitor"
+        eyebrow="Monitor detail"
         title={monitor.label}
         description={
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span>
-              {monitor.originName} → {monitor.destinationName}
+              <bdi dir="auto">{monitor.originName}</bdi>
+              <span aria-hidden="true"> → </span>
+              <bdi dir="auto">{monitor.destinationName}</bdi>
             </span>
             <span aria-hidden="true">·</span>
             <DateDisplay value={monitor.departureDate} />
@@ -620,7 +827,11 @@ export function MonitorDetailPage() {
               />
               {refreshing ? "Refreshing…" : "Refresh"}
             </Button>
-            <Button asChild variant="outline" size="sm">
+            <Button
+              asChild
+              variant={monitor.status === "paused" ? "outline" : "default"}
+              size="sm"
+            >
               <Link to={`/monitors/${encodeURIComponent(id)}/edit`}>Edit</Link>
             </Button>
             {monitor.status === "active" ? (
@@ -651,7 +862,7 @@ export function MonitorDetailPage() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="text-destructive"
+                  className="text-destructive hover:bg-destructive/5 hover:text-destructive"
                   disabled={busyAction !== null}
                 >
                   <Trash2 aria-hidden="true" />
@@ -695,18 +906,23 @@ export function MonitorDetailPage() {
         />
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle>Status</CardTitle>
+      <Card className="gap-0 overflow-hidden py-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-surface-raised/55 px-4 py-3 sm:px-5">
+          <div className="flex flex-wrap items-center gap-2">
             <MonitorStatusBadge status={monitor.status} />
+            <Badge variant="outline">
+              {activeTargets.length} active provider
+              {activeTargets.length === 1 ? "" : "s"}
+            </Badge>
+            <Badge variant="outline">
+              {totalPassengers} passenger{totalPassengers === 1 ? "" : "s"}
+            </Badge>
           </div>
-          <CardDescription>
-            Availability reflects saved check results, not a live query. A
-            failed check always leaves availability unknown.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+          <span className="font-mono text-[0.65rem] text-muted-foreground">
+            Updated {formatTehranTimestamp(monitor.updatedAt)}
+          </span>
+        </div>
+        <CardContent className="space-y-4 px-4 py-4 sm:px-5">
           <Alert variant={alertVariantForTone(summary.tone)}>
             {summary.tone === "info" ? (
               <Info aria-hidden="true" />
@@ -740,49 +956,76 @@ export function MonitorDetailPage() {
             </Alert>
           ) : null}
 
-          <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-4">
+          <dl className="grid grid-cols-2 gap-x-5 gap-y-3 border-t pt-4 text-sm sm:grid-cols-4">
             <div>
-              <dt className="text-xs text-muted-foreground">Adults</dt>
-              <dd className="font-medium tabular-nums">{monitor.adults}</dd>
+              <dt className="eyebrow text-[0.6rem]">Adults</dt>
+              <dd className="mt-1 font-mono font-medium tabular-nums">
+                {monitor.adults}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Children</dt>
-              <dd className="font-medium tabular-nums">{monitor.children}</dd>
+              <dt className="eyebrow text-[0.6rem]">Children</dt>
+              <dd className="mt-1 font-mono font-medium tabular-nums">
+                {monitor.children}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Infants</dt>
-              <dd className="font-medium tabular-nums">{monitor.infants}</dd>
+              <dt className="eyebrow text-[0.6rem]">Infants</dt>
+              <dd className="mt-1 font-mono font-medium tabular-nums">
+                {monitor.infants}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Providers</dt>
-              <dd className="font-medium">{activeTargets.length} active</dd>
+              <dt className="eyebrow text-[0.6rem]">Providers</dt>
+              <dd className="mt-1 font-medium">{activeTargets.length} active</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Departure date</dt>
-              <dd>
+              <dt className="eyebrow text-[0.6rem]">Departure date</dt>
+              <dd className="mt-1">
                 <DateDisplay value={monitor.departureDate} />
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">
-                Expires (Tehran)
-              </dt>
-              <dd>{formatTehranTimestamp(monitor.expiresAt)}</dd>
+              <dt className="eyebrow text-[0.6rem]">Expires (Tehran)</dt>
+              <dd className="mt-1 font-mono text-[0.75rem]">
+                {formatTehranTimestamp(monitor.expiresAt)}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Created</dt>
-              <dd>{formatTehranTimestamp(monitor.createdAt)}</dd>
+              <dt className="eyebrow text-[0.6rem]">Created</dt>
+              <dd className="mt-1 font-mono text-[0.75rem]">
+                {formatTehranTimestamp(monitor.createdAt)}
+              </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">Updated</dt>
-              <dd>{formatTehranTimestamp(monitor.updatedAt)}</dd>
+              <dt className="eyebrow text-[0.6rem]">Updated</dt>
+              <dd className="mt-1 font-mono text-[0.75rem]">
+                {formatTehranTimestamp(monitor.updatedAt)}
+              </dd>
             </div>
           </dl>
         </CardContent>
       </Card>
 
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold">Provider observations</h2>
+      <section className="space-y-3" aria-labelledby="provider-observations">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h2
+              id="provider-observations"
+              className="text-lg font-semibold tracking-[-0.015em]"
+            >
+              Provider observations
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Saved check results, not live availability. A missing or unknown
+              offering is never treated as unavailable.
+            </p>
+          </div>
+          <span className="font-mono text-[0.65rem] tracking-wide text-muted-foreground uppercase">
+            {monitor.providers.length} target
+            {monitor.providers.length === 1 ? "" : "s"}
+          </span>
+        </div>
         {monitor.providers.length === 0 ? (
           <EmptyState
             icon={AlertTriangle}
@@ -790,15 +1033,17 @@ export function MonitorDetailPage() {
             description="This monitor has no provider target rows."
           />
         ) : (
-          monitor.providers.map((target) => (
-            <ProviderTarget
-              key={target.providerId}
-              target={target}
-              provider={providerMap.get(target.providerId)}
-            />
-          ))
+          <div className="space-y-3">
+            {monitor.providers.map((target) => (
+              <ProviderTarget
+                key={target.providerId}
+                target={target}
+                provider={providerMap.get(target.providerId)}
+              />
+            ))}
+          </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

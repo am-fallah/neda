@@ -111,7 +111,7 @@ export function JalaliDatePicker({
           aria-invalid={invalid || undefined}
           aria-describedby={describedBy}
           className={cn(
-            "flex h-10 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-left text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50",
+            "flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-input bg-card px-3 text-left text-sm shadow-none transition-[border-color,box-shadow] outline-none hover:border-muted-foreground/70 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:border-border disabled:bg-muted/50 disabled:opacity-60 max-sm:h-11",
             invalid && "border-destructive",
             className,
           )}
@@ -138,7 +138,7 @@ export function JalaliDatePicker({
           </span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[19rem]">
+      <PopoverContent className="w-[min(21rem,calc(100vw-1rem))] p-3 sm:p-4">
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
             <Button
@@ -160,7 +160,7 @@ export function JalaliDatePicker({
                     jm: Number(event.target.value),
                   }))
                 }
-                className="h-8 w-auto text-xs"
+                className="h-9 w-auto text-xs max-sm:h-10"
               >
                 {Array.from({ length: 12 }, (_, index) => index + 1).map(
                   (month) => (
@@ -179,7 +179,7 @@ export function JalaliDatePicker({
                     jy: Number(event.target.value),
                   }))
                 }
-                className="h-8 w-auto text-xs"
+                className="h-9 w-auto text-xs max-sm:h-10"
               >
                 {yearOptions.map((year) => (
                   <option key={year} value={year}>
@@ -234,7 +234,7 @@ export function JalaliDatePicker({
                   aria-label={`${day} ${jalaliMonthName(view.jm)} ${view.jy} (${iso})`}
                   onClick={() => selectDay(day)}
                   className={cn(
-                    "flex size-9 items-center justify-center rounded-md text-sm transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-30",
+                    "flex size-9 items-center justify-center rounded-md font-mono text-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-30",
                     isSelected &&
                       "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground",
                     isToday && !isSelected && "border border-primary/50",

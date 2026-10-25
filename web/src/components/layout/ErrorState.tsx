@@ -48,14 +48,16 @@ export function ErrorState({
       <AlertDescription>
         <p>{messageFor(error)}</p>
         {requestId ? (
-          <p className="font-mono text-xs opacity-80">Request ID: {requestId}</p>
+          <p className="font-mono text-[0.7rem] break-all opacity-80">
+            Request ID: {requestId}
+          </p>
         ) : null}
         {onRetry ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            className="mt-2"
+            className="mt-2 border-destructive/30 text-destructive hover:bg-destructive/5 hover:text-destructive"
             onClick={onRetry}
           >
             <RotateCcw aria-hidden="true" />

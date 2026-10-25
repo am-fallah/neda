@@ -1641,12 +1641,15 @@ non-functional success. `docs/openapi.yaml` documents the routes.
 
 ### 16.6 Styling, accessibility, build
 
-- Tailwind + shadcn/ui; CSS variables for light/dark; system theme default with manual toggle.
-- Responsive sidebar/topbar; tables become cards on mobile.
-- Accessibility: semantic landmarks, labels, keyboard navigation, focus rings, error summaries, aria-live for async feedback, color not sole indicator, reduced-motion respect.
+- The visual source of truth is [`design-system/neda/MASTER.md`](../design-system/neda/MASTER.md), generated/adapted with the installed UI/UX Pro Max skill; the approved New Monitor neutral workflow override is [`design-system/neda/pages/new-monitor.md`](../design-system/neda/pages/new-monitor.md). Route components consume semantic tokens from `web/src/styles.css` and do not hardcode palette values.
+- Design direction: a restrained “railway operations console” — warm paper canvas, flat hairline cards, deep pine/teal actions, a single amber rail accent, and semantic status colors. Fira Sans carries UI prose, Fira Code carries data/identifiers/micro-labels, and self-hosted Vazirmatn covers Persian/Arabic glyphs. Fonts are self-hosted because the SPA CSP keeps `font-src 'self'`.
+- Tailwind CSS 4 + shadcn/ui; CSS tokens for light/dark; system theme default with manual toggle. The app shell uses a 240px sidebar on desktop and a modal navigation drawer with focus trap, Escape dismissal, and focus return on mobile.
+- Density and responsiveness: 4px rhythm, 8/10 density, 44px mobile controls, flat 10px cards, no hover lift, and no page-level horizontal overflow. Provider health, inventory observations, check-run, and delivery tables switch to semantic card lists below their readable table widths; any remaining table wrapper is horizontally contained and keyboard-scrollable.
+- Accessibility: semantic landmarks, skip link, labels, keyboard navigation, visible 3px focus, error summaries with focus management and field links, inline errors, aria-live for async feedback, color not sole indicator, reduced-motion respect, and programmatic focus on route changes. Dialog/alert-dialog primitives own focus trapping; alert dialogs accept Escape as a cancel action.
+- Motion is limited to 120–180ms feedback/surface transitions and short overlay enter/exit; there is no page-load choreography. `prefers-reduced-motion: reduce` disables non-essential transitions and smooth scrolling.
 - Vite dev proxy `/api` to `127.0.0.1:8080`; production build to `web/dist`; `web/embed.go` embeds the build into the Go binary, and `internal/webui` serves it with SPA fallback for non-API routes. Missing hashed assets return 404 rather than the SPA shell; API and health paths never fall back. HTML is `no-store`, hashed assets are immutable, and the service-worker bootstrap file is no-cache when that feature is added.
 - Bundle discipline: no chart library, no heavy state library; icons via lucide-react; toasts via shadcn sonner. Pages are route-level lazy-loaded to keep the initial bundle bounded.
-- Tests: Vitest + Testing Library for login, monitor form/date conversion, pause/resume, status distinction, settings secret display, Push permission mocks. Manual acceptance checklist for real browser Push/Telegram/booking links.
+- Tests: Vitest + Testing Library for login, monitor form/date conversion, pause/resume, status distinction, settings secret display, Push permission mocks. Manual/browser acceptance evidence is recorded in [`docs/FRONTEND_ACCEPTANCE.md`](FRONTEND_ACCEPTANCE.md), including the 2026-10-25 design-system/browser/axe audit.
 
 ---
 

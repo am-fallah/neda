@@ -2,6 +2,33 @@
 
 **Status: checklist prepared and partially executed on 2026-10-24 with an automated Chrome/Playwright audit against a local development build using the fake provider.** A separate New Monitor corrective audit was executed on 2026-10-25 against a production frontend build with mocked API/search fixtures and 0 axe violations across the states recorded below. A further New Monitor hierarchy/price audit on 2026-10-25 verified the train→wagon→fare presentation, wagon/all-offering selection, view-only price filtering, and 320/360/390 responsive behavior with 0 axe violations. The automated audit covered login, the unauthenticated redirect, wrong-password feedback, overview, theme persistence, monitor creation with the Jalali picker, a real reservable observation, pause/resume, history filtering, settings secret handling, mobile navigation, logout, skip-link keyboard focus, dialog Escape handling, and an axe WCAG 2 A/AA audit with zero violations on six screens. Screenshots were visually reviewed. Human-only cases and any flow requiring real Telegram credentials, Web Push, production providers, or a second device remain marked **NOT RUN — manual**. Do not use production providers, real Telegram credentials, or production infrastructure for this checklist unless separately authorized.
 
+## Dashboard redesign audit (2026-10-25, WEB-014)
+
+Environment: production Vite build served from an isolated synthetic HTTP server with in-memory API fixtures, system Chrome through Playwright 1.64.1, axe-core 4.14.0. No backend database, real provider request, real monitor, Telegram/Push credential or delivery, booking action, or deployment was used. The provider name in the fixtures is explicitly labelled `MrBilit (synthetic review)`; all search results are local fixtures.
+
+Design system: `design-system/neda/MASTER.md` (UI/UX Pro Max `--design-system`, adapted after fit review), plus the approved `pages/new-monitor.md` neutral workflow override. The final direction is a restrained railway-operations console with warm paper surfaces, flat hairline cards, pine/teal actions, amber rail accent, semantic status colors, Fira Sans/Fira Code, and self-hosted Vazirmatn for Persian/Arabic fallback.
+
+| Check | Result | Evidence |
+|---|---|---|
+| Design system persisted and applied | PASS | Master and New Monitor override committed; route components use semantic tokens from `web/src/styles.css` with no raw palette values. |
+| Shared shell | PASS | 240px desktop sidebar with grouped navigation and secondary New Monitor action; mobile 64px top bar and modal navigation drawer. Drawer traps focus, closes on Escape, returns focus to the trigger, and focuses `main` after navigation. |
+| Overview | PASS | Posture summary, 4-up operational metrics with active/paused/expired distribution, alert stack, recent events/deliveries, provider health, and a three-step first-run panel. Empty and populated states reviewed. |
+| Monitors | PASS | URL-backed search and status filters with counts, operational cards, provider/test badges, last attempt/next check, paused/expired/unknown language preserved. All four filter states exercised. |
+| Monitor detail/edit | PASS | Breadcrumbs, compact status summary, selected options, inventory/check tables on wide screens, semantic cards below 1280px, and delivery cards on narrow screens, pause/resume, delete confirmation. Edit shows validation error summary with field links and focus. |
+| New Monitor | PASS | Train→wagon→fare hierarchy, wagon all-offering selection, partial fare selection, explicit “Selected” text, price/unpriced handling, view-only price filter/sort, preserved selections outside the filtered view, conservative availability, and summary rail. Creation succeeded against the synthetic API and navigated to the created monitor. Empty, provider-error, creation-error, and stale-search states were also reviewed; a filtered selection remained selected and createable, and changing the URL disabled creation. |
+| History/event detail | PASS | Event/delivery tabs, URL-backed filters, cursor loading, event timeline, delivery table, historical/non-live wording, and per-channel delivery semantics. Delivery and detection remain distinct. |
+| Settings | PASS | Horizontal section navigation below `xl`, five settings sections, secret fields empty, polling save, synthetic Telegram test, Push device state, password validation, theme choices. |
+| Login | PASS | Two-panel desktop composition and mobile card; visible labels, password manager attributes, show/hide control, generic error, setup guidance, rate-limit state. Light/dark and 320/390/1440 reviewed. |
+| Dialog/keyboard | PASS | Skip link first focus; visible focus rings; dialog focus trap; Escape cancels destructive confirmation; focus returns to trigger; error summary receives focus after failed submit; wagon checkbox toggles with Space. |
+| Responsive overflow | PASS | No page-level horizontal overflow on `/`, `/monitors`, monitor detail, New Monitor, history, event detail, or settings at 1440, 1024, 390, 360, and 320px. |
+| Light/dark themes | PASS | Both themes reviewed on all core routes at 1440/390 plus login at 1440/390/320; status contrast and semantic colors remain distinct. |
+| Axe WCAG 2 A/AA + 2.1 A/AA + 2.2 AA + best-practice | PASS | 49 scenario runs, 0 violations: desktop light/dark routes, mobile 390/320 routes, login light/dark/error, empty states, New Monitor initial/results/selected/validation, edit validation, delete dialog, mobile drawer, and overview error. |
+| Interaction flows | PASS | 11/11: synthetic monitor creation + toast/navigation, pause/resume, mobile drawer navigation/focus, history filter/tab, polling save, synthetic Telegram test, theme toggle + persistence. |
+| Runtime/page errors | PASS | No page errors on audited flows. Expected mocked 4xx/5xx responses were isolated to their error-state scenarios. |
+| Command checks | PASS | `npm ci`, `npm run lint`, `npm run typecheck`, `npm test` (161 tests/19 files), `npm run build`; `make check`, `make race`. |
+
+PR [#44](https://github.com/am-fallah/neda/pull/44); Go CI [40219787846](https://github.com/am-fallah/neda/actions/runs/40219787846), frontend [40219787978](https://github.com/am-fallah/neda/actions/runs/40219787978), and Docker CI [40219787966](https://github.com/am-fallah/neda/actions/runs/40219787966) passed. Remaining manual acceptance for the owner: human screen-reader/zoom review, real Telegram/Push delivery, real provider monitoring, and deployment. Screenshots and the synthetic review server are intentionally outside the repository.
+
 ## Preconditions
 
 - [ ] Repository is clean and the latest `main` is checked out.

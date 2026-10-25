@@ -56,7 +56,7 @@ export function MonitorPriceFilter({
           type="button"
           variant={active ? "secondary" : "outline"}
           size="sm"
-          className="h-8"
+          className="h-9 max-sm:h-11"
           disabled={disabled}
           aria-label={active ? "Edit price filter" : "Filter by price"}
         >
@@ -73,7 +73,7 @@ export function MonitorPriceFilter({
           ) : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-4">
+      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-4">
         <div className="flex flex-col gap-3">
           <div>
             <h3 className="text-sm font-semibold">Price range</h3>
@@ -94,7 +94,7 @@ export function MonitorPriceFilter({
                 placeholder={
                   knownMin !== null ? formatAmount(knownMin) : "Min amount"
                 }
-                className="h-9 font-mono tabular-nums"
+                className="h-10 font-mono tabular-nums max-sm:h-11"
                 value={min}
                 onChange={(event) => onMinChange(event.target.value)}
                 aria-invalid={error ? true : undefined}
@@ -110,7 +110,7 @@ export function MonitorPriceFilter({
                 placeholder={
                   knownMax !== null ? formatAmount(knownMax) : "Max amount"
                 }
-                className="h-9 font-mono tabular-nums"
+                className="h-10 font-mono tabular-nums max-sm:h-11"
                 value={max}
                 onChange={(event) => onMaxChange(event.target.value)}
                 aria-invalid={error ? true : undefined}
@@ -129,7 +129,7 @@ export function MonitorPriceFilter({
             </p>
           ) : null}
 
-          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/70 px-3 py-2.5 text-xs">
+          <label className="flex min-h-11 cursor-pointer items-start gap-2 rounded-md border border-border/70 px-3 py-2.5 text-xs sm:min-h-0">
             <input
               type="checkbox"
               className="mt-0.5 size-4 shrink-0 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
@@ -161,7 +161,7 @@ export function MonitorPriceFilter({
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8"
+                className="h-9 max-sm:h-11"
                 onClick={onClear}
                 disabled={!hasValues && !includeUnpriced}
               >
@@ -170,7 +170,7 @@ export function MonitorPriceFilter({
               <Button
                 type="button"
                 size="sm"
-                className="h-8"
+                className="h-9 max-sm:h-11"
                 onClick={() => setOpen(false)}
               >
                 Done

@@ -41,21 +41,23 @@ approved or executed by this review.
 
 Runtime (production) dependencies are React 19, React DOM, React Router,
 Radix UI primitives, `class-variance-authority`, `clsx`, `tailwind-merge`,
-`lucide-react`, `sonner`, `react-hook-form`, `zod`, and `jalaali-js`. All are
-permissive licenses (MIT/ISC/Apache-2.0/BSD/0BSD). The project package itself is
-private and marked `UNLICENSED`; it is not published.
+`lucide-react`, `sonner`, `react-hook-form`, `zod`, `jalaali-js`, and the
+self-hosted Fontsource Fira Sans/Fira Code/Vazirmatn packages. All are
+permissive licenses (MIT/ISC/Apache-2.0/BSD/0BSD/OFL-1.1). The project package
+itself is private and marked `UNLICENSED`; it is not published.
 
 `license-checker --summary` on the full installed tree reports:
 
 ```
 MIT 247, Apache-2.0 19, ISC 13, BSD-2-Clause 8, MPL-2.0 4,
-BSD-3-Clause 3, MIT-0 2, BlueOak-1.0.0 2, CC-BY-4.0 1,
+OFL-1.1 3, BSD-3-Clause 3, MIT-0 2, BlueOak-1.0.0 2, CC-BY-4.0 1,
 CC0-1.0 1, UNLICENSED 1, 0BSD 1
 ```
 
-The production-only tree reports `MIT 60, Apache-2.0 1, ISC 1, UNLICENSED 1,
-0BSD 1`. The four MPL-2.0 packages are dev/build-only and are not bundled into
-the runtime SPA. No GPL/AGPL runtime dependency was found.
+The production-only tree reports `MIT 60, OFL-1.1 3, Apache-2.0 1, ISC 1,
+UNLICENSED 1, 0BSD 1`. The OFL-1.1 packages are the self-hosted font assets.
+The four MPL-2.0 packages are dev/build-only and are not bundled into the
+runtime SPA. No GPL/AGPL runtime dependency was found.
 
 ## 4. Vulnerability scans
 
@@ -112,6 +114,8 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
   keys are tested independently of the driver.
 - Argon2id parameters are explicit in `internal/auth/password.go` and recorded
   in the architecture. Password hashing concurrency is bounded.
+- Fonts are self-hosted through Fontsource so the SPA can keep `font-src 'self'`
+  in its Content Security Policy; no runtime Google Fonts request is made.
 - Any dependency addition must update this document, pass `govulncheck` and
   `npm audit`, preserve lockfiles, and avoid install scripts without review.
 
