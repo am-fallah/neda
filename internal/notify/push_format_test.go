@@ -96,6 +96,26 @@ func TestFormatPushFallsBackToEventDetail(t *testing.T) {
 	}
 }
 
+func TestFormatPushFallsBackToHTTPIPEventDetail(t *testing.T) {
+	event := notify.Event{
+		ID:         "abc",
+		Kind:       notify.KindProviderRecovered,
+		ProviderID: "mrbilit",
+		OccurredAt: formatNow,
+	}
+	raw, err := notify.FormatPush(event, "http://203.0.113.10:8080/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload notify.PushPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.URL != "http://203.0.113.10:8080/events/abc" {
+		t.Fatalf("URL = %q", payload.URL)
+	}
+}
+
 func TestFormatPushOmitsUnvalidatedURLs(t *testing.T) {
 	event := notify.Event{
 		ID:         "abc",

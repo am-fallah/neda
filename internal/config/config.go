@@ -34,6 +34,7 @@ type Config struct {
 	LogLevel            string
 	LogFormat           string
 	TrustProxy          bool
+	AllowInsecureHTTP   bool
 	FakeProviderEnabled bool
 	MrBilitEnabled      bool
 	SessionTTL          time.Duration
@@ -44,6 +45,13 @@ type Config struct {
 // IsProduction reports whether production-only safeguards are enabled.
 func (c Config) IsProduction() bool {
 	return c.Env == Production
+}
+
+// SecureCookies reports whether browser cookies must carry the Secure flag.
+// Direct HTTP access deliberately uses non-Secure cookies because browsers do
+// not send Secure cookies over plain HTTP.
+func (c Config) SecureCookies() bool {
+	return c.PublicURL != nil && strings.EqualFold(c.PublicURL.Scheme, "https")
 }
 
 // Load reads configuration from the process environment.
@@ -114,6 +122,10 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	allowInsecureHTTP, err := parseBool(get, "NEDA_ALLOW_INSECURE_HTTP", false)
+	if err != nil {
+		return Config{}, err
+	}
 	fakeProvider, err := parseBool(get, "NEDA_FAKE_PROVIDER_ENABLED", false)
 	if err != nil {
 		return Config{}, err
@@ -143,7 +155,7 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 
-	publicURL, err := parsePublicURL(value(get, "NEDA_PUBLIC_URL", ""), env)
+	publicURL, err := parsePublicURL(value(get, "NEDA_PUBLIC_URL", ""), env, allowInsecureHTTP)
 	if err != nil {
 		return Config{}, err
 	}
@@ -178,6 +190,7 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 		LogLevel:            logLevel,
 		LogFormat:           logFormat,
 		TrustProxy:          trustProxy,
+		AllowInsecureHTTP:   allowInsecureHTTP,
 		FakeProviderEnabled: fakeProvider,
 		MrBilitEnabled:      mrbilitEnabled,
 		SessionTTL:          time.Duration(sessionTTL) * time.Hour,
@@ -249,7 +262,7 @@ func parseHours(get func(string) (string, bool), key string, fallback int) (int,
 	return parseInt(get, key, fallback, 1, 24*365*10)
 }
 
-func parsePublicURL(raw string, env Environment) (*url.URL, error) {
+func parsePublicURL(raw string, env Environment, allowInsecureHTTP bool) (*url.URL, error) {
 	if raw == "" {
 		if env == Production {
 			return nil, errors.New("NEDA_PUBLIC_URL is required in production")
@@ -261,11 +274,19 @@ func parsePublicURL(raw string, env Environment) (*url.URL, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NEDA_PUBLIC_URL: invalid URL: %w", err)
 	}
-	if parsed.Scheme != "https" && !(env == Development && parsed.Scheme == "http") {
-		return nil, errors.New("NEDA_PUBLIC_URL: scheme must be https in production")
-	}
 	if parsed.Host == "" {
 		return nil, errors.New("NEDA_PUBLIC_URL: host is required")
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return nil, errors.New("NEDA_PUBLIC_URL: scheme must be http or https")
+	}
+	if env == Production && parsed.Scheme == "http" {
+		if !allowInsecureHTTP {
+			return nil, errors.New("NEDA_PUBLIC_URL: scheme must be https in production (set NEDA_ALLOW_INSECURE_HTTP=true only for direct HTTP access by IP)")
+		}
+		if net.ParseIP(parsed.Hostname()) == nil {
+			return nil, errors.New("NEDA_PUBLIC_URL: HTTP public URLs in production require an IP-literal host; use HTTPS for domain names")
+		}
 	}
 	if parsed.User != nil {
 		return nil, errors.New("NEDA_PUBLIC_URL: userinfo is not allowed")

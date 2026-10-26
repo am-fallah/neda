@@ -12,8 +12,9 @@ import (
 var ErrOriginNotAllowed = errors.New("auth: origin not allowed")
 
 // OriginPolicy validates same-origin requests for login and state-changing
-// authenticated routes. Production uses NEDA_PUBLIC_URL; development derives
-// the expected origin from the validated request Host.
+// authenticated routes. Production uses NEDA_PUBLIC_URL (HTTPS or the explicit
+// HTTP IP mode); development derives the expected origin from the validated
+// request Host.
 type OriginPolicy struct {
 	PublicURL  *url.URL
 	Production bool

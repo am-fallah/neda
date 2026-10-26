@@ -57,6 +57,9 @@ func TestLoadProductionDefaults(t *testing.T) {
 	if cfg.FakeProviderEnabled {
 		t.Fatal("FakeProviderEnabled = true by default")
 	}
+	if cfg.AllowInsecureHTTP {
+		t.Fatal("AllowInsecureHTTP = true by default")
+	}
 	if !cfg.MrBilitEnabled {
 		t.Fatal("MrBilitEnabled = false, want true")
 	}
@@ -65,6 +68,9 @@ func TestLoadProductionDefaults(t *testing.T) {
 	}
 	if cfg.PublicURL == nil || cfg.PublicURL.Host != "neda.example.com" {
 		t.Fatalf("PublicURL = %v", cfg.PublicURL)
+	}
+	if !cfg.SecureCookies() {
+		t.Fatal("HTTPS production config did not request Secure cookies")
 	}
 }
 
@@ -220,6 +226,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"log-level", "NEDA_LOG_LEVEL", "verbose", "NEDA_LOG_LEVEL"},
 		{"log-format", "NEDA_LOG_FORMAT", "yaml", "NEDA_LOG_FORMAT"},
 		{"trust-proxy", "NEDA_TRUST_PROXY", "sometimes", "NEDA_TRUST_PROXY"},
+		{"allow-insecure-http", "NEDA_ALLOW_INSECURE_HTTP", "sometimes", "NEDA_ALLOW_INSECURE_HTTP"},
 		{"mrbilit-provider", "NEDA_MRBILIT_ENABLED", "sometimes", "NEDA_MRBILIT_ENABLED"},
 		{"fake-provider", "NEDA_FAKE_PROVIDER_ENABLED", "sometimes", "NEDA_FAKE_PROVIDER_ENABLED"},
 		{"workers-low", "NEDA_WORKERS", "0", "NEDA_WORKERS"},
@@ -295,6 +302,76 @@ func TestLoadAllowsHTTPPublicURLOffProduction(t *testing.T) {
 	}
 	if cfg.PublicURL == nil || cfg.PublicURL.Scheme != "http" {
 		t.Fatalf("PublicURL = %v", cfg.PublicURL)
+	}
+	if cfg.SecureCookies() {
+		t.Fatal("HTTP development config requested Secure cookies")
+	}
+}
+
+func TestLoadAllowsDirectHTTPIPInProduction(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	cfg, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
+		"NEDA_HTTP_ADDR":           "0.0.0.0:9090",
+		"NEDA_PUBLIC_URL":          "http://203.0.113.10:8080",
+		"NEDA_ALLOW_INSECURE_HTTP": "true",
+		"NEDA_MRBILIT_ENABLED":     "true",
+	}))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.PublicURL == nil || cfg.PublicURL.Scheme != "http" || cfg.PublicURL.Host != "203.0.113.10:8080" {
+		t.Fatalf("PublicURL = %v", cfg.PublicURL)
+	}
+	if cfg.HTTPAddr != "0.0.0.0:9090" {
+		t.Fatalf("HTTPAddr = %q", cfg.HTTPAddr)
+	}
+	if !cfg.AllowInsecureHTTP {
+		t.Fatal("AllowInsecureHTTP = false")
+	}
+	if cfg.SecureCookies() {
+		t.Fatal("direct HTTP config requested Secure cookies")
+	}
+}
+
+func TestLoadAllowsDirectHTTPIPv6InProduction(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	cfg, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
+		"NEDA_PUBLIC_URL":          "http://[2001:db8::10]:8080",
+		"NEDA_ALLOW_INSECURE_HTTP": "true",
+		"NEDA_MRBILIT_ENABLED":     "true",
+	}))
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	if cfg.PublicURL == nil || cfg.PublicURL.Scheme != "http" || cfg.PublicURL.Hostname() != "2001:db8::10" {
+		t.Fatalf("PublicURL = %v", cfg.PublicURL)
+	}
+}
+
+func TestLoadRejectsDirectHTTPIPWithoutOptIn(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	_, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
+		"NEDA_PUBLIC_URL":          "http://203.0.113.10:8080",
+		"NEDA_MRBILIT_ENABLED":     "true",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "NEDA_ALLOW_INSECURE_HTTP") {
+		t.Fatalf("error = %v, want NEDA_ALLOW_INSECURE_HTTP guidance", err)
+	}
+}
+
+func TestLoadRejectsDirectHTTPHostnameInProduction(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	_, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
+		"NEDA_PUBLIC_URL":          "http://neda.example.com",
+		"NEDA_ALLOW_INSECURE_HTTP": "true",
+		"NEDA_MRBILIT_ENABLED":     "true",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "IP-literal") {
+		t.Fatalf("error = %v, want IP-literal requirement for an HTTP hostname", err)
 	}
 }
 

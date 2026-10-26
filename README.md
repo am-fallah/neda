@@ -221,6 +221,7 @@ The private REST API lives under `/api/v1` and covers auth, monitors, providers 
 ### Behavioral and operational limits
 
 - Delivery is at-least-once. A crash between sending and recording the result can produce a duplicate notification.
+- Direct public-IP HTTP mode is unencrypted, omits Secure cookies/HSTS, and cannot use browser Web Push. Use it only on a trusted network or behind a VPN/TLS tunnel.
 - Provider capacity, child/infant inventory semantics, and price currency/per-passenger basis are not fully verified. Capacity shortfall remains `Unknown`.
 - The MrBilit URL resolver depends on route data embedded in the public page, which is not a documented API contract; it fails closed if the page shape changes.
 - Login rate limiting and provider spacing are in-memory and reset on restart.
@@ -293,10 +294,11 @@ The service reads environment variables. The settings most relevant to local dev
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEDA_ENV` | `production` | `development` or `production`. Use `development` locally. |
-| `NEDA_HTTP_ADDR` | `:8080` | HTTP listen address. |
+| `NEDA_HTTP_ADDR` | `:8080` | HTTP listen address. Use `0.0.0.0:PORT` for direct host access. |
 | `NEDA_DB_PATH` | `/data/neda.db` | SQLite database path. |
 | `NEDA_ENCRYPTION_KEY_FILE` | — | Owner-only file containing a base64 32-byte key. Required in production and needed for Telegram/Push secrets. |
-| `NEDA_PUBLIC_URL` | — | Required in production. Exact HTTPS origin for Host/origin checks, links, and Push. |
+| `NEDA_PUBLIC_URL` | — | Required in production. Exact public origin for Host/origin checks and links. HTTPS is the secure default; HTTP is accepted only for an IP literal with `NEDA_ALLOW_INSECURE_HTTP=true`. |
+| `NEDA_ALLOW_INSECURE_HTTP` | `false` | Explicit opt-in for production HTTP access by IP. Disables Secure cookies and HSTS; never use it for a domain or over an untrusted network. |
 | `NEDA_VAPID_SUBJECT` | — | `mailto:` contact or HTTPS URL required for Web Push. |
 | `NEDA_MRBILIT_ENABLED` | `false` | Must be `true` in production; development registers MrBilit automatically. |
 | `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Enables the test-only provider in development/testing. Rejected in production. |
@@ -307,9 +309,31 @@ The service reads environment variables. The settings most relevant to local dev
 | `NEDA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
 | `NEDA_LOG_FORMAT` | `json` in production, `text` in development | Structured log format. |
 
+Compose-only settings are `NEDA_PUBLISH_HOST` (default `127.0.0.1`) and `NEDA_PUBLISH_PORT` (default `8080`). They control where the container port is published on the host and are not read by the Go service.
+
 The global polling interval is not an environment variable. It is stored in SQLite as `poll_interval_seconds`, seeded to 300 seconds, and bounded to 60–3600 seconds. Changing it affects future scheduling decisions; existing `next_due_at` values are not recalculated immediately.
 
 Production startup fails closed when required production configuration is missing, when the real provider is not enabled, when the fake provider is enabled, when the provider registry is empty, or when active monitors reference an unregistered provider. See [`.env.example`](.env.example) for placeholders and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full configuration and security model.
+
+### Direct public-IP HTTP access
+
+When there is no domain name or TLS certificate, Neda can be exposed directly by IP. This requires an explicit insecure-mode opt-in and an IP-literal public origin:
+
+```bash
+NEDA_ENV=production
+NEDA_HTTP_ADDR=0.0.0.0:8080
+NEDA_PUBLIC_URL=http://203.0.113.10:8080
+NEDA_ALLOW_INSECURE_HTTP=true
+NEDA_MRBILIT_ENABLED=true
+NEDA_ENCRYPTION_KEY_FILE=/path/to/encryption_key
+NEDA_VAPID_SUBJECT=mailto:owner@example.com
+```
+
+Then open `http://203.0.113.10:8080`. The port is chosen by the deployment; it does not have to be `8080`. For Compose, also set `NEDA_PUBLISH_HOST=0.0.0.0` and `NEDA_PUBLISH_PORT=<port>` so the container port is reachable externally. In direct binary mode, `NEDA_HTTP_ADDR` is the bind address.
+
+The `NEDA_PUBLIC_URL` origin must exactly match the browser's Host header, including a non-default port; mismatch returns `421 Misdirected Request`. HTTP is accepted only for an IP-literal host, not a domain name. HTTPS domain deployments are unchanged and still use Secure cookies and HSTS.
+
+> **Security warning:** plain HTTP is unencrypted. Anyone on the network path can read or modify traffic, including the login password and session cookies. Use direct HTTP only on a trusted network, or protect it with a VPN or other secure tunnel. Browser Web Push requires a secure context (HTTPS or localhost) and will be unavailable; Telegram notifications can still be used. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Operations
 

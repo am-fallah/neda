@@ -45,6 +45,9 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 	logger := logging.NewWithWriter(stdout, cfg.LogLevel, cfg.LogFormat)
+	if cfg.AllowInsecureHTTP && cfg.PublicURL != nil && strings.EqualFold(cfg.PublicURL.Scheme, "http") {
+		logger.Warn("plaintext HTTP access enabled; traffic is not encrypted and browser cookies will not use the Secure flag")
+	}
 
 	if err := validateRuntimeUser(os.Geteuid(), cfg.IsProduction()); err != nil {
 		logger.Error("runtime user validation failed", "error", err)
@@ -130,7 +133,7 @@ func runServe(stdout, stderr io.Writer) int {
 	authManager, err := auth.NewManager(appStore, auth.Config{
 		SessionTTL:  cfg.SessionTTL,
 		SessionIdle: cfg.SessionIdle,
-		Secure:      cfg.IsProduction(),
+		Secure:      cfg.SecureCookies(),
 		PublicURL:   cfg.PublicURL,
 		Production:  cfg.IsProduction(),
 		Now:         time.Now,

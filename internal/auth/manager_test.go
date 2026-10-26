@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,6 +351,44 @@ func TestNewManagerForcesSecureCookiesInProduction(t *testing.T) {
 	}
 	if !manager.cfg.Secure {
 		t.Fatal("production manager did not force Secure cookies")
+	}
+}
+
+func TestProductionHTTPIPUsesNonSecureCookies(t *testing.T) {
+	st, _ := newAuthStore(t)
+	manager, err := NewManager(st, Config{
+		SessionTTL:          time.Hour,
+		SessionIdle:         30 * time.Minute,
+		TouchInterval:       5 * time.Minute,
+		Production:          true,
+		Secure:              true,
+		PublicURL:           mustURL(t, "http://203.0.113.10:8080"),
+		Params:              testParams,
+		MaxConcurrentHashes: 1,
+	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if manager.cfg.Secure {
+		t.Fatal("HTTP IP production manager requested Secure cookies")
+	}
+	recorder := httptest.NewRecorder()
+	manager.SetSessionCookies(recorder, LoginResult{
+		SessionToken: "session-token",
+		CSRFToken:    "csrf-token",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("cookies = %d, want 2", len(cookies))
+	}
+	for _, cookie := range cookies {
+		if cookie.Secure {
+			t.Fatalf("HTTP IP cookie %q is Secure", cookie.Name)
+		}
+		if !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
+			t.Fatalf("cookie %q flags = HttpOnly:%v SameSite:%v", cookie.Name, cookie.HttpOnly, cookie.SameSite)
+		}
 	}
 }
 

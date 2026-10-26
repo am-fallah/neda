@@ -281,7 +281,7 @@ The dashboard is private and password-protected. No registration, billing, or mu
 Requirements:
 - Secure initial password setup; no hardcoded or default credentials.
 - Prefer an offline CLI command such as `neda set-password` for initial setup, reading the password interactively without echo and never accepting it as a command-line argument. Do not expose an unauthenticated web bootstrap endpoint on a public interface. Confirm the design against the actual container/deployment workflow.
-- Use a modern password hash (prefer Argon2id when supportable; document any deviation), secure server-managed sessions, `HttpOnly` cookies, appropriate `SameSite`, `Secure` in production, CSRF protection where applicable, login rate limiting, and safe logout.
+- Use a modern password hash (prefer Argon2id when supportable; document any deviation), secure server-managed sessions, `HttpOnly` cookies, appropriate `SameSite`, `Secure` cookies when the public origin is HTTPS, CSRF protection where applicable, login rate limiting, and safe logout. Direct public-IP HTTP is an explicit unencrypted exception and must be documented as suitable only for trusted networks or VPN/TLS-tunneled traffic.
 - Protect all private APIs. Only intentionally public health endpoints may be exempt.
 - Never expose stored secrets again in settings responses. Never place secrets in frontend bundles, logs, Git history, example files, or errors.
 - Encrypt Telegram credentials and any other sensitive settings at rest with a persistent external key. Explain backup, restore, rotation/recovery limitations, and key-loss consequences.

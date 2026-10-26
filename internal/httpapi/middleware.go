@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/am-fallah/neda/internal/logging"
@@ -77,7 +78,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		headers.Set("X-Permitted-Cross-Domain-Policies", "none")
 		headers.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		headers.Set(headerCacheControl, "no-store")
-		if s.cfg.Production {
+		if s.cfg.Production && s.cfg.PublicURL != nil && strings.EqualFold(s.cfg.PublicURL.Scheme, "https") {
 			headers.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}
 		next.ServeHTTP(w, r)

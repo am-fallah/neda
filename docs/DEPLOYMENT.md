@@ -13,13 +13,13 @@ traffic, real Telegram/Push credentials, or deployment.
 | Host | Existing low-resource Ubuntu server; owner supplies OS version, CPU/RAM, free disk |
 | Container runtime | Docker Engine with Compose v2 |
 | Existing services | Owner supplies occupied ports and any existing reverse proxy |
-| Domain/DNS | Owner supplies a dedicated hostname resolving to the server |
-| TLS | Owner supplies certificate automation (Caddy, certbot, or existing proxy) |
-| Public exposure | Only 80/443 reachable; Neda binds `127.0.0.1:8080` |
+| Domain/DNS | Required for the HTTPS proxy mode; not required for direct public-IP HTTP mode |
+| TLS | Required for the HTTPS proxy mode; absent by design in direct HTTP mode |
+| Public exposure | Proxy mode: only 80/443 reachable; direct HTTP mode: only the chosen `NEDA_PUBLISH_PORT` |
 | Runtime user | Non-root deployment user's UID/GID; `scripts/setup.sh` records the current values |
 | Data | Bind-mounted host directory `./data`; backup target off-host |
 | Secrets | Key file outside Git and the database; read-only bind mount, host owner = runtime UID, mode `0400`/`0600` |
-| Prerequisites | Docker Engine with Compose v2, `openssl`, `git`, and owner-provided DNS/TLS |
+| Prerequisites | Docker Engine with Compose v2, `openssl`, `git`, and either DNS/TLS for proxy mode or a public IP and chosen port for direct HTTP mode |
 | Resource budget | 1 CPU, 512 MiB memory, 256 PIDs, 10 MiB × 3 log files as starting limits |
 
 Do not invent server facts. Record actual values during the approved deployment
@@ -43,8 +43,12 @@ Run the first-time setup as the non-root deployment user that owns the checkout:
 ```sh
 cd /opt/neda
 ./scripts/setup.sh
-# Non-interactive form:
+# Non-interactive HTTPS proxy form:
 # NEDA_PUBLIC_URL=https://neda.example.com \
+# NEDA_VAPID_SUBJECT=mailto:owner@example.com ./scripts/setup.sh
+# Non-interactive direct public-IP HTTP form (unencrypted):
+# NEDA_ALLOW_INSECURE_HTTP=true \
+# NEDA_PUBLIC_URL=http://203.0.113.10:8080 \
 # NEDA_VAPID_SUBJECT=mailto:owner@example.com ./scripts/setup.sh
 ```
 
@@ -52,7 +56,9 @@ The script creates `.env` (mode 0600), `data/`, and
 `secrets/encryption_key` (owner = current UID/GID, mode 0400), without printing
 the key. It refuses to run if `.env`, the key, or the database already exists,
 so it cannot silently replace a key or data. It also refuses to run as root.
-Re-run it only for a genuinely new install.
+Re-run it only for a genuinely new install. In direct HTTP mode it writes
+`NEDA_PUBLISH_HOST=0.0.0.0`, sets the published port from the URL, and keeps
+`NEDA_TRUST_PROXY=false`; the secure proxy default remains loopback-only.
 
 The repository's `compose.yaml` bind-mounts `./data` read-write and
 `./secrets/encryption_key` read-only at `/run/secrets/encryption_key`. The host
@@ -114,6 +120,9 @@ current non-root UID/GID. Its effective contents are:
 NEDA_PUBLIC_URL=https://neda.example.com
 NEDA_VAPID_SUBJECT=mailto:owner@example.com
 NEDA_MRBILIT_ENABLED=true
+NEDA_ALLOW_INSECURE_HTTP=false
+NEDA_PUBLISH_HOST=127.0.0.1
+NEDA_PUBLISH_PORT=8080
 NEDA_RUNTIME_UID=<deployment user uid>
 NEDA_RUNTIME_GID=<deployment user gid>
 NEDA_TRUST_PROXY=true
@@ -122,13 +131,20 @@ NEDA_TRUST_PROXY=true
 Edit `.env` only for deliberate changes; do not put the encryption key in it.
 `NEDA_LOG_LEVEL` and `NEDA_WORKERS` are optional and default through Compose.
 
-- `NEDA_PUBLIC_URL` must be the exact public HTTPS origin. Host mismatch returns
-  421; do not include a path, query, or fragment.
+- `NEDA_PUBLIC_URL` must be the exact public origin. Host mismatch returns 421;
+  do not include a path, query, or fragment. The secure default is HTTPS.
+- `NEDA_ALLOW_INSECURE_HTTP=true` is the explicit opt-in for direct HTTP access
+  by IP. It permits only `http://<IP-literal>[:PORT]` in production and is
+  rejected for hostnames. It disables Secure cookies and HSTS.
+- `NEDA_PUBLISH_HOST`/`NEDA_PUBLISH_PORT` select the host interface and port
+  published by Compose. Keep `127.0.0.1` for proxy mode; use `0.0.0.0` and the
+  chosen public port for direct HTTP access.
 - `NEDA_TRUST_PROXY=true` is appropriate only when the reverse proxy is the
-  local trusted ingress. The Compose port is loopback-only, so a host proxy is
-  the expected ingress. If the app is exposed directly, set it to `false`.
+  local trusted ingress. Direct HTTP exposure must use `false` because there is
+  no trusted proxy.
 - `NEDA_VAPID_SUBJECT` is required for Push. A `mailto:` contact or HTTPS URL is
-  accepted.
+  accepted. Browser Push needs a secure context, so it is unavailable in direct
+  HTTP mode.
 - `NEDA_MRBILIT_ENABLED=true` is required in production. The image does not
   enable it by default, and `compose.yaml` refuses to render if the variable is
   unset, so production registration is an explicit opt-in. Startup fails before
@@ -144,6 +160,45 @@ Edit `.env` only for deliberate changes; do not put the encryption key in it.
 cd /opt/neda
 docker compose config >/dev/null
 ```
+
+### 4.1 Direct public-IP HTTP mode
+
+Use this only when there is no domain/TLS and the network is trusted, or when
+traffic is protected by a VPN or another secure tunnel. Plain HTTP exposes the
+login password and session cookies to anyone who can observe the path.
+
+Example `/opt/neda/.env` for `http://203.0.113.10:8080`:
+
+```text
+NEDA_PUBLIC_URL=http://203.0.113.10:8080
+NEDA_ALLOW_INSECURE_HTTP=true
+NEDA_PUBLISH_HOST=0.0.0.0
+NEDA_PUBLISH_PORT=8080
+NEDA_TRUST_PROXY=false
+NEDA_VAPID_SUBJECT=mailto:owner@example.com
+NEDA_MRBILIT_ENABLED=true
+NEDA_RUNTIME_UID=<deployment user uid>
+NEDA_RUNTIME_GID=<deployment user gid>
+```
+
+Then start normally:
+
+```sh
+docker compose up -d
+curl -fsS http://203.0.113.10:8080/readyz
+```
+
+The public URL host and port must exactly match the browser address. For a
+non-default port, put it in both `NEDA_PUBLIC_URL` and `NEDA_PUBLISH_PORT`.
+For a direct (non-Compose) binary, bind the process with
+`NEDA_HTTP_ADDR=0.0.0.0:<port>` instead of using `NEDA_PUBLISH_*`.
+Firewall only the chosen port; do not expose Docker's control socket, the
+database, or any admin interface. Direct HTTP mode intentionally omits
+`Strict-Transport-Security` and does not mark browser cookies `Secure`. HTTPS
+domain mode remains unchanged and is strongly preferred outside an isolated
+network. Compose still requires a VAPID contact (`NEDA_VAPID_SUBJECT`); set a
+`mailto:` value, but note that browser Push cannot be enabled from an HTTP
+origin.
 
 ## 5. Reverse proxy and TLS
 
@@ -196,22 +251,37 @@ curl -fsS https://neda.example.com/readyz
 docker compose logs --tail=50 neda
 ```
 
-Verify:
+Verify the mode you deployed.
+
+For HTTPS proxy mode:
 
 1. `/healthz` and `/readyz` return 200 through HTTPS.
 2. `http://<server>:8080` is not reachable externally.
 3. Login works with the owner password; wrong-password attempts receive 429
    after the configured soft limit.
 4. Session/CSRF cookies are `Secure`, `HttpOnly`, `SameSite=Lax` in the browser.
-5. Do not create a fake-provider monitor in production. Verify the authenticated
+
+For direct public-IP HTTP mode:
+
+1. `http://<public-ip>:<port>/healthz` and `/readyz` return 200.
+2. Only the chosen port is reachable externally; the Docker control socket and
+   database are not exposed.
+3. Login works, the Host/Origin checks accept the same IP and port, and cookies
+   are `HttpOnly`/`SameSite=Lax` but **not** `Secure`.
+4. Responses do not include `Strict-Transport-Security`. Browser Push is
+   unavailable because the origin is not a secure context.
+
+In both modes:
+
+1. Do not create a fake-provider monitor in production. Verify the authenticated
    Providers view lists the real MrBilit provider with sane health metadata.
    Production startup must have failed closed if `NEDA_MRBILIT_ENABLED` was
    missing or false.
-6. Configure Telegram only if authorized; never paste the token into logs.
-7. Open Settings → Browser Push, enable this browser, and send a test **only if**
+2. Configure Telegram only if authorized; never paste the token into logs.
+3. Open Settings → Browser Push, enable this browser, and send a test **only if**
    the owner authorizes a real Push from the reviewed deployment. Otherwise mark
-   it not run.
-8. Confirm `docker inspect` shows a non-root user, read-only root, dropped
+   it not run. This is not available in direct HTTP mode.
+4. Confirm `docker inspect` shows a non-root user, read-only root, dropped
    capabilities, and the expected mounts.
 
 ## 7. Backup and restore
@@ -238,10 +308,12 @@ Restore:
 2. Restore the database and key together to a fresh `data/`/`secrets/` pair.
    Never restore only one of them.
 3. As the deployment user, restore the numeric owner and mode:
+
    ```sh
    sudo chown -R "$(id -u):$(id -g)" data secrets/encryption_key
    sudo chmod 0400 secrets/encryption_key
    ```
+
 4. Start the service and check `/readyz`, `PRAGMA integrity_check`, and that
    encrypted settings/Push keys decrypt (a wrong key fails startup closed before
    migrations or settings seeding).
@@ -273,6 +345,9 @@ docker compose ps
 curl -fsS https://neda.example.com/readyz
 ```
 
+Use `http://<public-ip>:<port>/readyz` instead when the deployment is in
+direct HTTP mode.
+
 Migrations are forward-only. Before an update, take a database+key backup,
 preserve the current image under a rollback tag, and record its ID (Compose tags
 the local build `neda:local`, so that tag alone is not a rollback target):
@@ -290,10 +365,12 @@ Rollback means:
    The database and key must come from the same backup set.
 3. Retag the preserved previous image as `neda:local` (or run the recorded
    image ID directly), then start it without rebuilding:
+
    ```sh
    docker tag neda:rollback-<timestamp> neda:local
    docker compose up -d --no-build
    ```
+
 4. Verify `/healthz`, `/readyz`, login, scheduling, and decryption of stored
    settings.
 
@@ -316,8 +393,10 @@ failed: restore the matching database+key backup before retrying.
   provider check.
 - Time: the host clock must be NTP-synced; Tehran display/expiry relies on IANA
   zones embedded in the binary.
-- Security: keep Docker and the host patched; do not expose the API without TLS;
-  review `docs/SECURITY.md` before changing the proxy, Push allowlist, or secrets.
+- Security: keep Docker and the host patched; prefer an HTTPS reverse proxy.
+  Direct HTTP mode is an explicit, unencrypted exception for trusted networks
+  or VPN/TLS-tunneled traffic. Review `docs/SECURITY.md` before changing the
+  proxy, exposed interface/port, Push allowlist, or secrets.
 
 ## 10. Approval checklist
 
@@ -334,6 +413,10 @@ failed: restore the matching database+key backup before retrying.
 - [ ] `NEDA_MRBILIT_ENABLED=true` is set explicitly (the image does not default
       it); startup log shows the real provider registered, and active monitors
       have no missing-provider coverage errors.
+- [ ] For direct HTTP mode, `NEDA_PUBLIC_URL=http://<IP>:<port>` and
+      `NEDA_ALLOW_INSECURE_HTTP=true` are set, only `NEDA_PUBLISH_PORT` is
+      exposed externally, `NEDA_TRUST_PROXY=false`, and the owner accepts that
+      traffic is unencrypted (or has added a VPN/TLS tunnel).
 - [ ] Previous image ID, database+key backup, and matching restore procedure are
       recorded before the first update.
 - [ ] Backup/restore drill on the target volume passes.

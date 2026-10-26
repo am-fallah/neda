@@ -25,6 +25,7 @@ func TestHealthTarget(t *testing.T) {
 		{"ipv4-all", "0.0.0.0:9000", "", "http://127.0.0.1:9000/readyz", ""},
 		{"loopback", "127.0.0.1:8081", "", "http://127.0.0.1:8081/readyz", ""},
 		{"public-host", ":8080", "https://neda.example.com", "http://127.0.0.1:8080/readyz", "neda.example.com"},
+		{"direct-http-ip", "0.0.0.0:9000", "http://203.0.113.10:9090", "http://127.0.0.1:9000/readyz", "203.0.113.10:9090"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

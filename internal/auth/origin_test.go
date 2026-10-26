@@ -60,6 +60,42 @@ func TestOriginPolicyProduction(t *testing.T) {
 	}
 }
 
+func TestOriginPolicyProductionHTTPIP(t *testing.T) {
+	policy := OriginPolicy{PublicURL: mustURL(t, "http://203.0.113.10:8080"), Production: true}
+
+	tests := []struct {
+		name    string
+		origin  string
+		referer string
+		wantErr bool
+	}{
+		{"origin match", "http://203.0.113.10:8080", "", false},
+		{"referer fallback", "", "http://203.0.113.10:8080/events?x=1", false},
+		{"wrong scheme", "https://203.0.113.10:8080", "", true},
+		{"wrong port", "http://203.0.113.10:9090", "", true},
+		{"wrong host", "http://198.51.100.10:8080", "", true},
+		{"missing both", "", "", true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "http://203.0.113.10:8080/api/v1/auth/login", nil)
+			if test.origin != "" {
+				req.Header.Set("Origin", test.origin)
+			}
+			if test.referer != "" {
+				req.Header.Set("Referer", test.referer)
+			}
+			err := policy.Check(req)
+			if test.wantErr && err == nil {
+				t.Fatal("Check succeeded, want error")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("Check: %v", err)
+			}
+		})
+	}
+}
+
 func TestOriginPolicyDevelopment(t *testing.T) {
 	policy := OriginPolicy{}
 	req := httptest.NewRequest(http.MethodPost, "http://localhost:8080/api/v1/auth/login", nil)

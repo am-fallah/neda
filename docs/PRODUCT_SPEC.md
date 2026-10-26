@@ -245,7 +245,7 @@ API requirements:
 - Private, password-protected dashboard. No registration, billing, or multi-user roles.
 - Secure initial password setup through an offline/interactive CLI such as `neda set-password`; read without echo; never accept the password as a command-line argument. No unauthenticated web bootstrap endpoint on a public interface.
 - Argon2id password hashing, preferably; document any deviation.
-- Secure server-managed sessions, `HttpOnly` cookies, appropriate `SameSite`, `Secure` in production, login rate limiting, and safe logout.
+- Secure server-managed sessions, `HttpOnly` cookies, appropriate `SameSite`, `Secure` when the public origin is HTTPS, login rate limiting, and safe logout. The explicit direct HTTP IP mode is unencrypted and omits the `Secure` cookie flag; it must be documented as suitable only for trusted networks or VPN/TLS-tunneled traffic.
 - Login does not require an authenticated-session CSRF token. Login requires same-origin `Origin`/`Referer` validation and rate limiting. Every authenticated state-changing request requires the session CSRF token and origin validation.
 - Protect all private APIs. Public health endpoints only.
 - Never expose stored secrets again in settings responses.
