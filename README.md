@@ -1,302 +1,266 @@
 # Neda
 
-**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, Docker/Compose packaging, bounded MrBilit live validation, the URL-first local MrBilit monitor flow, and explicit production MrBilit registration are implemented. Earlier foundations have local/CI/live evidence; the Docker/Compose workflow passed CI run [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143), while target-host deployment remains pending. Real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. Production monitoring requires `NEDA_MRBILIT_ENABLED=true`; startup fails closed if the real provider is not enabled or active monitors reference an unregistered provider. Nothing here authorizes live provider traffic, real Telegram/Push credentials, or deployment.
+Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It watches selected trains, wagons, and fare classes in the background and sends Telegram and browser Web Push notifications when a monitored option becomes reservable.
 
+Neda is intentionally **not a booking engine**. It never buys, reserves, or holds a ticket. When a booking link can be built safely, it takes the owner to the provider's site to complete the purchase.
 
-Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
+**Status (2026-10-26): local release candidate, not production-deployed.** Core monitoring, scheduling, the private API, the dashboard, persistence, the notification pipeline, and retention are implemented and covered by automated tests. Docker/Compose packaging exists. Real Telegram and browser Push delivery, live production provider checks, and target-host deployment have not been validated. See [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) for the current audit.
 
-## Implemented so far
+## The problem it solves
 
-**M1.1 service foundation**
+Iranian train tickets can appear at unpredictable times, and checking several routes, dates, passenger combinations, and fare classes by hand is repetitive. Neda moves that work to a small service that runs continuously, survives restarts, and reports only meaningful state changes.
 
-- Go module pinned to Go `1.27.3`.
-- Validated environment configuration with fail-closed production checks.
-- Structured logging with request IDs and credential/URL/body redaction.
-- SQLite with WAL, foreign keys, `synchronous=FULL`, a single-writer connection, embedded forward-only migrations (`0001`–`0005`), checksum verification, and rollback-safe application.
-- HTTP server with `GET /healthz`, `GET /readyz`, JSON errors, Host-header validation, body limits, security headers, panic recovery, explicit timeouts, and graceful shutdown.
-- `neda healthcheck` probes `/readyz` for local/container readiness.
-- Backend CI for formatting, module tidiness, vet, tests, race tests, and build.
+The design is deliberately conservative: a provider error, timeout, malformed response, empty result, or ambiguous observation is never presented as "sold out". Availability notifications are only produced from evidence that a specific offering is reservable.
 
-**M1.2 repository and authentication foundation (complete)**
+Neda is built for one technical owner who self-hosts the service. It is not SaaS, multi-tenant, or a public ticket-search site.
 
-- `internal/store`: transaction helper and repositories for settings, the single owner user, and sessions, with real-SQLite transaction, constraint, and foreign-key tests.
-- Argon2id password hashing with encoded parameters; minimum 12 characters and a bounded maximum.
-- `neda set-password`: interactive TTY-only setup, reads the password twice without echo, rejects piped input and password arguments, and revokes existing sessions.
-- Session and CSRF primitives: 32-byte random tokens stored only as SHA-256 hashes, HttpOnly session and `neda_csrf` cookies, idle/absolute expiry, logout and password-change revocation.
-- Origin/Referer validation, double-submit CSRF middleware, and in-memory per-client/global login rate limiting. HTTP auth endpoints and private-route protection are implemented by P4/API-001/API-005.
+## Key features
 
-**M2 initial provider foundation (approved slice complete)**
+- **Independent monitors** for a route, departure date, adult/child/infant counts, and one or more provider targets. Monitors can be paused, resumed, edited, and deleted; they expire automatically after the departure day ends in Tehran.
+- **URL-first MrBilit creation**: paste a public MrBilit train-search URL, review the train → wagon → fare hierarchy, and select the exact wagons or offerings to watch. Future offerings are not added automatically.
+- **Background scheduling** with a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, jitter, exponential target backoff, restart recovery, and near-term checks after edits or resume.
+- **Conservative availability tracking** using `Reservable`, `NotReservable`, and `Unknown`, durable availability episodes, and deduplicated availability events.
+- **Two independent notification channels**: Telegram Bot API and browser Web Push. Both use a transactional outbox, a retrying delivery worker, and per-channel delivery history.
+- **Provider health tracking**, separate from ticket availability: last attempt/success/error, consecutive infrastructure failures, one deduplicated degraded episode after three failures, a recovery event, and stale detection.
+- **Operational visibility**: overview counts, monitor observations, recent checks, provider health and degraded/recovered events, event history, delivery status, and booking links when available.
+- **Private dashboard and JSON API** with owner authentication, sessions, CSRF protection, a Jalali date picker, and English-only responsive light/dark UI.
+- **Bounded local data**: embedded forward-only migrations, single-writer SQLite, retention cleanup for diagnostics and history, and no raw provider responses archived.
 
-- `internal/provider`: normalized provider IDs, availability states, capabilities, metadata, request/result types, `Provider` interface, and an explicit immutable registry that rejects nil, duplicate, empty-ID, and empty-display-name entries.
-- Shared error taxonomy and `Classify` contract for scheduler/health: success, infrastructure, configuration, route, request, and abandoned categories; timeout/network/429/5xx/invalid-response and provider-side cancellation are infrastructure failures, while 4xx/route/config are not.
-- `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
-- Fake-provider metadata is surfaced as a test-only source in the dashboard. MrBilit is registered automatically in non-production environments and in production when `NEDA_MRBILIT_ENABLED=true`; production startup rejects an empty provider registry.
+## Current status at a glance
 
-**M3 SCH-001 monitor foundation (approved slice complete)**
+| Area | State |
+|---|---|
+| Monitors, scheduler, availability state machine, provider health | Implemented and tested |
+| Private HTTP API, dashboard, authentication, settings | Implemented and tested |
+| MrBilit adapter and URL-first selected-option flow | Implemented; live-validated for one route/date; production registration is explicit |
+| Telegram delivery | Implemented with encrypted credentials, test action, and fake-server tests; real delivery not yet accepted |
+| Web Push | Implemented with VAPID, encrypted subscriptions, service worker, and local/browser-simulation tests; real external delivery and closed-browser acceptance not yet run |
+| Packaging and target-host deployment | Docker/Compose assets exist; target-host deployment is pending |
 
-- `internal/domain`: durable monitor model, validation (label/route/date/passenger/provider rules), Tehran end-of-day expiry, active/paused/expired status, config-version update planning, and a `MonitorService` for create/get/list/edit/pause/resume/delete.
-- `internal/store`: real-SQLite monitor and provider-target repository with active/inactive target rows retained for history, atomic material-edit transactions, old-episode closure with `config_changed`, and near-term scheduling after commit.
-- Material edits bump affected `config_version`s; label-only and booking-slug-only edits do not reset scheduling. Provider removal deactivates without deleting history; re-adding reactivates and bumps again.
-- Expired monitors cannot resume until a future departure-date edit recomputes expiry and clears `expired_at`; paused monitors remain paused.
-- A scheduler wake callback is invoked after committed monitor changes; `SCH-002` supplies the wake channel, jitter, and scheduler loop, and `SCH-010` composes the check stage and outcome runner. Production dispatch remains inert while the provider registry is empty.
+Detailed task-by-task history and evidence live in [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md). The codebase uses milestone/task IDs such as `M1`–`M5`, `SCH-*`, `NTF-*`, and `PSH-*`; these are development tracking labels, not runtime concepts.
 
-**M3 SCH-002 scheduler foundation (approved slice complete)**
+## Supported providers and integrations
 
-- `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers used by `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and the `Runner`/`Result` contract implemented by the SCH-010 outcome runner.
-- `internal/store`: schedule projection, startup recovery/stagger, and the SQLite `poll_interval_seconds` setting seeded to 300s and validated against 60–3600s.
-- `MonitorService` near-term scheduling is injectable and deterministic; a material edit's post-commit wake is covered by a scheduler integration test.
-- `cmd/neda` starts and gracefully stops the scheduler. It composes the SCH-010 outcome runner and fails closed in production if the real provider is not enabled or active monitors reference an unregistered provider.
-- No provider-check execution, availability/health transitions, notifications, API endpoints, or frontend work is included.
+| Integration | Status | Details |
+|---|---|---|
+| **MrBilit** | Real adapter, implemented | Uses `GET https://train.mrbilit.com/api/GetAvailable/v2`. Supports URL search, route IDs, passenger counts, prices, selected wagon/class options, and booking links built only from an accepted route slug and valid date. Development registers it automatically; production requires `NEDA_MRBILIT_ENABLED=true`. |
+| **Test provider** | Test-only, implemented | Deterministic fake provider for local workflows and tests. It uses fake-only route IDs, performs no network access, is labelled as a test source in the UI, and is rejected in production. |
+| **Telegram Bot API** | Implemented | Bot token and chat ID are stored encrypted; the dashboard can save, clear, and test the configuration. Availability and provider-health events can be delivered. |
+| **Browser Web Push** | Implemented | VAPID keys, encrypted subscription storage, service-worker delivery, global enable/pause, per-device test/remove, and SSRF-safe outbound requests. Requires a secure browser context and configured VAPID subject. |
+| **Other train providers** | Not implemented | The provider interface and registry are the extension point. No other real train-ticket adapters exist. |
 
-**M3 SCH-003 provider spacing and target backoff (approved slice complete)**
+A monitor can contain multiple provider targets at the data-model and scheduler level. Today there is one real provider, and the production creation UI creates one MrBilit target from one search URL; there is no UI for combining several real providers into one monitor.
 
-- `internal/scheduler`: per-provider concurrency 1 and 5s start-to-start spacing (provisional), enforced alongside A-33 monitor-wide serialization. Spacing state is in-memory and resets on restart; startup staggering is unchanged.
-- `internal/scheduler/backoff.go`: pure target scheduling policy consuming `PRV-010` classifications. First infrastructure failure uses 2× interval; the delay is capped at `max(4×interval, 30m)`, gets ±10% post-cap jitter, and honors classified `RetryAfter` as a lower bound. Config/route/ordinary 4xx use the normal interval; success/valid empty reset the counter; abandoned outcomes do not update scheduling.
-- `internal/store`: transaction-scoped `ApplyTargetSchedule` updates only `consecutive_failures`, `next_due_at`, and `updated_at`. It never begins/commits a transaction. Production invocation belongs to SCH-010; no migration is required.
-- No provider HTTP retries, redirects, timeouts, availability/health transitions, notifications, API, or frontend work is included.
+## How it works
 
-**M3 SCH-004 provider-check stage (approved slice complete; consumed by SCH-010)**
+### 1. Create a monitor
 
-- `internal/scheduler/check.go`: `CheckStage` loads the persisted monitor/target, builds the normalized `provider.CheckRequest`, commits exactly one `check_runs(outcome='running')` row before I/O, validates provider configuration, and calls `Provider.Check` with one overall 20-second context. A `CheckAttempt` retains the check-run ID, target ID, request config version, booking slug, result/error, PRV-010 classification, and timing for SCH-010.
-- `internal/store/checks.go`: `StartCheckRun` performs the attempt-start transaction, verifies the target row still exists, and writes only `check_runs`.
-- The production scheduler now composes this stage through the SCH-010 outcome runner; the stage itself still performs no outcome writes.
-- No target scheduling, availability/health/outbox writes, HTTP retries, or live provider requests are included in the stage.
+For MrBilit, the owner pastes a public URL such as:
 
-**NTF-000 transactional notification outbox (approved slice complete)**
+```text
+https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24
+```
 
-- `internal/migrations/0004_notifications.sql`: provider-health tables, notification deliveries/attempts, and Push-subscription storage with enum, counter, foreign-key, and unique constraints plus outbox claim/lookup indexes.
-- `internal/migrations/0005_monitor_selections.sql`: selected train/class identities and matching metadata tied to provider targets and config versions.
-- `internal/notify/outbox.go`: `Enqueue` inserts an event and its initial `pending` deliveries inside the caller's `*sql.Tx`. A duplicate `dedupe_key` returns the existing event ID with `Created=false` and inserts nothing; duplicate delivery targets are no-ops. Delivery IDs are outbox-owned deterministic UUIDs derived from the event ID and destination identity, so multiple events in one transaction cannot collide on the global primary key. `FindEventIDByDedupeKey` provides only the minimal dedupe read-back.
-- Initial deliveries use `next_attempt_at = event.created_at`. The helper never begins, commits, or rolls back the caller's transaction.
-- Database rows are consumed by the P3 delivery worker (Telegram) and the Web Push sender/worker integration; event creation and enqueue remain owned by the transactional producers.
+Neda validates the URL shape, converts the Jalali date to Gregorian, resolves provider route IDs from the public search page, and performs an initial read-only search. The result is grouped as train → wagon → fare. The owner selects a whole wagon or individual offerings; the exact offering keys and display metadata are persisted in `monitor_provider_selections` against the target's configuration version.
 
-**M3 SCH-005 availability state machine (approved slice complete, applier only)**
+The price filter and sorting in this screen are view-only. They never change the selected offerings, the monitor payload, or availability state. Prices are provider-reported integer amounts; currency and per-passenger basis are not yet verified.
 
-- `internal/availability/apply.go`: `Apply(ctx, *sql.Tx, input)` applies one successful provider result to `monitor_provider_id × config_version × journey_key × offering_key` states. It covers initial Reservable, NotReservable→Reservable, continuous Reservable, decisive close, Unknown preservation, later re-open, missing/empty observations, and conflicting duplicate keys.
-- The applier never begins, commits, or rolls back. It writes availability states/episodes and enqueues availability events plus initial deliveries through NTF-000 inside the caller's transaction.
-- Missing and empty successful results set `last_missing_at` without closing episodes. Provider errors/timeouts/malformed results are never mapped to NotReservable; Unknown and conflict results remain Unknown.
-- This slice did not include provider health, check-run finalization, target scheduling/backoff, worker/sender, or production runner wiring; SCH-010 now supplies finalization and runner composition.
+### 2. Schedule checks
 
-**M3 SCH-006 provider health (approved slice complete, applier only)**
+The scheduler runs inside the Go process. It selects active, non-expired targets, runs at most one check per monitor at a time, and keeps a configurable number of workers busy (default 2, maximum 16). Provider checks are spaced at least 5 seconds apart per provider.
 
-- `internal/health/apply.go`: `ApplySuccess` and `ApplyFailure` are caller-transaction-scoped and never begin, commit, or roll back. They upsert `provider_health`, manage the single open degraded episode, emit one deduplicated degraded/recovery event through NTF-000, and update provider/target diagnostics.
-- A-21 is resolved to **Option A (infrastructure-only)**: only applicable infrastructure failures with the provider classification's outage flag increment the provider counter. Config/route/ordinary 4xx and business/availability outcomes update diagnostics but do not count as provider failures; success/empty resets the counter.
-- Three eligible infrastructure failures open one degraded episode and one event; further failures do not repeat it. Recovery closes the episode and emits one recovery event.
-- `internal/health/status.go` derives stale status as `max(3×poll interval, 15m)` or an open degraded episode.
-- Target `consecutive_failures`/`next_due_at`/`updated_at` remain owned by SCH-003; this slice did not include availability state, check-run finalization, workers/senders, or production runner wiring. SCH-010 supplies check finalization and runner composition.
+The global polling interval is a SQLite setting, defaulting to 300 seconds and bounded to 60–3600 seconds. After a check finishes, the next due time is calculated from the completion time with ±10% jitter. The effective start time can be later because of worker capacity, provider spacing, and backoff.
 
-**M3 SCH-007 expiry reconciliation and next-expiry wake (approved slice complete)**
+Transient provider failures use exponential target backoff: the first failure waits 2× the interval, and the delay is capped at `max(4× interval, 30 minutes)` with jitter. A provider `Retry-After` value is honored as a lower bound. Configuration, route, and ordinary 4xx errors do not trigger outage backoff. The adapter itself supports bounded HTTP retries, but the current production composition disables them (`NoRetries: true`); scheduler backoff is the active retry mechanism.
 
-- `internal/availability/expiry.go`: `CloseExpired` closes every open availability episode for a monitor with `close_reason='expired'`, inside the caller's transaction, without creating an event or delivery.
-- `internal/store/expiry.go`: `ReconcileExpirations` applies one transaction-scoped sweep over all monitors whose parsed `expires_at` is at or before `now`, including paused and disabled monitors. It sets `expired_at`, preserves `expires_at`, delegates episode closure to SCH-005, and returns the earliest remaining future expiry. It does not poll or write target scheduling, check-run, provider-health, event, or delivery state.
-- `internal/scheduler/scheduler.go`: the scheduler reconciles expiry during startup and every loop iteration and includes the next expiry in its timer deadline. Expiry is reconciled even while every worker is busy. Date-edit or pause/resume wakes recalculate the deadline, and old timers are stopped by the existing wait loop.
-- Expiry remains a non-event diagnostic transition: historical availability events remain, open episodes close, and paused monitors stay paused. An expired monitor cannot be resumed until a future departure-date edit recomputes `expires_at` and clears `expired_at`.
-- No schema migration, live provider request, notification sender, API, or deployment work is included.
+Monitors expire at the end of the departure day in `Asia/Tehran`. Pausing stops polling without deleting history. An expired monitor cannot resume until its departure date is edited to a future date.
 
-**M3 SCH-010 per-check outcome orchestrator (approved slice complete)**
+### 3. Check a provider
 
-- `internal/scheduler/outcome.go`: `OutcomeRunner` composes the SCH-004 check stage with one caller-owned outcome transaction. It applies the mandatory pre-I/O-return and in-transaction target validity gates (target existence/active state, monitor enabled, expiry, config version, booking slug) before any outcome write.
-- Success/valid-empty outcomes finalize the check row, apply availability transitions, apply provider-health success, persist target scheduling through SCH-003, and enqueue events/deliveries through NTF-000 atomically. Provider-error outcomes finalize the row, update SCH-006 diagnostics/counters, and persist target backoff without touching availability. Discarded and abandoned outcomes finalize only the running `check_runs` row.
-- Structural result validation runs before the outcome transaction. Invalid results are classified as `invalid_response` and take the provider-error branch. Caller cancellation is abandoned; deadline/timeout is a provider failure; target invalidity takes precedence over cancellation.
-- `internal/store`: `WithSQLTx` provides the raw transaction plus a transaction-scoped repository view; `FinalizeCheckRun` uses a conditional `WHERE id=? AND outcome='running'` update and reports `ErrNoRunningCheck` for duplicate/lost finalization.
-- An injected delivery source supplies destinations; production defaults to none until notification-channel tasks define resolution. The outbox wake is a no-op until a delivery worker exists. Outcome-transaction failure leaves the running row for startup recovery and returns `Settled:true` so the scheduler does not start a duplicate attempt immediately; the target is not rechecked until the process restarts or persisted scheduling changes, which is a documented limitation of this slice.
-- No live provider requests, notification senders, channel configuration, multi-provider end-to-end matrix, API, or deployment work is included.
+Before network I/O, the check stage writes exactly one `check_runs` row in `running` state. It loads the monitor and target configuration, validates the provider configuration, and calls the adapter with one overall 20-second deadline. Redirects are rejected and response sizes are bounded.
 
-**M3 SCH-008 multi-provider isolation (test-only complete)**
+After I/O, the outcome runner re-checks that the target still exists, is active and enabled, is not expired, and still has the same configuration version and booking slug. A stale result from a paused, edited, or deleted target is recorded as `discarded` and never updates availability, health, or scheduling. A shutdown or caller cancellation becomes `abandoned`.
 
-- `internal/scheduler/multi_provider_test.go` adds a nine-test `TestMultiProvider*` matrix over real check-stage/outcome-runner and scheduler components. It covers one provider failing while another succeeds, independent availability states/episodes/events even when providers report identical journey/offering keys, no cross-provider merge or suppression, independent event/outbox counts, and a discarded stale result that does not block the other provider.
-- Provider health is verified as global per provider ID, not per monitor: a beta success does not recover degraded alpha, while a later alpha success on another monitor does recover alpha. Per-target backoff is isolated, and the A-33 monitor-wide guard is verified with real sequential provider execution (maximum concurrency one).
-- Expiry tests use the merged SCH-007 reconciliation path to close every open episode for every provider of a monitor with `close_reason='expired'`, without creating events or outbox rows and without dispatching a post-expiry poll.
-- Evidence: `go test ./internal/scheduler/... -run TestMultiProvider -count=1` executed all nine tests and passed; ten repeated iterations also passed. No production behavior was changed.
+### 4. Apply availability and notifications atomically
 
-**M3 SCH-009 scheduler/state end-to-end integration (test-only complete)**
+A successful result is applied in one SQLite transaction:
 
-- `internal/scheduler/integration_*_test.go` adds a reusable temp-SQLite harness that composes the real scheduler, check stage, outcome runner, availability/health appliers, NTF-000 outbox, and a reopenable database. It covers all 15 SCH-009 acceptance criteria: success/valid-empty commit and health recovery, rollback both before and at the final schedule write, infrastructure and non-counting errors, threshold health commit/rollback, discarded/abandoned/deleted-target write sets, cancellation/timeout semantics, delivery/outbox ordering, stale in-flight material edits, attempt-start and outcome crash recovery, slow-retry deadline, booking-slug changes, expiry/date-edit/resume, and the interleaved health transition table.
-- Restart requirements close and reopen SQLite rather than relying on in-memory state. The stale in-flight test proves the SCH-010 validity gate discards the old-config result while the material edit's near-term schedule and provider health remain intact. The valid-empty test asserts both check finalization and the persisted provider-health success/recovery record.
-- AC 8 limitation: NTF-001 is not implemented, so there is no production delivery worker. The test-only after-commit observer proves that the delivery source runs while the outcome is uncommitted and that the outbox is visible only at the post-commit wake. It does not claim that an external sender was exercised.
-- Evidence: `go test ./internal/... -count=1`, `go test -count=1 ./...`, `go test -race -count=1 ./...`, `go vet ./...`, `go build ./...`, `gofmt -l .`, `git diff --check`, `make check`, and `make race` passed; selected integration tests passed repeated and race-enabled runs, and targeted runs under `TZ=UTC` and `TZ=America/New_York` passed. No production sender, schema change, live provider, server, or deployment work was added.
-- PR: [#13](https://github.com/am-fallah/neda/pull/13); code-head CI [40103924704](https://github.com/am-fallah/neda/actions/runs/40103924704) and evidence-head CI [40104074601](https://github.com/am-fallah/neda/actions/runs/40104074601) passed. Merged to `main` as `25d46b9` on 2026-10-24.
+- inventory states and availability episodes are updated;
+- provider health diagnostics and degraded/recovered episodes are updated;
+- target scheduling is advanced or backed off;
+- events and initial notification deliveries are inserted into the transactional outbox;
+- the check run is finalized.
 
-**P1a MrBilit adapter foundation**
+Provider errors finalize the check and update diagnostics without changing offering availability. A provider error, timeout, malformed response, or missing observation is never converted to `NotReservable`.
 
-- `internal/provider/mrbilit` implements the documented/provisional `GET /api/GetAvailable/v2` request with `from`, `to`, `date`, `adultCount`, `childCount`, and `infantCount`. It never sends unverified `genderCode`, `exclusive`, or `availableStatus` values and never sends cookies or credentials.
-- The transport owns only the 6s per-attempt timeout, two bounded retries (timeouts, connection errors, 429, 502/503/504), 500ms/1s backoff with jitter, `Retry-After` bounded by the caller's deadline, redirect rejection, cancellation, and a 2 MiB response cap. It does not create an overall check deadline; `SCH-004` remains the sole owner of the 20s context.
-- The parser accepts the observed `trains[]`/`prices[].classes[]`/`meta` envelope and keeps the synthetic fixtures as a separate test contract. Other shapes fail closed as invalid responses. Caps are 100 journeys, 50 offerings per journey, and 500 offerings total.
-- Journey/offering keys follow Architecture §9.3: native IDs use `id:<native>`; fallback keys hash a versioned canonical string and exclude price, capacity, availability flags, and array index. The known-negative sample (`capacity=0`, `isAvailable=false`, `reservationAvailable=true`) is `NotReservable`; positive/shortfall/contradiction cases use synthetic fixtures only.
-- Provider metadata declares URL-search and price support, and generic monitor validation now honors required route-ID capabilities while each adapter remains the final validator. Non-production environments register MrBilit automatically; production requires `NEDA_MRBILIT_ENABLED=true`. Real contract evidence is recorded in `docs/MRBILIT_LIVE_VALIDATION.md`.
-- PR: [#14](https://github.com/am-fallah/neda/pull/14); merged to `main` as `33f8a7c`, reverted by [#16](https://github.com/am-fallah/neda/pull/16) (`1fdba66`), and re-applied by [#17](https://github.com/am-fallah/neda/pull/17) (`bb514c3`). The code is present in `main`; code-head CI [40110863710](https://github.com/am-fallah/neda/actions/runs/40110863710) (`a477150`) and final code-head CI [40111365080](https://github.com/am-fallah/neda/actions/runs/40111365080) (`10ba711`) passed.
+Provider health is global per provider. Only applicable infrastructure failures count toward the outage threshold; configuration, route, and ordinary 4xx errors update diagnostics without incrementing it. A provider is marked stale when its last successful check is older than `max(3× poll interval, 15 minutes)`, or immediately while a degraded episode is open.
 
-**URL-first MrBilit monitor creation (local/non-production)**
+### 5. Deliver and retain
 
-- `POST /api/v1/providers/mrbilit/search` accepts a public MrBilit train search URL such as `https://mrbilit.com/trains/yazd-mashhad?departureDate=1405-08-24`. It validates the exact Host/path/query shape, ignores tracking parameters, converts the Jalali date to Gregorian, resolves numeric route IDs from the public page's embedded Nuxt `urlParams`, and fetches the initial API result through the existing adapter.
-- The initial search is stateless and separate from scheduled checks. It returns normalized trains/offerings, route IDs/names, dates, passenger counts, warnings, capacity, and Reservable/NotReservable/Unknown states. A positive numeric provider price is preserved as `priceAmount` with an empty `priceCurrency`; zero/missing/invalid amounts remain absent. Empty `trains[]` is a valid empty result, not a sold-out verdict.
-- The dashboard New Monitor page presents one train with its distinct wagon groups. Selecting a wagon persists every current underlying offering key; expanding the wagon allows exact or partial offering selection. The create API persists the exact selections in `monitor_provider_selections` with the target's config version and all matching/display metadata. A view-only provider-amount price filter and departure/lowest-known-price sorting never alter the selection or payload. Unverified prices are not sent in notifications.
-- Scheduled checks continue to call the existing adapter for the whole route. A deterministic selection filter reduces the result to selected options only. Exact journey/offering keys are preferred and validated against train/class metadata; a unique metadata fallback is allowed. Missing, ambiguous, or conflicting matches become `Unknown`; they never become `NotReservable`. Unselected classes create no inventory states, events, or deliveries.
-- Selection changes and material monitor edits use the existing config-version and episode-closure rules. Existing event/outbox dedupe remains the only notification path; repeated checks for the same open episode do not create duplicate events or deliveries.
-- Production uses the same real MrBilit adapter when `NEDA_MRBILIT_ENABLED=true`; no live provider request is issued by local or CI tests. Live validation remains bounded, unauthenticated, read-only, and non-booking.
+The delivery worker claims committed outbox rows with a lease, sends outside the database transaction, records every attempt, and retries transient failures with bounded delays. Telegram and Push destinations are resolved independently. Delivery is at-least-once; exactly-once external delivery is not claimed.
 
-**P2 encryption and Telegram foundation**
+A daily retention worker prunes bounded diagnostic and notification history. Open availability episodes are never pruned.
 
-- `internal/crypto` loads and validates the external key file, encrypts setting values with versioned AES-256-GCM and setting-key-bound associated data, and fails closed on wrong keys/tampering. `internal/config` now uses the same key-file validation at startup.
-- `internal/notify` provides a bounded, redirect-free Telegram Bot API client with HTML escaping, safe permanent/transient/rate-limit/canceled classification, `Retry-After`, and redacted errors. `internal/notify/telegramsettings` stores the token and chat ID encrypted and returns only a masked status/test view.
-- Delivery orchestration is implemented by `NTF-001`; the authenticated Telegram settings/test API is implemented by `API-004`. The manual backup/restore drill and `/data` permission proof remain `SEC-003`/`GATE-004`. No real credentials, live Telegram calls, or production key generation are included.
-- PR: [#15](https://github.com/am-fallah/neda/pull/15); merged to `main` as `759cf77`. Rebased-head CI [40115109700](https://github.com/am-fallah/neda/actions/runs/40115109700) and post-merge `main` CI [40115242788](https://github.com/am-fallah/neda/actions/runs/40115242788) passed.
+## Availability semantics
 
-**P3 notification delivery worker (Telegram)**
+| State | Meaning |
+|---|---|
+| `Reservable` | Sufficient positive evidence that the specific offering can be booked for the requested passenger mix, with no unresolved contradiction. A new episode creates one initial event. |
+| `NotReservable` | Decisive negative evidence for that offering. A successful negative observation closes the open episode. |
+| `Unknown` | Missing, ambiguous, insufficient, contradictory, malformed, errored, or timed-out evidence. It never closes an episode and is never displayed as "sold out". |
 
-- `internal/notify/delivery` claims committed outbox rows with a lease, sends outside any database transaction, records every attempt, applies bounded retry/backoff policy, honors safe `Retry-After`, supports crash reclaim of expired `sending` leases, and enforces a bounded worker concurrency.
-- The worker skips availability deliveries whose monitor is already expired and skips an unconfigured or unreadable channel instead of retrying forever. Event creation/outbox atomicity remains owned by NTF-000/SCH-005/SCH-006; the worker never creates events.
-- `internal/notify/format.go` renders escaped Telegram HTML with validated booking links and distinct provider-health/recovery labels. `internal/notify/delivery.TelegramSender` decrypts configured credentials and uses the bounded P2 client. Tests use fake Telegram servers only; no real credentials or messages are used.
-- Production composition starts the worker only when the encryption key file is configured. With the provider registry still empty, no production checks dispatch, so the worker has no new rows to send.
-- Remaining: NTF-002 full presentation (notably Jalali display); the authenticated Telegram settings/test endpoint is implemented by `API-004`.
-- PR: [#19](https://github.com/am-fallah/neda/pull/19); merged to `main` as `bddcf24`. Code CI [40115991305](https://github.com/am-fallah/neda/actions/runs/40115991305), docs CI [40116125663](https://github.com/am-fallah/neda/actions/runs/40116125663), and post-merge main CI [40116243015](https://github.com/am-fallah/neda/actions/runs/40116243015) passed.
+Important consequences:
 
-**P4 private authentication API**
+- A valid empty result is a successful query with no returned offerings. It does not close open episodes.
+- Repeated `Reservable` observations in one continuous episode do not create duplicate events. A later reservable observation after a confirmed close creates a new event.
+- For URL-first MrBilit monitors, only the selected offerings are monitored. Classes that appear in later searches are not added automatically.
+- Provider errors, timeouts, discarded results, and abandoned results never overwrite confirmed availability.
 
-- `POST /api/v1/auth/login` uses same-origin `Origin`/`Referer` validation and the in-memory login rate limiter, then issues a fresh session and CSRF cookie. Login does not use session CSRF.
-- `GET /api/v1/auth/session` returns authenticated state, CSRF token, setup-required signal, and expiry without secrets. `POST /api/v1/auth/logout` and `POST /api/v1/auth/password` require a session plus CSRF header/cookie and same-origin validation; password change revokes other sessions.
-- The API preserves the existing Host validation, body limits, security headers, no-CORS policy, request IDs, sanitized errors, and no-store caching. `cmd/neda/serve.go` composes the auth manager and login guard.
-- Tests cover login success/failure/setup-required, Origin rejection, rate limiting with `Retry-After`, cookie flags, session probes, private-route 401/403 behavior, logout, and password change. No real credentials are used.
-- PR: [#20](https://github.com/am-fallah/neda/pull/20); merged to `main` as `7cd0261`. Code CI [40116569664](https://github.com/am-fallah/neda/actions/runs/40116569664), docs CI [40116746410](https://github.com/am-fallah/neda/actions/runs/40116746410), and post-merge main CI [40116899292](https://github.com/am-fallah/neda/actions/runs/40116899292) passed.
+The detailed decision rules and transition tables are in [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-**API-002 monitor CRUD API**
+## Architecture
 
-- `internal/httpapi/monitors.go` adds private `GET/POST /api/v1/monitors`, `GET/PATCH/DELETE /api/v1/monitors/{id}`, and idempotent `POST /api/v1/monitors/{id}/pause|resume` endpoints.
-- Requests use camelCase monitor/provider DTOs. `PATCH` is partial: omitted fields/providers are preserved; supplying a provider list replaces the active set and inherits omitted optional fields from matching providers. Responses expose monitor status, expiry, scheduling/diagnostics, and provider rows without internal secrets. Validation failures return a `validation_error` with path-keyed fields; expired resume returns 409; delete returns 204.
-- `cmd/neda/serve.go` composes the monitor service with the scheduler waker and current-interval near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider is involved. Development may explicitly register the fake provider with `NEDA_FAKE_PROVIDER_ENABLED=true`; production rejects that flag and requires `NEDA_MRBILIT_ENABLED=true`.
-- Remaining: none for monitor CRUD/detail; overview/providers/events/deliveries are implemented by `API-003`.
-- PR: [#22](https://github.com/am-fallah/neda/pull/22); merged to `main` as `f33dd8a`. CI run [40119615680](https://github.com/am-fallah/neda/actions/runs/40119615680) passed on the code head; merged-main CI [40119753601](https://github.com/am-fallah/neda/actions/runs/40119753601) passed.
+```mermaid
+flowchart LR
+    Browser["Browser SPA<br/>React + TypeScript"] -->|"HTTPS /api/v1"| API["Go HTTP API<br/>auth, JSON API, SPA"]
+    API --> DB[("SQLite<br/>authoritative state")]
+    API -->|"serves embedded assets"| Browser
+    Scheduler["Scheduler<br/>bounded workers"] --> Registry["Provider registry"]
+    Registry --> MrBilit["MrBilit adapter"]
+    Registry --> Fake["Test-only adapter"]
+    MrBilit -->|"read-only GET"| MrBilitAPI["MrBilit API and public page"]
+    Scheduler --> Outcome["Check + outcome transaction"]
+    Outcome --> DB
+    Outcome --> Outbox["Events + outbox rows"]
+    Outbox --> Delivery["Delivery worker"]
+    Delivery --> Telegram["Telegram Bot API"]
+    Delivery --> Push["Browser Push services"]
+    Retention["Retention worker"] --> DB
+```
 
-**NTF-006 notification/event/delivery read model**
+The scheduler, delivery worker, and retention worker are goroutines in the same Go process as the HTTP server. SQLite and the in-memory in-flight/spacing state assume a single process and one replica.
 
-- `internal/store/notification_read.go` adds read-only `ListEvents`, `GetEvent`, and `ListDeliveries`. Events include durable snapshots, nested per-channel delivery state, and derived pending/sending/sent/retry/failed/skipped and attempted/terminal counts. Delivery history includes event kind, occurrence time, provider, and monitor context.
-- Pagination is opaque cursor-based with deterministic chronological ordering and stable ID tie-breaks; page sizes default to 50 and are capped at 100. Filters cover event kind/monitor/provider and delivery channel/status/event/kind. Delivery target keys, leases, credentials, raw error details, and HTTP endpoints are excluded.
-- This task is repository-only; `API-003` owns the HTTP events/deliveries/overview surface. No schema, outbox, worker, or delivery-semantics changes were made.
-- Tests cover empty pages, subsecond and tie ordering, page walking, filters, all six delivery statuses, attempted/terminal counts, malformed cursors, cancellation, and monitor-deletion cascade.
-- PR: [#24](https://github.com/am-fallah/neda/pull/24); CI run [40121564627](https://github.com/am-fallah/neda/actions/runs/40121564627).
+### Major components
 
-**API-008 monitor detail observations and diagnostics**
+| Component | Location | Responsibility |
+|---|---|---|
+| CLI | `cmd/neda` | `serve`, `set-password`, `healthcheck`, and `version`. |
+| HTTP API and middleware | `internal/httpapi` | Routing, authentication, CSRF, host validation, JSON errors, health endpoints, settings, history, Push, and SPA serving. |
+| Monitor domain | `internal/domain` | Monitor validation, status, expiry, edits, pause/resume/delete, and scheduling intent. |
+| Scheduler | `internal/scheduler` | Due selection, worker pool, monitor-wide serialization, spacing, jitter, backoff, restart recovery, check stage, and outcome orchestration. |
+| Provider boundary | `internal/provider` | Normalized types, explicit registry, error classification, and capability metadata. Adapters live in `provider/mrbilit` and `provider/fake`. |
+| Availability engine | `internal/availability` | Inventory states, episodes, event generation, and expiry closure. |
+| Provider health | `internal/health` | Infrastructure-failure counters, degraded episodes, recovery, and stale status. |
+| Notifications | `internal/notify` | Transactional outbox, Telegram formatting/client, and the lease-based delivery worker. |
+| Web Push | `internal/push` | VAPID keys, subscription validation, encryption, DNS/IP guards, and the sender. |
+| Persistence | `internal/db`, `internal/migrations`, `internal/store` | SQLite setup, embedded migrations, repositories, and query models. |
+| Authentication and secrets | `internal/auth`, `internal/crypto` | Argon2id passwords, sessions, CSRF, rate limits, key-file validation, and AES-256-GCM setting values. |
+| Dashboard | `web/` | React SPA, service worker, typed API client, and frontend tests. It is embedded into the binary with `go:embed`. |
+| Retention | `internal/retention` | Daily bounded cleanup of check runs, attempts, events, episodes, sessions, and disabled subscriptions. |
 
-- `GET /api/v1/monitors/{id}` now keeps the existing monitor/provider fields and adds bounded `observations` and `recentChecks` for each active provider target. List/create/update/pause/resume payloads are unchanged.
-- Observations are read only for the target's current `configVersion`, ordered deterministically by state and stable keys, capped at 100 with `observationsTruncated`. They expose the persisted `reservable`/`not_reservable`/`unknown` state and timestamps. `missing=true` means the latest successful check did not return that offering; current availability is then unknown, not confirmed unavailable or available.
-- Recent checks are newest-first, capped at 10 with `recentChecksTruncated`, and expose sanitized outcome, error category, HTTP status, duration, and counts. Provider errors, timeouts, malformed responses, and discarded/abandoned checks never overwrite the last confirmed availability state.
-- Inactive historical targets remain in the provider list but expose no stale diagnostics. The detail DTO excludes target keys, leases, credentials, endpoints, and raw provider errors.
-- Tests cover normal, empty, missing, unauthenticated, paused, expired, stale-timestamp, unknown/missing, empty-success-vs-provider-error, provider-error, config-version isolation, and unchanged list responses.
-- PR: [#25](https://github.com/am-fallah/neda/pull/25); CI run [40122307378](https://github.com/am-fallah/neda/actions/runs/40122307378).
+### Data model
 
-**Web Push (PSH-001–PSH-006 implementation)**
+| Tables | Purpose |
+|---|---|
+| `monitors`, `monitor_providers`, `monitor_provider_selections` | Routes, dates, passengers, per-provider targets, config versions, scheduling state, and exact selected offering identities. Inactive targets are retained for history. |
+| `check_runs` | One attempt per provider check with sanitized outcome, timing, HTTP status, and counts. |
+| `inventory_states`, `availability_episodes` | Latest state per target/config version/journey/offering and the open or closed reservable periods. |
+| `events`, `notification_deliveries`, `notification_attempts` | Durable availability and provider-health events, per-channel deliveries, and attempt history. |
+| `provider_health`, `provider_health_episodes` | Global per-provider diagnostics and degraded/recovery episodes. |
+| `push_subscriptions`, `settings`, `users`, `sessions` | Encrypted Push subscriptions, plain/encrypted settings, the single owner, and hashed session state. |
 
-- `internal/push` stores one VAPID keypair: the public key in plaintext settings and the private key as versioned AES-256-GCM ciphertext. The pair is generated once, validated, and reused across restarts; wrong-key/tamper cases fail closed.
-- Subscription endpoints, `p256dh`, and `auth` values are validated at subscription time (HTTPS-only allowlisted Push-service hosts, no userinfo/fragment, default port, bounded length, P-256 point, 16-byte auth) and encrypted at rest with per-row AAD. Dedupe uses the SHA-256 endpoint hash; re-registration preserves the row ID.
-- The sender resolves DNS once, rejects private/loopback/link-local/multicast/metadata/documentation addresses, dials the validated IP directly, rechecks the connected IP, disables proxies/redirects, and bounds time/body. 404/410 disables a subscription; 429/5xx retries with capped `Retry-After`; 400/401/403/413 is permanent.
-- Private API: `GET /api/v1/push/config`, `POST /api/v1/push/subscriptions`, `DELETE /api/v1/push/subscriptions/{id}`, and `POST /api/v1/push/test`. They never return endpoint/key/private-key material.
-- Dashboard: explicit permission request, enable/pause, device list, per-device/all-device test, remove device, and forget-this-browser. The service worker displays bounded payloads, opens only same-origin or validated `mrbilit.com` links, and asks an open dashboard to refresh a rotated subscription.
-- Automated tests cover validation, encryption, dedupe, disable/410, retry classification, SSRF/DNS rebinding, redirect rejection, API auth/CSRF, secret scans, and UI states. Real Push delivery and closed-browser acceptance remain manual and were not run.
+Configuration changes use a per-target `config_version`. Material changes to route, date, passengers, provider route IDs, or selections close old episodes with `config_changed` and start fresh state; label-only and booking-slug-only edits do not reset availability.
 
-**API-004 settings and Telegram configuration**
+### Technology stack
 
-- `GET /api/v1/settings` returns non-secret settings: `pollIntervalSeconds`, `pushEnabled`, and nested Telegram `available`/`configured`/`readable`, masked `chatLabel`, settings error category, and last-test metadata.
-- `PUT /api/v1/settings` atomically updates the poll interval (60–3600 seconds) and/or Push-enabled flag. The new interval applies to subsequent scheduling.
-- `PUT /api/v1/settings/telegram` saves the token and chat ID through the existing AES-256-GCM settings layer, or clears them with `clear:true`. Responses never include the token, raw chat ID, or ciphertext.
-- `POST /api/v1/settings/telegram/test` validates the bot with `getMe`, sends one test message, and records only a sanitized result category/timestamp. Telegram failures are shown through `lastTestOk=false`/`lastErrorKind`; missing encryption settings return 503 and missing/unreadable stored credentials return 409.
-- Uses the private session+CSRF wrapper and existing Host validation, body limits, and sanitized errors. Tests cover auth/CSRF, defaults, partial updates, interval bounds, encrypted storage, set/clear, success/permanent-failure tests, unreadable/missing/unavailable configuration, response secret scans, and log scans. No real Telegram credentials or messages are used.
-- PR: [#26](https://github.com/am-fallah/neda/pull/26); CI run [40123110108](https://github.com/am-fallah/neda/actions/runs/40123110108).
+- **Backend:** Go 1.27.3, standard-library `net/http`, `modernc.org/sqlite`, embedded forward-only SQL migrations, `log/slog`.
+- **Frontend:** React 19, TypeScript, Vite 8, Tailwind CSS 4, shadcn/ui and Radix primitives, React Router, `jalaali-js`.
+- **Notifications:** direct Telegram Bot API client and `webpush-go` for VAPID/Web Push.
+- **Security:** Argon2id, opaque sessions with hashed tokens, double-submit CSRF, AES-256-GCM secret storage with an external key file, strict Host/origin checks, and no CORS.
+- **Build:** one Go binary containing the API, background workers, migrations, and embedded frontend assets.
 
-**API-003 providers, events, deliveries, and overview**
+## Dashboard
 
-- `GET /api/v1/providers` returns registered provider metadata/capabilities, the test-only flag, and global per-provider health with optional open degraded episode and derived stale state. Missing health is `null`/unknown, never fabricated as healthy.
-- `GET /api/v1/events` and `/events/{id}` expose durable events with nested per-channel delivery state and summary counts. Filters: `kind`, `monitorId`, `providerId`, `limit`, opaque `cursor`. Availability events carry `state: "reservable"`; provider-health events carry only sanitized error/failure diagnostics.
-- `GET /api/v1/deliveries` exposes delivery history with `channel`, `status`, `eventId`, `kind`, `limit`, and opaque `cursor` filters. Target keys and leases are never returned.
-- `GET /api/v1/overview` returns bounded aggregates: derived monitor counts, registered-provider degraded/stale counts, delivery status counts, five recent availability events, five recent deliveries, and `generatedAt`.
-- All routes are private GETs; invalid filters/cursors return sanitized 400s and missing events 404. No write, retry, or send endpoint is added, so notification ownership remains with the delivery worker/tasks.
-- Tests cover auth, provider metadata/health/stale/degraded, event/delivery ordering and pagination, valid/invalid filters, detail/missing, empty results, overview counts/recent items, and internal-field absence.
-- PR: [#27](https://github.com/am-fallah/neda/pull/27); CI run [40123917780](https://github.com/am-fallah/neda/actions/runs/40123917780).
+The frontend is a single-page application served by the Go binary. It is English-only, responsive, and supports light, dark, and system themes.
 
-**API-007 end-to-end private API coverage**
+| Route | Purpose |
+|---|---|
+| `/login` | Owner sign-in and setup guidance when no password exists. |
+| `/` | Monitor-centric overview: attention, active, and paused/expired groups; monitor counts; provider health; recent availability events; and recent deliveries. |
+| `/monitors` | Searchable and status-filterable monitor list. |
+| `/monitors/new` | URL-first MrBilit search, wagon/fare selection, view-only price filter/sort, passenger confirmation, and monitor creation. |
+| `/monitors/:id` | Status, route/date/passengers, selected offerings, last observations, recent checks, provider diagnostics, pause/resume, edit, and delete. |
+| `/monitors/:id/edit` | Label edits; material route/date/passenger changes require a fresh selection set. |
+| `/events`, `/events/:id` | Availability and provider-health event history, delivery status, filters, cursor pagination, and booking links. |
+| `/settings` | Global polling interval, Telegram configuration/test, browser Push devices, password change, and appearance. |
 
-- `TestAPIEndToEndLifecycle` composes the real in-process HTTP server, temp SQLite, auth/session/CSRF manager, settings service, fake provider registry, fake Telegram tester, and NTF-006 read model.
-- The lifecycle covers unauthenticated 401s, login, settings read/update, Telegram configure/test, monitor create/list/detail, observation/check diagnostics, event/delivery reads, overview aggregates, pause/resume, delete cascade, settings persistence, logout, post-logout 401, and log secret scans.
-- No live provider, real Telegram credentials, or Push endpoint tests are used.
-- PR: [#28](https://github.com/am-fallah/neda/pull/28); CI run [40124471803](https://github.com/am-fallah/neda/actions/runs/40124471803).
+The private REST API lives under `/api/v1` and covers auth, monitors, providers and search, events, deliveries, overview, settings, and Push. `/healthz` and `/readyz` are public; `/api/v1/auth/login` and `/api/v1/auth/session` are intentionally accessible to the login page. The hand-written OpenAPI 3.0.3 document is [`docs/openapi.yaml`](docs/openapi.yaml).
 
-**API-006 OpenAPI documentation**
+## Current limitations
 
-- `docs/openapi.yaml` is a hand-written OpenAPI 3.0.3 description of the implemented health, auth/session, monitor, provider/health, event/delivery, overview, and settings/Telegram routes.
-- It documents session/CSRF cookie/header security, cursor/filter parameters, common error/status responses, and response schemas; write-only Telegram secrets are never described as returned.
-- Validated with `npx --yes @redocly/cli@1.34.5 lint docs/openapi.yaml` (valid, no warnings). No code generation or runtime changes.
-- PR: [#29](https://github.com/am-fallah/neda/pull/29); CI run [40125174668](https://github.com/am-fallah/neda/actions/runs/40125174668); merged as `4ed7a52`; merged-main CI [40125322348](https://github.com/am-fallah/neda/actions/runs/40125322348).
+### Not yet validated
 
-**M5 dashboard and frontend (WEB-001–WEB-009, FND-013)**
+- Real Telegram delivery with owner credentials.
+- Real browser-to-Push-service delivery, OS notification clicks, and delivery with the browser fully closed.
+- Live production provider checks. MrBilit has been validated with a small number of read-only requests against one route/date.
+- Target-host deployment, reverse proxy/TLS, backup/restore on the real host, and long-running resource/retention behavior.
+- Human screen-reader, zoom, and contrast review of the dashboard.
 
-- `web/` is a React 19 + TypeScript + Vite + Tailwind CSS 4 + shadcn/ui single-page app. Routes: `/login`, `/` (overview), `/monitors`, `/monitors/new`, `/monitors/:id`, `/monitors/:id/edit`, `/events`, `/events/:id`, and `/settings`. A protected layout redirects unauthenticated visitors to `/login`; any private API 401 with `unauthenticated` also clears the client session and redirects.
-- The typed API client uses same-origin credentials and an in-memory CSRF token from the login/session response. The token is never written to localStorage or sessionStorage. Server field errors are mapped into forms, while server validation remains authoritative.
-- The dashboard shows monitor counts, provider health (degraded/stale), recent events, and per-channel delivery status. The UI never treats a provider error, timeout, malformed response, missing offering, or stale observation as confirmed unavailability. "Not reservable" is never labeled "sold out"; `Unknown` and missing observations are shown as unknown with a reason category. Historical events and observations are explicitly labeled as historical, not current availability.
-- Monitor creation for MrBilit is URL-first: paste a MrBilit train search URL, review the compact passenger summary (counts are read from standard URL parameters when present; omitted values use MrBilit's URL defaults; otherwise clearly labelled defaults are shown with an optional editor), search, choose wagon groups or exact fare options, confirm route/date/passengers/global interval/notification status, and create. The selected-offering payload preserves the exact counts used by the search. The backend persists the exact selected offering identities and metadata; future offerings are never added automatically. The existing manual form remains available for the test-only provider. Edit supports label-only changes for selected-option monitors; changing route/date/passengers requires a new selection set, and the server fails closed on stale selection dates. The New Monitor route uses a route-scoped neutral palette across the page and shared shell; other pages keep the global theme.
-- Detail pages show last observed inventory, recent checks, per-provider diagnostics, pause/resume, edit, and confirmed delete. Observation rows expose validated booking links only; missing/unknown offerings never imply "sold out". History supports event/delivery filters and cursor pagination.
-- Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, enable/pause/test/remove browser Push devices, and change the password. Telegram status exposes only a masked chat label and sanitized test result; Push status exposes only the public VAPID key and device metadata. No secret or subscription endpoint is rendered.
-- The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
-- `web/dist/.gitkeep` keeps `go build ./...` valid before a frontend build. The checked-in `.gitkeep` is restored after builds; generated assets are ignored.
-- `npm run lint`, `npm run typecheck`, `npm test` (161 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
+### Not implemented or deliberately out of scope
 
-## Not implemented yet
+- Ticket purchase, reservation, payment, or seat selection.
+- Additional real train providers. MrBilit is the only real adapter.
+- A UI for combining multiple real providers in one monitor.
+- Multi-user accounts, registration, roles, billing, or public sharing.
+- Per-monitor polling intervals; the interval is global.
+- Manual "check now".
+- Cross-provider journey merging, inventory aggregation, or notification suppression.
+- Price history, seat maps, analytics dashboards, email/SMS notifications, or a native mobile app.
+- Horizontal scaling or multiple replicas. The scheduler, SQLite, and in-memory concurrency state are single-process.
 
-Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, and deployment. Production MrBilit registration is implemented and fails closed unless `NEDA_MRBILIT_ENABLED=true`; the Telegram/Push delivery foundation has no production credentials. Ordinary tests do not dispatch production provider checks. Nothing in this repository authorizes real Telegram/Push credentials, live provider traffic, or deployment.
+### Behavioral and operational limits
+
+- Delivery is at-least-once. A crash between sending and recording the result can produce a duplicate notification.
+- Provider capacity, child/infant inventory semantics, and price currency/per-passenger basis are not fully verified. Capacity shortfall remains `Unknown`.
+- The MrBilit URL resolver depends on route data embedded in the public page, which is not a documented API contract; it fails closed if the page shape changes.
+- Login rate limiting and provider spacing are in-memory and reset on restart.
+- The retention windows are design defaults; long-term growth has not been measured on the target host.
+- The repository does not authorize live provider traffic, real Telegram/Push credentials, or deployment by itself. Follow the project safety rules and obtain owner approval.
 
 ## Local development
 
-Prerequisites: Go `1.27.3`, Node.js `22.12+` with npm, and `make`.
+Prerequisites: Go 1.27.3, Node.js 22.12+ with npm, and `make`.
 
-Backend checks:
+Run the backend checks:
 
 ```bash
-make check          # formatting, vet, tests, build
-make race           # race-enabled tests
+make check   # formatting, vet, tests, build
+make race    # race-enabled tests
 ```
 
-Create or update the owner password for the local database in an interactive terminal:
+Set the owner password offline. The command requires a TTY, reads the password twice without echo, and does not accept a password argument:
 
 ```bash
 NEDA_ENV=development NEDA_DB_PATH=./data/neda.db go run ./cmd/neda set-password
 ```
 
-The command rejects non-TTY stdin and does not accept a password argument. The password is read twice without echo.
-
-Run the backend:
+Run the backend. Development registers MrBilit automatically. Add the test-only provider only when you need deterministic local data:
 
 ```bash
+make run
+# or
 NEDA_FAKE_PROVIDER_ENABLED=true make run
 ```
 
-`make run` sets `NEDA_ENV=development` and `NEDA_DB_PATH=./data/neda.db`. Non-production environments automatically register MrBilit for the URL-first monitor flow. The fake provider is test-only and disabled by default; enable it only for local workflows. In another terminal:
+`make run` uses `NEDA_ENV=development`, `NEDA_DB_PATH=./data/neda.db`, and port `8080`.
 
-```bash
-curl -i http://127.0.0.1:8080/healthz
-curl -i http://127.0.0.1:8080/readyz
-NEDA_ENV=development go run ./cmd/neda healthcheck
-```
-
-Run the dashboard development server in a separate terminal:
+Run the Vite development server in another terminal. It proxies `/api`, `/healthz`, and `/readyz` to the backend:
 
 ```bash
 cd web
 npm ci
 npm run dev
 ```
-
-Vite serves `http://localhost:5173` and proxies `/api`, `/healthz`, and `/readyz` to `http://127.0.0.1:8080`. Open the Vite URL, sign in with the password set above, and enable the fake provider on the backend only if you want local test data. The browser never sees the test provider as a real ticket source; it is labeled in the UI.
-
-Production-style single-binary build:
-
-```bash
-cd web
-npm ci
-npm run build        # writes web/dist and restores web/dist/.gitkeep
-cd ..
-go build -o neda ./cmd/neda
-NEDA_ENV=development NEDA_DB_PATH=./data/neda.db ./neda serve
-```
-
-The frontend must be built before the Go binary because assets are compiled in with `go:embed`. `go build ./...` remains valid without a frontend build (the SPA returns a clear 503 while API/health routes still work).
 
 Frontend checks:
 
@@ -308,259 +272,87 @@ npm test
 npm run build
 ```
 
-The dashboard test suite uses Vitest and Testing Library with mocked `fetch`; it does not require a running backend, live provider, Telegram, or Push credentials. See [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) for the manual browser checklist.
+The frontend must be built before a single-binary production build because assets are embedded with `go:embed`:
+
+```bash
+cd web
+npm ci
+npm run build
+cd ..
+go build -o neda ./cmd/neda
+```
+
+`go build ./...` still succeeds without a frontend build; the API and health routes remain available while the SPA reports that assets are not built.
+
+Ordinary tests use temporary SQLite, fake providers, and fake Telegram/Push endpoints. They do not require live provider access, real credentials, or a running browser.
 
 ## Configuration
 
-The current service reads environment variables. The validated settings that affect the running skeleton and auth foundation are:
+The service reads environment variables. The settings most relevant to local development and provider behavior are:
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `NEDA_ENV` | `production` | `development` or `production`. Use `development` locally. |
 | `NEDA_HTTP_ADDR` | `:8080` | HTTP listen address. |
 | `NEDA_DB_PATH` | `/data/neda.db` | SQLite database path. |
-| `NEDA_ENCRYPTION_KEY_FILE` | — | Required in production. Owner-only (`0400`/`0600`) base64 file containing exactly 32 bytes. |
-| `NEDA_PUBLIC_URL` | — | Required in production. HTTPS origin used for Host-header/origin validation and event/notification links. |
-| `NEDA_VAPID_SUBJECT` | — | `mailto:` address or HTTPS contact required for Web Push. VAPID keys are generated once when an encryption key is configured; the public key is available only through the authenticated Push config endpoint. |
+| `NEDA_ENCRYPTION_KEY_FILE` | — | Owner-only file containing a base64 32-byte key. Required in production and needed for Telegram/Push secrets. |
+| `NEDA_PUBLIC_URL` | — | Required in production. Exact HTTPS origin for Host/origin checks, links, and Push. |
+| `NEDA_VAPID_SUBJECT` | — | `mailto:` contact or HTTPS URL required for Web Push. |
+| `NEDA_MRBILIT_ENABLED` | `false` | Must be `true` in production; development registers MrBilit automatically. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Enables the test-only provider in development/testing. Rejected in production. |
+| `NEDA_WORKERS` | `2` | Scheduler worker pool, 1–16. |
+| `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime. |
+| `NEDA_SESSION_IDLE_HOURS` | `168` | Idle session timeout. |
+| `NEDA_TRUST_PROXY` | `false` | Honor forwarded headers only behind a trusted local proxy. |
 | `NEDA_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. |
-| `NEDA_LOG_FORMAT` | `json` in production, `text` in development | `json` or `text`. |
-| `NEDA_TRUST_PROXY` | `false` | Honor `X-Forwarded-For` only behind a trusted local reverse proxy. Keep false for direct exposure. |
-| `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
-| `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
-| `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
-| `NEDA_MRBILIT_ENABLED` | `false` | Required in production; registers the real MrBilit adapter. Development registers it automatically. |
-| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and rejected in production. |
+| `NEDA_LOG_FORMAT` | `json` in production, `text` in development | Structured log format. |
 
-Production startup fails if `NEDA_MRBILIT_ENABLED` is not true, if active monitors reference an unregistered provider, or if the production process runs as UID 0.
+The global polling interval is not an environment variable. It is stored in SQLite as `poll_interval_seconds`, seeded to 300 seconds, and bounded to 60–3600 seconds. Changing it affects future scheduling decisions; existing `next_due_at` values are not recalculated immediately.
 
-Compose-only variables: `NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID` select the non-root
-runtime user and must match the owner of `./data` and
-`./secrets/encryption_key`. They are not read by the Go service.
+Production startup fails closed when required production configuration is missing, when the real provider is not enabled, when the fake provider is enabled, when the provider registry is empty, or when active monitors reference an unregistered provider. See [`.env.example`](.env.example) for placeholders and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full configuration and security model.
 
-The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader. Private auth, monitor, provider/health, event/delivery, overview, settings/Telegram, and Push routes are implemented. Web Push requires HTTPS in production (localhost is allowed for development) and an external browser Push service. Do not commit real secrets.
+## Operations
 
-## Docker deployment
-
-Prerequisites: a Linux host, Docker Engine with Compose v2, `openssl`, a
-non-root deployment user that owns the checkout, DNS/TLS/reverse-proxy
-configuration for the chosen HTTPS origin, and outbound network access for the
-first image build (base images and locked npm/Go dependencies). The repository
-provides a multi-stage `Dockerfile`, a single-replica `compose.yaml`, and a
-first-time `scripts/setup.sh` that prompts for the public URL and VAPID contact.
-
-```sh
-# On the deployment host, from the reviewed checkout (for example /opt/neda):
-./scripts/setup.sh
-docker compose run --rm -it --entrypoint /neda neda set-password
-docker compose up -d
-docker compose ps
-docker compose logs --tail=50 neda
-curl -fsS https://neda.example.com/readyz
-```
-
-`setup.sh` creates `.env` (mode 0600), `./data` (mode 0700 on first creation),
-and `./secrets/encryption_key` (owner = the current UID/GID, mode 0400). It
-refuses to overwrite an existing `.env`, key, or database, and it does not print
-the key. `compose.yaml` sets `pull_policy: build`, so `docker compose up -d`
-builds `neda:local` from the reviewed checkout and never pulls a same-named tag
-from a registry; Docker's layer cache keeps an unchanged build fast. No manual
-image build is required. Re-running setup is intentionally not a
-configuration-update path.
-
-The key is a read-only host bind mount at `/run/secrets/encryption_key`, not a
-Compose secret. File-backed Compose secrets are bind mounts in non-swarm Compose
-and their `uid`/`gid`/`mode` fields are not applied, so the host file owner and
-mode are authoritative. The service refuses a key it does not own or one with
-group/world access. `/data` is a host bind mount so SQLite and the key are backed
-up together. The app listens on `127.0.0.1:8080` on the host; a local TLS reverse
-proxy is the ingress.
-
-The image is distroless, non-root, CGO-free, and runs with a read-only root
-filesystem under Compose, dropped capabilities, `no-new-privileges`, and bounded
-resources. The image does not enable the real provider by default; Compose
-requires `NEDA_MRBILIT_ENABLED=true` explicitly. Docker is not installed on the
-local development machine. The Docker workflow passed in CI run
-[40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143): the
-image was built, Compose started, and the runtime assertions passed. Target-host
-deployment remains pending.
-
-The Dockerfile pins its Node, Go, and distroless base images to verified
-multi-arch digests; see [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) for the
-update procedure. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full
-preflight, proxy/TLS, backup/restore, update/rollback, and approval checklist.
-No deployment is authorized by the presence of these files.
-
-## Operational setup
-
-### Initial password
-
-There is no web bootstrap. Set the owner password offline with a TTY; the
-command reads it twice without echo, rejects piped input, and revokes existing
-sessions:
-
-```bash
-NEDA_DB_PATH=./data/neda.db go run ./cmd/neda set-password
-# Docker:
-docker compose run --rm -it --entrypoint /neda neda set-password
-```
-
-Use at least 12 characters. Do not pass the password as an argument or commit a
-database containing a real hash.
-
-### Telegram
-
-1. Create/obtain a bot token from Telegram and the destination chat ID or
-   `@channel`.
-2. Sign in to Neda → Settings → Telegram.
-3. Enter the token and chat ID, save, then use **Send test message**.
-4. The token/chat ID are encrypted at rest and never returned; only a masked
-   chat label and sanitized test category are shown.
-5. Use **Clear credentials** to remove them. Delivery history is retained.
-
-A real test sends a real Telegram message. Do not do this without owner
-authorization. Transient failures retry with bounds; 400/401/403 are permanent
-configuration errors.
-
-### Browser Web Push
-
-Prerequisites: a production HTTPS origin, a configured encryption key, and
-`NEDA_VAPID_SUBJECT` (a `mailto:` contact or HTTPS URL). On first startup the
-service generates one VAPID pair; the private key is encrypted and the public key
-is available only through the authenticated Push config endpoint. Restarting does
-not change the pair.
-
-1. Sign in → Settings → Browser Push.
-2. Choose a device label and click **Enable this browser**. Permission is
-   requested only by that click.
-3. Allow notifications when the browser prompts.
-4. Use **Test** for that device or **Send test to all devices**.
-5. **Pause delivery** stops all Push sends without deleting devices. **Remove**
-   disables one server row. **Unsubscribe this browser** removes the browser
-   subscription locally; the server row is disabled on the next 404/410.
-6. The service worker displays notifications while the dashboard is closed, and
-   opens the validated booking URL or event detail page on click.
-
-The browser must support service workers/Push; iOS requires an installed PWA and
-platform support. Push is unavailable on plain HTTP except localhost. Never put
-subscription endpoints, keys, or VAPID private material in logs, tickets, or
-source control.
-
-### Backups and restore
-
-A backup is only usable with both the SQLite database and the encryption key.
-Stop the service before a simple copy so WAL/SHM files are not changing:
-
-```bash
-cd /opt/neda
-docker compose stop neda
-tar -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz data secrets/encryption_key
-docker compose start neda
-```
-
-The stopped-copy archive includes any WAL/SHM sidecars, so it does not require a
-host `sqlite3` package. If you prefer an online backup, use SQLite `.backup` and
-copy the key separately. After restoring as the deployment user, keep `data` and
-the key owned by that user and the key mode `0400`:
-
-```bash
-sudo chown -R "$(id -u):$(id -g)" data secrets/encryption_key
-sudo chmod 0400 secrets/encryption_key
-```
-
-Keep the key owner-only (`0400`/`0600`), encrypt backups at rest, and test restore
-on a fresh volume. A database without its key fails closed; Telegram/VAPID/Push
-material must then be reset. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and
-[`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md).
-
-### Reverse proxy, TLS, and exposure
-
-Run Neda bound to loopback and terminate TLS at a reviewed reverse proxy. Preserve
-the public `Host` header; Host mismatch returns 421. Set `NEDA_TRUST_PROXY=true`
-only when the proxy is trusted/local. Do not add CORS, expose SQLite/admin routes
-directly, or expose port 8080 publicly. HSTS is emitted in production; the proxy
-must redirect HTTP to HTTPS. Android/iOS clients and Push require a trusted
-certificate.
-
-### Troubleshooting
-
-| Symptom | Check |
-|---|---|
-| 421 misdirected request | `NEDA_PUBLIC_URL` host/port exactly match the browser Host; proxy preserves Host |
-| 401 everywhere | Session expired/cleared; sign in again; check cookie `Secure`/HTTPS |
-| 403 on a save | CSRF cookie/header lost, or wrong Origin; reload the dashboard and use the same origin |
-| 429 login | Wait for `Retry-After`; limiter is per-process and resets on restart |
-| 503 setup/auth | No owner password (`set-password`) or missing encryption key in production |
-| Telegram 409 | Credentials missing/unreadable; re-enter them after checking the key |
-| Push unavailable | `NEDA_VAPID_SUBJECT`/key/encryption key missing, or HTTPS/browser unsupported |
-| Push test fails | Sanitized category in the UI; 404/410 disables, 429/5xx retries, 400/403 is permanent |
-| Timezone/date wrong | Host clock/NTP; binary embeds IANA zones and uses `Asia/Tehran` |
-| Disk growth | Check `data/neda.db`, `-wal`, backups; retention runs daily; logs are capped in Compose |
-
-### Validation
-
-```bash
-make check
-make race
-cd web && npm ci && npm run lint && npm run typecheck && npm test && npm run build
-cd .. && npx --yes @redocly/cli@1.34.5 lint docs/openapi.yaml
-```
-
-Ordinary tests and CI use fake providers, fake Telegram/Push endpoints, and
-temporary SQLite. They do not make live MrBilit, Telegram, or Push calls. Real
-delivery and deployment require separate owner authorization.
-
-## Repository layout
-
-```text
-cmd/neda/             CLI: serve, set-password, healthcheck, version
-internal/config/      environment loading and validation
-internal/logging/     structured logging and redaction
-internal/db/          SQLite open/PRAGMAs, migration runner, readiness
-internal/migrations/  embedded forward-only SQL migrations
-internal/store/       transaction helper and core repositories
-internal/domain/      monitor model, validation, expiry, and CRUD service
-internal/scheduler/   due-time loop, monitor-wide guard, jitter, recovery, expiry wake, runner boundary
-internal/auth/        password, session, CSRF, origin, and rate-limit primitives
-internal/provider/    normalized provider boundary, registry, and classification
-internal/provider/fake/ deterministic test-only provider
-internal/push/        VAPID, subscription validation/storage, guarded transport, sender
-internal/retention/   bounded daily cleanup of diagnostic/notification history
-internal/jalali/      maintained Persian-calendar conversion wrapper
-internal/httpapi/     HTTP server, middleware, health/readiness, private API
-internal/webui/       embedded SPA handler, SPA fallback, static caching
-web/                  React/TypeScript dashboard and `go:embed` assets
-web/src/              routes, pages, components, typed API client, tests
-web/embed.go          embeds web/dist into the Go binary
-docs/                 approved planning documents and frontend acceptance checklist
-.github/workflows/    backend and frontend CI
-```
+- **Initial password:** use `neda set-password` in an interactive terminal. There is no unauthenticated web bootstrap.
+- **Telegram and Push:** configure them from **Settings**. Credentials and subscription material are encrypted with the external key; the UI never redisplays stored secrets.
+- **Backups:** the SQLite database and encryption key must be backed up together. A database without its key cannot decrypt Telegram/Push settings. See [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) and [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md).
+- **Deployment:** Docker/Compose files and a first-time setup script exist, but target-host deployment has not been performed or approved. The deployment plan, proxy/TLS, and rollback steps are in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). They are not covered by this README.
 
 ## Documentation
 
-- [`docs/BRIEF.md`](docs/BRIEF.md) — approved product and engineering brief; the authoritative requirement source.
-- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — product behavior, assumptions, and acceptance criteria.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture, schema, scheduler/state design, security, testing, and deployment design.
-- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — single source of truth for tasks, gates, dependencies, and verification evidence.
-- [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — manual browser/accessibility acceptance checklist for the dashboard.
-- [`docs/BROWSER_PUSH_VALIDATION.md`](docs/BROWSER_PUSH_VALIDATION.md) — real Chrome service-worker/Push simulation and permission-denial evidence.
-- [`docs/MRBILIT_LIVE_VALIDATION.md`](docs/MRBILIT_LIVE_VALIDATION.md) — bounded MrBilit live request evidence, observed semantics, and limitations.
-- [`docs/MRBILIT_URL_FIRST.md`](docs/MRBILIT_URL_FIRST.md) — URL-first monitor creation, selected-option matching, persistence, and live-search evidence.
-- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, rollback, and approval checklist.
-- [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence and limitations.
-- [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — Definition-of-done audit, blockers, and next milestone.
-- [`docs/RESOURCE_MEASUREMENT.md`](docs/RESOURCE_MEASUREMENT.md) — 1-hour synthetic RSS/CPU/DB/WAL evidence and limitations.
-- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and unresolved security risks.
-- [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability-scan evidence.
+### Product and planning
+
+- [`docs/BRIEF.md`](docs/BRIEF.md) — authoritative product and engineering brief.
+- [`docs/PRODUCT_SPEC.md`](docs/PRODUCT_SPEC.md) — behavior, assumptions, and acceptance criteria.
+- [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) — tasks, gates, status, and verification evidence.
+- [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) — current release audit, blockers, and known limitations.
+
+### Architecture and security
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, schema, provider boundary, scheduler/state design, security, and testing.
+- [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, findings, and residual risks.
 - [`docs/ENCRYPTION.md`](docs/ENCRYPTION.md) — encryption-key lifecycle and recovery constraints.
-- [`docs/CODEGRAPH_WORKFLOW.md`](docs/CODEGRAPH_WORKFLOW.md) — CodeGraph usage policy.
-- [`AGENTS.md`](AGENTS.md) — operating rules for agents working in this repository.
+- [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) — dependency inventory, licenses, and vulnerability scans.
+- [`docs/RESOURCE_MEASUREMENT.md`](docs/RESOURCE_MEASUREMENT.md) — local synthetic resource measurements and limitations.
 
-## Safety and security
+### Provider and UI evidence
 
-- No live MrBilit, Telegram, or Web Push calls are made by ordinary tests or CI. Push sender tests use TLS loopback fixtures and injected resolvers; Telegram tests use fake servers.
-- No production server access or deployment is authorized by this repository state.
-- Runtime secrets must be supplied outside the repository.
-- The auth layer stores only session/CSRF hashes; raw tokens live in HttpOnly cookies. The dashboard keeps its CSRF token in memory only and does not store credentials, tokens, or Telegram secrets in browser storage.
-- The dashboard never displays Telegram tokens, raw chat IDs, ciphertext, Push subscription material, or raw provider errors.
-- The fake provider is test-only, disabled by default, and is labeled as a test source in the UI.
-- Do not commit passwords, tokens, cookies, private keys, encryption keys, Push subscription material, production environment files, or private runtime data.
+- [`docs/MRBILIT_LIVE_VALIDATION.md`](docs/MRBILIT_LIVE_VALIDATION.md) — bounded live request evidence and observed provider semantics.
+- [`docs/MRBILIT_URL_FIRST.md`](docs/MRBILIT_URL_FIRST.md) — URL-first creation, selection matching, and live-search evidence.
+- [`docs/BROWSER_PUSH_VALIDATION.md`](docs/BROWSER_PUSH_VALIDATION.md) — browser service-worker/Push simulation and permission-denial evidence.
+- [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md) — dashboard acceptance checklist and automated browser audit results.
+
+### Operations and API
+
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — deployment plan, proxy/TLS, backup/restore, and rollback.
+- [`docs/BACKUP_RESTORE_DRILL.md`](docs/BACKUP_RESTORE_DRILL.md) — local backup/restore evidence.
+- [`docs/openapi.yaml`](docs/openapi.yaml) — OpenAPI 3.0.3 description of the implemented API.
+
+## Working in this repository
+
+- Read [`AGENTS.md`](AGENTS.md) before making changes. It defines the repository safety rules, the staged workflow, and the task-tracking contract.
+- Treat [`docs/BRIEF.md`](docs/BRIEF.md) as the authoritative product source and [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) as the single task tracker.
+- Keep provider-specific parsing and availability rules inside adapters. The scheduler and state engine consume normalized outcomes only.
+- Preserve the fail-closed availability rules: never infer `NotReservable` from an error, timeout, empty result, missing observation, or ambiguous identity.
+- Use deterministic tests and fixtures. Do not make live MrBilit, Telegram, or Push calls in ordinary tests or CI, and do not commit credentials, keys, subscription endpoints, databases, or generated graph data.
+- [`docs/CODEGRAPH_WORKFLOW.md`](docs/CODEGRAPH_WORKFLOW.md) describes the optional CodeGraph navigation policy for this repository.
