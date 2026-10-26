@@ -112,9 +112,11 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
   vulnerabilities; one module-level advisory remains for the unimported
   `golang.org/x/crypto/openpgp` package.
 - `cd web && npm audit --audit-level=low`: `found 0 vulnerabilities`.
-- No image scanner (`trivy`, `grype`, `syft`, `snyk`) or Docker runtime was
-  available locally. Image scanning remains blocked until an approved scanner
-  and image build environment are available.
+- No image scanner (`trivy`, `grype`, `syft`, `snyk`) or local Docker runtime was
+  available. The Docker image build and Compose runtime smoke passed CI run
+  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450)
+  (16,773,556 bytes uncompressed / 7,409,125 compressed). Image scanning remains
+  pending an approved scanner.
 
 ## 5. Maintenance and review notes
 
@@ -138,6 +140,8 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
   package is not imported. Do not use `golang.org/x/crypto/openpgp`.
 - `npm audit` covers the npm advisory database only; browser/platform Push
   behavior and provider services are outside its scope.
-- Docker base images are now digest-pinned, but no local/CI image build or image
-  vulnerability scan was executed in this session. Docker runtime validation
-  remains a release action.
+- Docker base images are digest-pinned; the CI image build and Compose runtime
+  smoke passed in run
+  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450).
+  Image vulnerability scanning and target-host validation remain release
+  actions.

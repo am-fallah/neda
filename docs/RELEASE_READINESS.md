@@ -19,9 +19,11 @@ default; `compose.yaml` requires the setting explicitly. The Docker workflow
 builds through Compose and includes an actual Compose start check plus effective
 UID/GID, read-only root, dropped capabilities, restart-policy, container
 recreation with stable key/database, wrong-valid-key, UID-0/fake-provider
-fail-closed, and cleanup checks; it has not been run from this local machine
-because Docker is unavailable here. `scripts/setup.sh` provides the first-time
-host layout and key without overwriting existing files.
+fail-closed, and cleanup checks. That workflow passed CI run
+[40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450);
+Docker is still unavailable on the local development machine.
+`scripts/setup.sh` provides the first-time host layout and key without
+overwriting existing files.
 
 Local production-mode verification on 2026-10-26 used a temporary database and
 key, no live monitors, and no provider calls. It observed
@@ -40,10 +42,10 @@ registry APIs and still expose `linux/amd64` and `linux/arm64` entries.
 `govulncheck ./...` reported no called vulnerabilities (one module-level
 advisory remains for an unimported `openpgp` package), and
 `npm audit --audit-level=low` reported 0 vulnerabilities. No image scanner or
-Docker runtime was available, so no image build, image scan, or container
-runtime check was performed locally. A production-only UID-0 guard is
-implemented and unit-tested. The updated Compose workflow still requires an
-actual CI or authorized Docker run.
+local Docker runtime was available, so image scanning remains pending. The
+Docker image build and Compose runtime checks passed in CI run
+[40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450).
+A production-only UID-0 guard is implemented and unit-tested.
 
 ## 1. Verified facts
 
@@ -62,7 +64,7 @@ actual CI or authorized Docker run.
 | Dependency scans pass with documented exception | `docs/DEPENDENCIES.md`; 2026-10-26 `govulncheck` reported no called vulnerabilities (one unimported module advisory) and `npm audit` reported 0. No image scanner available. |
 | 1-hour synthetic resource measurement completed | `docs/RESOURCE_MEASUREMENT.md`: RSS avg 22.6 MiB, CPU avg 0.12%, WAL max 3.94 MiB, 482 checks |
 | Bounded MrBilit live validation completed | `docs/MRBILIT_LIVE_VALIDATION.md`: 2 unauthenticated GETs, HTTP 200, 1 journey/6 classes, 2 Reservable, 4 NotReservable, 0 Unknown, 6 booking URLs |
-| Docker image/Compose validation | Prior Docker CI run `40133170885` passed image, non-root/read-only runtime, healthcheck, restart, fresh-volume restore, wrong-key rejection. The current workflow adds a Compose build, actual Compose start, effective UID/GID, restart-policy, container recreation, wrong-valid-key, UID-0/fake-provider fail-closed, and cleanup checks; these have NOT been run locally or observed in CI in this session. |
+| Docker image/Compose validation | CI run [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450) passed the Compose build, actual Compose start, effective UID/GID, read-only root, dropped capabilities, restart-policy, container recreation, key/DB persistence, VAPID stability, wrong-valid-key, UID-0/fake-provider fail-closed, and cleanup checks. Local Docker remains unavailable. |
 
 ## 2. Definition-of-done audit
 
@@ -95,7 +97,7 @@ actual CI or authorized Docker run.
 | Real browser-to-Push-service delivery and closed-browser acceptance | Owner authorization + HTTPS deployment + live Push service |
 | Real Telegram delivery | Owner credentials + explicit authorization |
 | Production provider registration (`PRV-009`) | Implemented locally; live production provider behavior still not exercised |
-| Actual Compose runtime and target-volume drill | CI workflow now includes Compose, UID/GID, restart, and wrong-key checks; CI execution and the target-host drill remain owner-approved |
+| Actual Compose runtime and target-volume drill | Compose runtime passed CI run [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450); the target-host volume drill remains owner-approved |
 | Target-host resource/soak measurement | Owner-approved deployment/soak window (local synthetic result is complete) |
 | Deployment plan review (`OPS-005`/`GATE-004`) | Explicit owner approval |
 
@@ -114,11 +116,12 @@ actual CI or authorized Docker run.
   separately checked at startup. A wrong key is still caught while the VAPID
   private key is present.
 - Real Push/Telegram/provider/HTTPS behavior is not proven by unit tests or CI.
-- Docker/Compose runtime validation is only represented by the CI workflow
-  definition, including an actual `docker compose up` smoke and the additional
-  UID/GID, restart-policy, wrong-key, and fail-closed checks; that workflow has
-  not run here. The target Ubuntu host, proxy, TLS, firewall, key ownership, and
-  backup volume also remain unvalidated.
+- Docker/Compose runtime validation passed in CI run
+  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450),
+  including the actual `docker compose up` smoke and the additional UID/GID,
+  read-only, capability, restart/recreation, wrong-key, and fail-closed checks.
+  The target Ubuntu host, proxy, TLS, firewall, key ownership, and backup volume
+  remain unvalidated.
 - The local backup drill used a directory, not a Docker named volume; the Docker
   CI job exercises a fresh bind-mounted volume but not the owner's real host.
 - Retention defaults are design choices; the local 1-hour DB/WAL result passes,
