@@ -57,7 +57,7 @@ A production-only UID-0 guard is implemented and unit-tested.
 | M1–M5 backend/frontend, private API, and Web Push implemented | merged PRs #33/#34; tracker |
 | Retention worker implemented with rollback/FK tests | `internal/retention`; `go test ./internal/retention/...` |
 | Go checks pass locally (including race) | `make check`; `make race`; command log in tracker |
-| Frontend checks pass locally | `npm ci`, `lint`, `typecheck`, `test` (161 tests), `build` |
+| Frontend checks pass locally | `npm ci`, `lint`, `typecheck`, `test` (169 tests), `build` |
 | OpenAPI valid | Redocly CLI 1.34.5 |
 | Local backup/restore drill passes | `docs/BACKUP_RESTORE_DRILL.md` |
 | Real Chrome service worker displays a synthetic Push and permission denial is handled | `docs/BROWSER_PUSH_VALIDATION.md` |
