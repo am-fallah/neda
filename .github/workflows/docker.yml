@@ -44,6 +44,36 @@ jobs:
           fi
           grep -q "NEDA_MRBILIT_ENABLED" "$COMPOSE_DIR/missing-provider.log"
 
+      - name: Run first-time setup script
+        run: |
+          SETUP_DIR="$RUNNER_TEMP/neda-setup-smoke"
+          rm -rf "$SETUP_DIR"
+          mkdir -p "$SETUP_DIR/scripts"
+          cp compose.yaml Dockerfile "$SETUP_DIR/"
+          cp scripts/setup.sh "$SETUP_DIR/scripts/setup.sh"
+          chmod +x "$SETUP_DIR/scripts/setup.sh"
+
+          (
+            cd "$SETUP_DIR"
+            NEDA_PUBLIC_URL=https://neda.example.com \
+            NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            ./scripts/setup.sh
+          ) >"$SETUP_DIR/setup.log" 2>&1
+
+          test "$(stat -c '%a' "$SETUP_DIR/.env")" = "600"
+          test "$(stat -c '%a' "$SETUP_DIR/data")" = "700"
+          test "$(stat -c '%a' "$SETUP_DIR/secrets")" = "700"
+          test "$(stat -c '%a' "$SETUP_DIR/secrets/encryption_key")" = "400"
+          test "$(stat -c '%u' "$SETUP_DIR/secrets/encryption_key")" = "$(id -u)"
+          test "$(openssl base64 -d -A < "$SETUP_DIR/secrets/encryption_key" | wc -c | tr -d ' ')" = "32"
+          grep -q '^NEDA_PUBLIC_URL=' "$SETUP_DIR/.env"
+          grep -q '^NEDA_VAPID_SUBJECT=' "$SETUP_DIR/.env"
+          grep -q '^NEDA_MRBILIT_ENABLED=true$' "$SETUP_DIR/.env"
+          if grep -qF -f "$SETUP_DIR/secrets/encryption_key" "$SETUP_DIR/setup.log"; then
+            echo "setup script printed the encryption key" >&2
+            exit 1
+          fi
+
       - name: Build image through Compose
         env:
           NEDA_PUBLIC_URL: https://neda.example.com
@@ -419,6 +449,7 @@ jobs:
             "$RUNNER_TEMP/neda-bad" \
             "$RUNNER_TEMP/neda-bad-key" \
             "$RUNNER_TEMP/neda-fail-closed" \
-            "$RUNNER_TEMP/neda-fake"
+            "$RUNNER_TEMP/neda-fake" \
+            "$RUNNER_TEMP/neda-setup-smoke"
           sudo rm -rf "$RUNNER_TEMP/neda-root" 2>/dev/null || true
           rm -f "$RUNNER_TEMP/bad-key.log" "$RUNNER_TEMP/neda-ci.log"

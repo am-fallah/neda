@@ -114,8 +114,8 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
 - `cd web && npm audit --audit-level=low`: `found 0 vulnerabilities`.
 - No image scanner (`trivy`, `grype`, `syft`, `snyk`) or local Docker runtime was
   available. The Docker image build and Compose runtime smoke passed CI run
-  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450)
-  (16,773,556 bytes uncompressed / 7,409,125 compressed). Image scanning remains
+  [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143)
+  (16,761,268 bytes uncompressed / 7,407,549 compressed). Image scanning remains
   pending an approved scanner.
 
 ## 5. Maintenance and review notes
@@ -142,6 +142,6 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
   behavior and provider services are outside its scope.
 - Docker base images are digest-pinned; the CI image build and Compose runtime
   smoke passed in run
-  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450).
+  [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143).
   Image vulnerability scanning and target-host validation remain release
   actions.
