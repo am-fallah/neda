@@ -1,6 +1,6 @@
 # Neda
 
-**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, Docker/Compose packaging, bounded MrBilit live validation, and a URL-first local MrBilit monitor flow are implemented and locally/CI/live tested. Production provider registration, real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. The production provider registry remains intentionally empty, so production checks do not dispatch and no new availability events are created. Nothing here authorizes further live provider traffic, real Telegram/Push credentials, or deployment.
+**Status: M1–M5 foundations, the private JSON API, the dashboard, Web Push, retention cleanup, Docker/Compose packaging, bounded MrBilit live validation, the URL-first local MrBilit monitor flow, and explicit production MrBilit registration are implemented. Earlier foundations have local/CI/live evidence; the updated Docker/Compose workflow and target-host deployment await an authorized run. Real browser/Telegram delivery acceptance, target-host backup/restore, and deployment remain pending.** The repository contains the planning documents, service/store/auth foundation, normalized provider boundary with a test-only fake provider, durable monitor CRUD/validation, the scheduler/state engine, the transactional outbox with Telegram and Web Push delivery, the private JSON API, and a React/TypeScript dashboard embedded in the Go binary. Push service-worker/UI code and fake-endpoint sender tests are complete; real browser-to-Push-service and real Telegram delivery are manual acceptance items and were not run. Production monitoring requires `NEDA_MRBILIT_ENABLED=true`; startup fails closed if the real provider is not enabled or active monitors reference an unregistered provider. Nothing here authorizes live provider traffic, real Telegram/Push credentials, or deployment.
 
 
 Neda is a single-user, self-hosted train-ticket availability monitor for Iranian train routes. It monitors configured routes, departure dates, passenger counts, and selected providers in the background, then sends actionable Telegram and browser Web Push notifications when availability is confirmed. It is not a booking engine: the owner completes any purchase on the provider's site.
@@ -14,7 +14,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Structured logging with request IDs and credential/URL/body redaction.
 - SQLite with WAL, foreign keys, `synchronous=FULL`, a single-writer connection, embedded forward-only migrations (`0001`–`0005`), checksum verification, and rollback-safe application.
 - HTTP server with `GET /healthz`, `GET /readyz`, JSON errors, Host-header validation, body limits, security headers, panic recovery, explicit timeouts, and graceful shutdown.
-- `neda healthcheck` for local/container health probes.
+- `neda healthcheck` probes `/readyz` for local/container readiness.
 - Backend CI for formatting, module tidiness, vet, tests, race tests, and build.
 
 **M1.2 repository and authentication foundation (complete)**
@@ -30,7 +30,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - `internal/provider`: normalized provider IDs, availability states, capabilities, metadata, request/result types, `Provider` interface, and an explicit immutable registry that rejects nil, duplicate, empty-ID, and empty-display-name entries.
 - Shared error taxonomy and `Classify` contract for scheduler/health: success, infrastructure, configuration, route, request, and abandoned categories; timeout/network/429/5xx/invalid-response and provider-side cancellation are infrastructure failures, while 4xx/route/config are not.
 - `internal/provider/fake`: deterministic, test-only provider with `TestOnly` metadata, fake-only route-ID prefixes, injected clock, and deterministic available/sold-out/unknown/empty/error scenarios. It performs no network access and is not registered by default.
-- Fake-provider metadata is surfaced as a test-only source in the dashboard. MrBilit is registered automatically in non-production environments for URL-first local monitor creation; the production registry remains empty pending `PRV-009`.
+- Fake-provider metadata is surfaced as a test-only source in the dashboard. MrBilit is registered automatically in non-production environments and in production when `NEDA_MRBILIT_ENABLED=true`; production startup rejects an empty provider registry.
 
 **M3 SCH-001 monitor foundation (approved slice complete)**
 
@@ -45,7 +45,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - `internal/scheduler`: due selection for enabled, non-expired monitors with active registered-provider targets; monitor-wide in-flight serialization (A-33); bounded worker pool (`NEDA_WORKERS`, 1–16, default 2); timer-plus-wake loop with no busy polling; ±10% jitter helpers used by `SCH-010` and 0–30s near-term jitter; restart stagger; stale `check_runs` recovery; and the `Runner`/`Result` contract implemented by the SCH-010 outcome runner.
 - `internal/store`: schedule projection, startup recovery/stagger, and the SQLite `poll_interval_seconds` setting seeded to 300s and validated against 60–3600s.
 - `MonitorService` near-term scheduling is injectable and deterministic; a material edit's post-commit wake is covered by a scheduler integration test.
-- `cmd/neda` starts and gracefully stops the scheduler. It now composes the SCH-010 outcome runner; with the intentionally empty production provider registry it performs recovery/staggering but dispatches no provider checks.
+- `cmd/neda` starts and gracefully stops the scheduler. It composes the SCH-010 outcome runner and fails closed in production if the real provider is not enabled or active monitors reference an unregistered provider.
 - No provider-check execution, availability/health transitions, notifications, API endpoints, or frontend work is included.
 
 **M3 SCH-003 provider spacing and target backoff (approved slice complete)**
@@ -123,7 +123,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - The transport owns only the 6s per-attempt timeout, two bounded retries (timeouts, connection errors, 429, 502/503/504), 500ms/1s backoff with jitter, `Retry-After` bounded by the caller's deadline, redirect rejection, cancellation, and a 2 MiB response cap. It does not create an overall check deadline; `SCH-004` remains the sole owner of the 20s context.
 - The parser accepts the observed `trains[]`/`prices[].classes[]`/`meta` envelope and keeps the synthetic fixtures as a separate test contract. Other shapes fail closed as invalid responses. Caps are 100 journeys, 50 offerings per journey, and 500 offerings total.
 - Journey/offering keys follow Architecture §9.3: native IDs use `id:<native>`; fallback keys hash a versioned canonical string and exclude price, capacity, availability flags, and array index. The known-negative sample (`capacity=0`, `isAvailable=false`, `reservationAvailable=true`) is `NotReservable`; positive/shortfall/contradiction cases use synthetic fixtures only.
-- Provider metadata declares URL-search and price support, and generic monitor validation now honors required route-ID capabilities while each adapter remains the final validator. The adapter is not registered in production; `PRV-009` remains deferred. Non-production environments register it automatically for the URL-first local flow. Real contract evidence is recorded in `docs/MRBILIT_LIVE_VALIDATION.md`.
+- Provider metadata declares URL-search and price support, and generic monitor validation now honors required route-ID capabilities while each adapter remains the final validator. Non-production environments register MrBilit automatically; production requires `NEDA_MRBILIT_ENABLED=true`. Real contract evidence is recorded in `docs/MRBILIT_LIVE_VALIDATION.md`.
 - PR: [#14](https://github.com/am-fallah/neda/pull/14); merged to `main` as `33f8a7c`, reverted by [#16](https://github.com/am-fallah/neda/pull/16) (`1fdba66`), and re-applied by [#17](https://github.com/am-fallah/neda/pull/17) (`bb514c3`). The code is present in `main`; code-head CI [40110863710](https://github.com/am-fallah/neda/actions/runs/40110863710) (`a477150`) and final code-head CI [40111365080](https://github.com/am-fallah/neda/actions/runs/40111365080) (`10ba711`) passed.
 
 **URL-first MrBilit monitor creation (local/non-production)**
@@ -133,7 +133,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - The dashboard New Monitor page presents one train with its distinct wagon groups. Selecting a wagon persists every current underlying offering key; expanding the wagon allows exact or partial offering selection. The create API persists the exact selections in `monitor_provider_selections` with the target's config version and all matching/display metadata. A view-only provider-amount price filter and departure/lowest-known-price sorting never alter the selection or payload. Unverified prices are not sent in notifications.
 - Scheduled checks continue to call the existing adapter for the whole route. A deterministic selection filter reduces the result to selected options only. Exact journey/offering keys are preferred and validated against train/class metadata; a unique metadata fallback is allowed. Missing, ambiguous, or conflicting matches become `Unknown`; they never become `NotReservable`. Unselected classes create no inventory states, events, or deliveries.
 - Selection changes and material monitor edits use the existing config-version and episode-closure rules. Existing event/outbox dedupe remains the only notification path; repeated checks for the same open episode do not create duplicate events or deliveries.
-- Production remains unchanged: no MrBilit provider is registered and no production checks dispatch. Live validation remains bounded, unauthenticated, read-only, and non-booking.
+- Production uses the same real MrBilit adapter when `NEDA_MRBILIT_ENABLED=true`; no live provider request is issued by local or CI tests. Live validation remains bounded, unauthenticated, read-only, and non-booking.
 
 **P2 encryption and Telegram foundation**
 
@@ -163,7 +163,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 
 - `internal/httpapi/monitors.go` adds private `GET/POST /api/v1/monitors`, `GET/PATCH/DELETE /api/v1/monitors/{id}`, and idempotent `POST /api/v1/monitors/{id}/pause|resume` endpoints.
 - Requests use camelCase monitor/provider DTOs. `PATCH` is partial: omitted fields/providers are preserved; supplying a provider list replaces the active set and inherits omitted optional fields from matching providers. Responses expose monitor status, expiry, scheduling/diagnostics, and provider rows without internal secrets. Validation failures return a `validation_error` with path-keyed fields; expired resume returns 409; delete returns 204.
-- `cmd/neda/serve.go` composes the monitor service with the scheduler waker and current-interval near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider is involved. Development may explicitly register the fake provider with `NEDA_FAKE_PROVIDER_ENABLED=true`; production keeps the provider registry empty until P1b/`PRV-009`, so production monitor create/edit rejects provider selections and no checks dispatch.
+- `cmd/neda/serve.go` composes the monitor service with the scheduler waker and current-interval near-term scheduling. Automated tests use the deterministic fake provider and temp SQLite; no live provider is involved. Development may explicitly register the fake provider with `NEDA_FAKE_PROVIDER_ENABLED=true`; production rejects that flag and requires `NEDA_MRBILIT_ENABLED=true`.
 - Remaining: none for monitor CRUD/detail; overview/providers/events/deliveries are implemented by `API-003`.
 - PR: [#22](https://github.com/am-fallah/neda/pull/22); merged to `main` as `f33dd8a`. CI run [40119615680](https://github.com/am-fallah/neda/actions/runs/40119615680) passed on the code head; merged-main CI [40119753601](https://github.com/am-fallah/neda/actions/runs/40119753601) passed.
 
@@ -236,11 +236,11 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 - Settings read/update the polling interval, configure/clear encrypted Telegram credentials without prefilling secrets, run an explicit Telegram test, enable/pause/test/remove browser Push devices, and change the password. Telegram status exposes only a masked chat label and sanitized test result; Push status exposes only the public VAPID key and device metadata. No secret or subscription endpoint is rendered.
 - The frontend is embedded with `web/embed.go` and served by `internal/webui`: one Go binary serves the SPA and API, deep links fall back to `index.html`, missing hashed assets return 404, API/health paths never fall back to HTML, HTML is `no-store`, hashed assets are immutable, and the SPA CSP allows same-origin scripts plus inline style attributes required by Radix while forbidding inline scripts.
 - `web/dist/.gitkeep` keeps `go build ./...` valid before a frontend build. The checked-in `.gitkeep` is restored after builds; generated assets are ignored.
-- `npm run lint`, `npm run typecheck`, `npm test` (149 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
+- `npm run lint`, `npm run typecheck`, `npm test` (169 tests), and `npm run build` pass. Vitest/Testing Library covers date conversion/leap/boundaries, API/CSRF/401 behavior, login and setup guidance, monitor status semantics, pause/resume/delete confirmation, settings secret handling, polling validation, password change, history filters/pagination, delivery labels, Push enable/permission-denial/device/test states, and VAPID key conversion. The manual browser checklist is in [`docs/FRONTEND_ACCEPTANCE.md`](docs/FRONTEND_ACCEPTANCE.md); items requiring a real browser/Telegram/Push are recorded as not run where applicable.
 
 ## Not implemented yet
 
-Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, production MrBilit registration (`PRV-009`), and deployment. The MrBilit adapter parses the observed live envelope and booking URL and supports the URL-first local flow, but production registration remains deferred; the Telegram/Push delivery foundation has no production credentials and no production provider checks dispatch with the empty registry. Nothing in this repository authorizes real Telegram/Push credentials or deployment.
+Real browser-to-Push-service and Telegram delivery acceptance, target-host backup/restore and soak measurement, and deployment. Production MrBilit registration is implemented and fails closed unless `NEDA_MRBILIT_ENABLED=true`; the Telegram/Push delivery foundation has no production credentials. Ordinary tests do not dispatch production provider checks. Nothing in this repository authorizes real Telegram/Push credentials, live provider traffic, or deployment.
 
 ## Local development
 
@@ -328,44 +328,66 @@ The current service reads environment variables. The validated settings that aff
 | `NEDA_SESSION_TTL_HOURS` | `720` | Absolute session lifetime used by the auth foundation. |
 | `NEDA_SESSION_IDLE_HOURS` | `168` | Idle timeout used by the auth foundation; must not exceed the absolute TTL. |
 | `NEDA_WORKERS` | `2` | Bounded scheduler worker pool; integer from 1 to 16. |
-| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and ignored in production. |
+| `NEDA_MRBILIT_ENABLED` | `false` | Required in production; registers the real MrBilit adapter. Development registers it automatically. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | `false` | Test-only fake provider; never a real ticket source and rejected in production. |
 
-MrBilit has no separate enable flag. It registers automatically when `NEDA_ENV` is not `production`; production keeps the provider registry empty until `PRV-009`.
+Production startup fails if `NEDA_MRBILIT_ENABLED` is not true, if active monitors reference an unregistered provider, or if the production process runs as UID 0.
 
 Compose-only variables: `NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID` select the non-root
-runtime user and must match the owner of `./data` and the key-secret target. They
-are not read by the Go service.
+runtime user and must match the owner of `./data` and
+`./secrets/encryption_key`. They are not read by the Go service.
 
 The global polling interval is not an environment variable. It is seeded into SQLite settings as `poll_interval_seconds` with a default of 300 seconds and enforced bounds of 60–3600 seconds. `.env.example` lists placeholders for settings validated by the loader. Private auth, monitor, provider/health, event/delivery, overview, settings/Telegram, and Push routes are implemented. Web Push requires HTTPS in production (localhost is allowed for development) and an external browser Push service. Do not commit real secrets.
 
-## Docker deployment (design + CI smoke)
+## Docker deployment
 
-The repository includes a multi-stage `Dockerfile` and a single-replica
-`compose.yaml`. The runtime image is distroless, non-root, CGO-free, DNS/IP
-validated outbound, with a read-only root filesystem under Compose, a writable
-`/data` volume, and a long-form key secret mounted `0400`. Docker is not
-installed on the local development machine; the `docker` CI workflow builds the
-image and runs it read-only with a fresh volume, checks `/healthz`, restarts it,
-verifies the VAPID key is stable, and confirms a wrong key mode fails closed.
+Prerequisites: a Linux host, Docker Engine with Compose v2, `openssl`, a
+non-root deployment user that owns the checkout, DNS/TLS/reverse-proxy
+configuration for the chosen HTTPS origin, and outbound network access for the
+first image build (base images and locked npm/Go dependencies). The repository
+provides a multi-stage `Dockerfile`, a single-replica `compose.yaml`, and a
+first-time `scripts/setup.sh` that prompts for the public URL and VAPID contact.
 
 ```sh
-# On the reviewed deployment host, with owner-approved values:
-cd /opt/neda
-cp .env.example .env
-# Edit NEDA_PUBLIC_URL, NEDA_VAPID_SUBJECT, NEDA_RUNTIME_UID/GID.
-# Install a base64 32-byte key at ./secrets/encryption_key with mode 0400.
-mkdir -p data
-sudo chown -R "$NEDA_RUNTIME_UID:$NEDA_RUNTIME_GID" data
-docker compose config >/dev/null
+# On the deployment host, from the reviewed checkout (for example /opt/neda):
+./scripts/setup.sh
 docker compose run --rm -it --entrypoint /neda neda set-password
 docker compose up -d
-curl -fsS https://neda.example.com/healthz
+docker compose ps
+docker compose logs --tail=50 neda
+curl -fsS https://neda.example.com/readyz
 ```
 
-The app listens on `127.0.0.1:8080`; place a TLS reverse proxy in front of it.
-See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full preflight, proxy,
-backup/restore, rollback, and approval checklist. No deployment is authorized by
-the presence of these files.
+`setup.sh` creates `.env` (mode 0600), `./data` (mode 0700 on first creation),
+and `./secrets/encryption_key` (owner = the current UID/GID, mode 0400). It
+refuses to overwrite an existing `.env`, key, or database, and it does not print
+the key. `compose.yaml` sets `pull_policy: build`, so `docker compose up -d`
+builds `neda:local` from the reviewed checkout and never pulls a same-named tag
+from a registry; Docker's layer cache keeps an unchanged build fast. No manual
+image build is required. Re-running setup is intentionally not a
+configuration-update path.
+
+The key is a read-only host bind mount at `/run/secrets/encryption_key`, not a
+Compose secret. File-backed Compose secrets are bind mounts in non-swarm Compose
+and their `uid`/`gid`/`mode` fields are not applied, so the host file owner and
+mode are authoritative. The service refuses a key it does not own or one with
+group/world access. `/data` is a host bind mount so SQLite and the key are backed
+up together. The app listens on `127.0.0.1:8080` on the host; a local TLS reverse
+proxy is the ingress.
+
+The image is distroless, non-root, CGO-free, and runs with a read-only root
+filesystem under Compose, dropped capabilities, `no-new-privileges`, and bounded
+resources. The image does not enable the real provider by default; Compose
+requires `NEDA_MRBILIT_ENABLED=true` explicitly. Docker is not installed on the
+local development machine, and the current Docker workflow has not been executed
+in this local session; do not treat the commands above as locally verified until
+the workflow or an authorized host run passes.
+
+The Dockerfile pins its Node, Go, and distroless base images to verified
+multi-arch digests; see [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md) for the
+update procedure. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the full
+preflight, proxy/TLS, backup/restore, update/rollback, and approval checklist.
+No deployment is authorized by the presence of these files.
 
 ## Operational setup
 
@@ -425,13 +447,23 @@ source control.
 ### Backups and restore
 
 A backup is only usable with both the SQLite database and the encryption key.
-Stop the service before a simple copy, or use SQLite `.backup` while running:
+Stop the service before a simple copy so WAL/SHM files are not changing:
 
 ```bash
+cd /opt/neda
 docker compose stop neda
-sqlite3 data/neda.db 'PRAGMA wal_checkpoint(TRUNCATE);'
-tar -C /opt -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz neda/data neda/secrets/encryption_key
+tar -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz data secrets/encryption_key
 docker compose start neda
+```
+
+The stopped-copy archive includes any WAL/SHM sidecars, so it does not require a
+host `sqlite3` package. If you prefer an online backup, use SQLite `.backup` and
+copy the key separately. After restoring as the deployment user, keep `data` and
+the key owned by that user and the key mode `0400`:
+
+```bash
+sudo chown -R "$(id -u):$(id -g)" data secrets/encryption_key
+sudo chmod 0400 secrets/encryption_key
 ```
 
 Keep the key owner-only (`0400`/`0600`), encrypt backups at rest, and test restore

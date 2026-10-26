@@ -21,10 +21,10 @@ func TestHealthTarget(t *testing.T) {
 		wantTarget string
 		wantHost   string
 	}{
-		{"all-interfaces", ":8080", "", "http://127.0.0.1:8080/healthz", ""},
-		{"ipv4-all", "0.0.0.0:9000", "", "http://127.0.0.1:9000/healthz", ""},
-		{"loopback", "127.0.0.1:8081", "", "http://127.0.0.1:8081/healthz", ""},
-		{"public-host", ":8080", "https://neda.example.com", "http://127.0.0.1:8080/healthz", "neda.example.com"},
+		{"all-interfaces", ":8080", "", "http://127.0.0.1:8080/readyz", ""},
+		{"ipv4-all", "0.0.0.0:9000", "", "http://127.0.0.1:9000/readyz", ""},
+		{"loopback", "127.0.0.1:8081", "", "http://127.0.0.1:8081/readyz", ""},
+		{"public-host", ":8080", "https://neda.example.com", "http://127.0.0.1:8080/readyz", "neda.example.com"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestHealthTargetRejectsBadAddress(t *testing.T) {
 
 func TestRunHealthcheck(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/healthz" {
+		if r.URL.Path != "/readyz" {
 			http.NotFound(w, r)
 			return
 		}
@@ -105,6 +105,7 @@ func TestRunHealthcheckUsesPublicHostHeader(t *testing.T) {
 	t.Setenv("NEDA_HTTP_ADDR", strings.TrimPrefix(server.URL, "http://"))
 	t.Setenv("NEDA_PUBLIC_URL", "https://neda.example.com")
 	t.Setenv("NEDA_ENCRYPTION_KEY_FILE", keyPath)
+	t.Setenv("NEDA_MRBILIT_ENABLED", "true")
 
 	var stdout, stderr bytes.Buffer
 	if code := runHealthcheck(&stdout, &stderr); code != 0 {
@@ -126,7 +127,9 @@ func TestRunHealthcheckReportsFailure(t *testing.T) {
 	if code := runHealthcheck(&stdout, &stderr); code != 1 {
 		t.Fatalf("runHealthcheck = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "HTTP 503") {
-		t.Fatalf("stderr = %q", stderr.String())
+	for _, want := range []string{"readiness check", "/readyz", "HTTP 503"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want substring %q", stderr.String(), want)
+		}
 	}
 }

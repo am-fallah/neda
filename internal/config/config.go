@@ -35,6 +35,7 @@ type Config struct {
 	LogFormat           string
 	TrustProxy          bool
 	FakeProviderEnabled bool
+	MrBilitEnabled      bool
 	SessionTTL          time.Duration
 	SessionIdle         time.Duration
 	Workers             int
@@ -117,6 +118,13 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	mrbilitEnabled, err := parseBool(get, "NEDA_MRBILIT_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	if env == Production && fakeProvider {
+		return Config{}, errors.New("NEDA_FAKE_PROVIDER_ENABLED is not allowed in production")
+	}
 
 	sessionTTL, err := parseHours(get, "NEDA_SESSION_TTL_HOURS", 720)
 	if err != nil {
@@ -156,6 +164,10 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 
+	if env == Production && !mrbilitEnabled {
+		return Config{}, errors.New("NEDA_MRBILIT_ENABLED must be true in production; the real provider is required")
+	}
+
 	return Config{
 		Env:                 env,
 		HTTPAddr:            httpAddr,
@@ -167,6 +179,7 @@ func LoadFrom(get func(string) (string, bool)) (Config, error) {
 		LogFormat:           logFormat,
 		TrustProxy:          trustProxy,
 		FakeProviderEnabled: fakeProvider,
+		MrBilitEnabled:      mrbilitEnabled,
 		SessionTTL:          time.Duration(sessionTTL) * time.Hour,
 		SessionIdle:         time.Duration(sessionIdle) * time.Hour,
 		Workers:             workers,

@@ -3,11 +3,15 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/url"
 	"os"
 	"os/signal"
+	"sort"
+	"strings"
 	"syscall"
 	"time"
 
@@ -42,6 +46,31 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	logger := logging.NewWithWriter(stdout, cfg.LogLevel, cfg.LogFormat)
 
+	if err := validateRuntimeUser(os.Geteuid(), cfg.IsProduction()); err != nil {
+		logger.Error("runtime user validation failed", "error", err)
+		return 1
+	}
+
+	// Construct the provider registry before opening the database so a
+	// production misconfiguration fails before any persistent state changes.
+	providerRegistry, providerFlags, err := providerRegistryForConfig(cfg, logger)
+	if err != nil {
+		logger.Error("provider registry initialization failed", "error", err)
+		return 1
+	}
+
+	// Load the key before opening the database so the persisted-secret check can
+	// run before migrations or settings seeding.
+	var encryptionKey *crypto.Key
+	if cfg.EncryptionKeyFile != "" {
+		encryptionKey, err = crypto.LoadKeyFile(cfg.EncryptionKeyFile)
+		if err != nil {
+			logger.Error("encryption key load failed", "error", err)
+			return 1
+		}
+		defer encryptionKey.Zero()
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -56,6 +85,13 @@ func runServe(stdout, stderr io.Writer) int {
 		}
 	}()
 
+	if encryptionKey != nil {
+		if err := validateKeyDatabaseConsistency(ctx, database.DB, encryptionKey); err != nil {
+			logger.Error("encryption key/database consistency check failed", "error", err)
+			return 1
+		}
+	}
+
 	applied, err := db.Migrate(ctx, database.DB, migrations.FS)
 	if err != nil {
 		logger.Error("database migration failed", "error", err)
@@ -68,6 +104,15 @@ func runServe(stdout, stderr io.Writer) int {
 	logger.Info("database ready", "migrations", applied)
 
 	appStore := store.New(database.DB)
+
+	// Check persisted provider references before seeding any settings so a
+	// production coverage failure does not write defaults to the database.
+	if err := validateProviderCoverage(ctx, appStore, providerRegistry, time.Now().UTC(), cfg.IsProduction(), logger); err != nil {
+		logger.Error("provider coverage check failed", "error", err)
+		return 1
+	}
+	logger.Info("provider registry ready", "providers", registryProviderIDs(providerRegistry))
+
 	if err := appStore.EnsurePollInterval(ctx, time.Now().UTC()); err != nil {
 		logger.Error("poll interval initialization failed", "error", err)
 		return 1
@@ -104,22 +149,15 @@ func runServe(stdout, stderr io.Writer) int {
 		Production: cfg.IsProduction(),
 	}, loginLimiter, cfg.TrustProxy)
 
-	// P2/P3/PSH: load the external key only when configured. Development
-	// startup without a key remains usable; encrypted channels are simply
-	// unavailable.
+	// P2/P3/PSH: encrypted channels are available only when a key is configured.
+	// Development startup without a key remains usable.
 	var telegramSettings *telegramsettings.Settings
 	var telegramClient *notify.TelegramClient
 	var pushService *pushservice.Service
 	var pushSender *pushservice.Sender
 	var deliverySource scheduler.DeliverySource
-	if cfg.EncryptionKeyFile != "" {
-		key, err := crypto.LoadKeyFile(cfg.EncryptionKeyFile)
-		if err != nil {
-			logger.Error("encryption key load failed", "error", err)
-			return 1
-		}
-		defer key.Zero()
-		telegramSettings, err = telegramsettings.New(appStore, key, time.Now)
+	if encryptionKey != nil {
+		telegramSettings, err = telegramsettings.New(appStore, encryptionKey, time.Now)
 		if err != nil {
 			logger.Error("telegram settings initialization failed", "error", err)
 			return 1
@@ -129,7 +167,7 @@ func runServe(stdout, stderr io.Writer) int {
 			logger.Error("telegram client initialization failed", "error", err)
 			return 1
 		}
-		pushService, err = pushservice.New(appStore, database.DB, key, cfg.VAPIDSubject, time.Now)
+		pushService, err = pushservice.New(appStore, database.DB, encryptionKey, cfg.VAPIDSubject, time.Now)
 		if err != nil {
 			logger.Error("web push initialization failed", "error", err)
 			return 1
@@ -160,14 +198,6 @@ func runServe(stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	// PRV-009 (production provider configuration) remains deferred, so the
-	// production registry stays empty. Non-production environments register the
-	// real MrBilit adapter automatically; the fake provider remains explicit.
-	providerRegistry, providerFlags, err := providerRegistryForConfig(cfg)
-	if err != nil {
-		logger.Error("provider registry initialization failed", "error", err)
-		return 1
-	}
 	// The waker is the scheduler's wake source and the post-commit hook for
 	// monitor CRUD changes.
 	waker := scheduler.NewWaker()
@@ -365,16 +395,132 @@ func publicURLString(publicURL *url.URL) string {
 	return publicURL.String()
 }
 
+// validateRuntimeUser makes the non-root requirement explicit for production
+// even if a Compose override or host launcher supplies UID 0.
+func validateRuntimeUser(uid int, production bool) error {
+	if production && uid == 0 {
+		return errors.New("production refuses to run as root (uid 0); set a non-root runtime UID")
+	}
+	return nil
+}
+
+// validateKeyDatabaseConsistency verifies that the configured key can decrypt
+// every persisted secret before migrations or settings seeding. A fresh database
+// has no settings table or secret rows and passes.
+func validateKeyDatabaseConsistency(ctx context.Context, database *sql.DB, key *crypto.Key) error {
+	if database == nil || key == nil {
+		return errors.New("key/database consistency requires a database and key")
+	}
+	var tableCount int
+	if err := database.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'settings'`,
+	).Scan(&tableCount); err != nil {
+		return fmt.Errorf("inspect settings table: %w", err)
+	}
+	if tableCount == 0 {
+		return nil
+	}
+	rows, err := database.QueryContext(ctx,
+		`SELECT key, value FROM settings WHERE is_secret = 1`,
+	)
+	if err != nil {
+		return fmt.Errorf("read encrypted settings: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var settingKey, ciphertext string
+		if err := rows.Scan(&settingKey, &ciphertext); err != nil {
+			return fmt.Errorf("scan encrypted setting: %w", err)
+		}
+		if _, err := key.Decrypt(settingKey, ciphertext); err != nil {
+			return fmt.Errorf("encrypted setting %q cannot be decrypted with the configured key", settingKey)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read encrypted settings: %w", err)
+	}
+	return nil
+}
+
+type scheduleLister interface {
+	ListScheduleTargets(ctx context.Context, now time.Time) ([]domain.ScheduleTarget, error)
+}
+
+// validateProviderCoverage prevents active monitors from being silently
+// skipped when their persisted provider is not registered. Production must
+// fail closed; development may continue with a visible warning.
+func validateProviderCoverage(
+	ctx context.Context,
+	schedule scheduleLister,
+	registry *provider.Registry,
+	now time.Time,
+	production bool,
+	logger *slog.Logger,
+) error {
+	if schedule == nil || registry == nil {
+		return errors.New("provider coverage requires a schedule repository and registry")
+	}
+	targets, err := schedule.ListScheduleTargets(ctx, now)
+	if err != nil {
+		return fmt.Errorf("list active targets: %w", err)
+	}
+	missing := make(map[provider.ID]struct{})
+	for _, target := range targets {
+		if _, ok := registry.Lookup(target.ProviderID); !ok {
+			missing[target.ProviderID] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		if logger != nil {
+			logger.Info("provider coverage ready", "active_targets", len(targets))
+		}
+		return nil
+	}
+	ids := make([]string, 0, len(missing))
+	for id := range missing {
+		ids = append(ids, string(id))
+	}
+	sort.Strings(ids)
+	if production {
+		return fmt.Errorf("active monitors require unregistered providers: %s", strings.Join(ids, ", "))
+	}
+	if logger != nil {
+		logger.Warn("active monitors require unregistered providers", "providers", ids)
+	}
+	return nil
+}
+
+func registryProviderIDs(registry *provider.Registry) []string {
+	if registry == nil {
+		return nil
+	}
+	metadata := registry.List()
+	ids := make([]string, 0, len(metadata))
+	for _, item := range metadata {
+		ids = append(ids, string(item.ID))
+	}
+	return ids
+}
+
 type providerFlags struct {
 	FakeEnabled    bool
 	MrBilitEnabled bool
 }
 
-func providerRegistryForConfig(cfg config.Config) (*provider.Registry, providerFlags, error) {
+func providerRegistryForConfig(cfg config.Config, logger *slog.Logger) (*provider.Registry, providerFlags, error) {
+	if cfg.IsProduction() {
+		if !cfg.MrBilitEnabled {
+			return nil, providerFlags{}, errors.New("NEDA_MRBILIT_ENABLED must be true in production; the real provider is required")
+		}
+		if cfg.FakeProviderEnabled {
+			return nil, providerFlags{}, errors.New("NEDA_FAKE_PROVIDER_ENABLED is not allowed in production")
+		}
+	}
+
 	providers := make([]provider.Provider, 0, 2)
 	flags := providerFlags{}
-	if !cfg.IsProduction() {
-		adapter, err := mrbilit.New(mrbilit.Config{NoRetries: true})
+	if !cfg.IsProduction() || cfg.MrBilitEnabled {
+		adapter, err := mrbilit.New(mrbilit.Config{NoRetries: true, Logger: logger})
 		if err != nil {
 			return nil, providerFlags{}, err
 		}
@@ -384,6 +530,9 @@ func providerRegistryForConfig(cfg config.Config) (*provider.Registry, providerF
 	if cfg.FakeProviderEnabled && !cfg.IsProduction() {
 		providers = append(providers, fake.New())
 		flags.FakeEnabled = true
+	}
+	if cfg.IsProduction() && len(providers) == 0 {
+		return nil, providerFlags{}, errors.New("production provider registry is empty")
 	}
 	registry, err := provider.NewRegistry(providers...)
 	if err != nil {

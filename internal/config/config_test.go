@@ -34,6 +34,7 @@ func TestLoadProductionDefaults(t *testing.T) {
 	cfg, err := LoadFrom(lookup(map[string]string{
 		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
 		"NEDA_PUBLIC_URL":          "https://neda.example.com",
+		"NEDA_MRBILIT_ENABLED":     "true",
 	}))
 	if err != nil {
 		t.Fatalf("LoadFrom: %v", err)
@@ -56,11 +57,38 @@ func TestLoadProductionDefaults(t *testing.T) {
 	if cfg.FakeProviderEnabled {
 		t.Fatal("FakeProviderEnabled = true by default")
 	}
+	if !cfg.MrBilitEnabled {
+		t.Fatal("MrBilitEnabled = false, want true")
+	}
 	if cfg.Workers != 2 {
 		t.Fatalf("Workers = %d", cfg.Workers)
 	}
 	if cfg.PublicURL == nil || cfg.PublicURL.Host != "neda.example.com" {
 		t.Fatalf("PublicURL = %v", cfg.PublicURL)
+	}
+}
+
+func TestLoadProductionRequiresMrBilit(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	_, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE": keyFile,
+		"NEDA_PUBLIC_URL":          "https://neda.example.com",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "NEDA_MRBILIT_ENABLED") {
+		t.Fatalf("error = %v, want NEDA_MRBILIT_ENABLED error", err)
+	}
+}
+
+func TestLoadProductionRejectsFakeProvider(t *testing.T) {
+	keyFile := writeKey(t, 0o600)
+	_, err := LoadFrom(lookup(map[string]string{
+		"NEDA_ENCRYPTION_KEY_FILE":   keyFile,
+		"NEDA_PUBLIC_URL":            "https://neda.example.com",
+		"NEDA_MRBILIT_ENABLED":       "true",
+		"NEDA_FAKE_PROVIDER_ENABLED": "true",
+	}))
+	if err == nil || !strings.Contains(err.Error(), "NEDA_FAKE_PROVIDER_ENABLED") {
+		t.Fatalf("error = %v, want fake-provider rejection", err)
 	}
 }
 
@@ -177,6 +205,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 	base := map[string]string{
 		"NEDA_ENCRYPTION_KEY_FILE": validKey,
 		"NEDA_PUBLIC_URL":          "https://neda.example.com",
+		"NEDA_MRBILIT_ENABLED":     "true",
 	}
 
 	cases := []struct {
@@ -191,6 +220,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"log-level", "NEDA_LOG_LEVEL", "verbose", "NEDA_LOG_LEVEL"},
 		{"log-format", "NEDA_LOG_FORMAT", "yaml", "NEDA_LOG_FORMAT"},
 		{"trust-proxy", "NEDA_TRUST_PROXY", "sometimes", "NEDA_TRUST_PROXY"},
+		{"mrbilit-provider", "NEDA_MRBILIT_ENABLED", "sometimes", "NEDA_MRBILIT_ENABLED"},
 		{"fake-provider", "NEDA_FAKE_PROVIDER_ENABLED", "sometimes", "NEDA_FAKE_PROVIDER_ENABLED"},
 		{"workers-low", "NEDA_WORKERS", "0", "NEDA_WORKERS"},
 		{"workers-high", "NEDA_WORKERS", "17", "NEDA_WORKERS"},

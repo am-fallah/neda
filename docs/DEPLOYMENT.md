@@ -1,10 +1,10 @@
-# Neda — Deployment Plan (design only)
+# Neda — Docker Compose Deployment
 
-**Status:** Design for owner review. **No server was accessed, no container was
-deployed, and no production data was touched.** Deployment requires explicit
-approval of `GATE-004` after this plan and `OPS-005` are reviewed. Nothing in
-this document authorizes live MrBilit validation (`GATE-003`) or real
-Telegram/Push credentials.
+**Status:** Deployment files and a first-time setup script are present. **No
+server was accessed, no container was deployed, and no production data was
+touched.** Deployment requires explicit approval of `GATE-004` after this plan
+and `OPS-005` are reviewed. Nothing in this document authorizes live MrBilit
+traffic, real Telegram/Push credentials, or deployment.
 
 ## 1. Target and assumptions
 
@@ -16,9 +16,10 @@ Telegram/Push credentials.
 | Domain/DNS | Owner supplies a dedicated hostname resolving to the server |
 | TLS | Owner supplies certificate automation (Caddy, certbot, or existing proxy) |
 | Public exposure | Only 80/443 reachable; Neda binds `127.0.0.1:8080` |
-| Runtime user | A non-root UID/GID (default `1000:1000`; macOS dev user may differ) |
+| Runtime user | Non-root deployment user's UID/GID; `scripts/setup.sh` records the current values |
 | Data | Bind-mounted host directory `./data`; backup target off-host |
-| Secrets | Key file outside Git and outside the database; Compose secret with mode 0400 |
+| Secrets | Key file outside Git and the database; read-only bind mount, host owner = runtime UID, mode `0400`/`0600` |
+| Prerequisites | Docker Engine with Compose v2, `openssl`, `git`, and owner-provided DNS/TLS |
 | Resource budget | 1 CPU, 512 MiB memory, 256 PIDs, 10 MiB × 3 log files as starting limits |
 
 Do not invent server facts. Record actual values during the approved deployment
@@ -37,60 +38,106 @@ Recommended layout on the host:
     └── encryption_key      # base64, exactly 32 bytes, mode 0400, owner = runtime UID
 ```
 
-The repository's `compose.yaml` bind-mounts `./data` and mounts
-`./secrets/encryption_key` through a long-form Compose secret with explicit
-`uid`, `gid`, and `mode: 0400`. The runtime UID must own `data/`:
-
-```sh
-sudo install -d -m 0700 -o 1000 -g 1000 /opt/neda/data /opt/neda/secrets
-sudo install -m 0400 -o 1000 -g 1000 /dev/null /opt/neda/secrets/encryption_key
-# Generate the key locally with a trusted tool, then install it with mode 0400.
-```
-
-Do not place the key in `.env`, Compose environment variables, image layers, or
-the Git working tree. Do not paste it into chat or tickets.
-
-## 3. Build and transfer
-
-Preferred: build on the server from a reviewed, signed-off commit:
+Run the first-time setup as the non-root deployment user that owns the checkout:
 
 ```sh
 cd /opt/neda
-git fetch --tags
-git checkout <reviewed-commit>
-docker compose build --pull
+./scripts/setup.sh
+# Non-interactive form:
+# NEDA_PUBLIC_URL=https://neda.example.com \
+# NEDA_VAPID_SUBJECT=mailto:owner@example.com ./scripts/setup.sh
+```
+
+The script creates `.env` (mode 0600), `data/`, and
+`secrets/encryption_key` (owner = current UID/GID, mode 0400), without printing
+the key. It refuses to run if `.env`, the key, or the database already exists,
+so it cannot silently replace a key or data. It also refuses to run as root.
+Re-run it only for a genuinely new install.
+
+The repository's `compose.yaml` bind-mounts `./data` read-write and
+`./secrets/encryption_key` read-only at `/run/secrets/encryption_key`. The host
+key owner must equal `NEDA_RUNTIME_UID` and its mode must remain `0400` or `0600`;
+the service enforces both. File-backed Compose secrets are bind mounts in
+non-swarm Compose and their `uid`/`gid`/`mode` fields are ignored, so this
+repository deliberately uses an explicit bind mount instead. This design targets
+Linux Docker Engine/Compose v2. It has not been run against Docker Desktop,
+rootless UID remapping, or a remote Docker daemon. On any of those platforms,
+confirm the container sees the key as a regular file owned by the runtime UID
+before relying on the deployment.
+
+Do not place the key in `.env`, Compose environment variables, image layers, or
+the Git working tree. Do not paste it into chat or tickets. The key and the
+database must be backed up together.
+
+## 3. Build and transfer
+
+The Compose service sets `pull_policy: build`: it builds `neda:local` from this
+checkout and does not try to pull that mutable tag from a registry. The normal
+first start is therefore:
+
+```sh
+cd /opt/neda
+docker compose up -d
 docker image inspect neda:local --format '{{.Id}} {{.Size}}'
 ```
 
+No manual `docker build` is required. Repeated `up` commands rebuild from source
+but reuse Docker's layer cache when nothing changed. `docker compose restart
+neda` restarts the existing container without invoking a build. For a reviewed
+update, build from the checked-out commit before recreating the container:
+
+```sh
+git fetch --tags
+git checkout <reviewed-commit>
+docker compose build --pull
+docker compose up -d
+```
+
 If building on the server is undesirable, build in CI, push to a private
-registry, pin the digest in `compose.yaml`, and pull by digest. Do not use a
-floating `latest` tag. Record the image digest in the deployment log.
+registry, pin the digest in `compose.yaml`, and pull by digest. That path
+requires removing/replacing the local `build` section and `pull_policy: build`
+with the digest-pinned `image` and an appropriate pull policy. Do not use a
+floating `latest` tag. Record the image ID/digest in the deployment log.
 
 The image is multi-stage, runs as `nonroot:nonroot` by default, has no shell or
 package manager, uses a read-only root filesystem under Compose, drops all
-capabilities, and sets `no-new-privileges`. The Compose override runs as the
-owner of `data/` and the secret; that UID must never be 0.
+capabilities, and sets `no-new-privileges`. Compose runs the container as the
+owner of `data/` and the key (`NEDA_RUNTIME_UID`/`NEDA_RUNTIME_GID`); that UID
+must never be 0, and the application independently refuses UID 0 in production.
 
 ## 4. Configuration
 
-Create `/opt/neda/.env` with owner-only permissions:
+`scripts/setup.sh` creates `/opt/neda/.env` with owner-only permissions and the
+current non-root UID/GID. Its effective contents are:
 
 ```text
 NEDA_PUBLIC_URL=https://neda.example.com
 NEDA_VAPID_SUBJECT=mailto:owner@example.com
-NEDA_RUNTIME_UID=1000
-NEDA_RUNTIME_GID=1000
+NEDA_MRBILIT_ENABLED=true
+NEDA_RUNTIME_UID=<deployment user uid>
+NEDA_RUNTIME_GID=<deployment user gid>
 NEDA_TRUST_PROXY=true
-NEDA_LOG_LEVEL=info
-NEDA_WORKERS=2
 ```
+
+Edit `.env` only for deliberate changes; do not put the encryption key in it.
+`NEDA_LOG_LEVEL` and `NEDA_WORKERS` are optional and default through Compose.
 
 - `NEDA_PUBLIC_URL` must be the exact public HTTPS origin. Host mismatch returns
   421; do not include a path, query, or fragment.
 - `NEDA_TRUST_PROXY=true` is appropriate only when the reverse proxy is the
-  local trusted ingress. If the app is exposed directly, keep it `false`.
+  local trusted ingress. The Compose port is loopback-only, so a host proxy is
+  the expected ingress. If the app is exposed directly, set it to `false`.
 - `NEDA_VAPID_SUBJECT` is required for Push. A `mailto:` contact or HTTPS URL is
   accepted.
+- `NEDA_MRBILIT_ENABLED=true` is required in production. The image does not
+  enable it by default, and `compose.yaml` refuses to render if the variable is
+  unset, so production registration is an explicit opt-in. Startup fails before
+  opening the database if the real provider is not enabled; it also fails if any
+  active monitor references an unregistered provider. A development database
+  containing active fake-provider targets must have those targets removed or
+  deactivated before production startup.
+- The application itself refuses to start in production when its effective UID
+  is `0`, even if a Compose override or launcher supplies root.
 - Validate without starting:
 
 ```sh
@@ -129,8 +176,9 @@ Firewall: allow 22/tcp only from owner-approved administration networks, and
 
 ## 6. Initial password and first-run verification
 
-The web app has no unauthenticated bootstrap. Set the owner password offline
-with a TTY:
+Complete section 2 (`scripts/setup.sh`) first. `docker compose run` builds the
+image on first use if it is not present. The web app has no unauthenticated
+bootstrap; set the owner password offline with a TTY:
 
 ```sh
 cd /opt/neda
@@ -155,8 +203,10 @@ Verify:
 3. Login works with the owner password; wrong-password attempts receive 429
    after the configured soft limit.
 4. Session/CSRF cookies are `Secure`, `HttpOnly`, `SameSite=Lax` in the browser.
-5. Create a monitor with the fake provider only in a non-production environment;
-   production intentionally has an empty provider registry until `PRV-009`.
+5. Do not create a fake-provider monitor in production. Verify the authenticated
+   Providers view lists the real MrBilit provider with sane health metadata.
+   Production startup must have failed closed if `NEDA_MRBILIT_ENABLED` was
+   missing or false.
 6. Configure Telegram only if authorized; never paste the token into logs.
 7. Open Settings → Browser Push, enable this browser, and send a test **only if**
    the owner authorizes a real Push from the reviewed deployment. Otherwise mark
@@ -166,13 +216,14 @@ Verify:
 
 ## 7. Backup and restore
 
-Stop-and-copy is the simplest consistent backup:
+Stop-and-copy is the simplest consistent backup. A clean stop closes SQLite and
+the archive includes any WAL/SHM sidecars, so no host `sqlite3` package is
+required:
 
 ```sh
 cd /opt/neda
 docker compose stop neda
-sqlite3 data/neda.db 'PRAGMA wal_checkpoint(TRUNCATE);'
-tar -C /opt -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz neda/data neda/secrets/encryption_key
+tar -czf /secure/backups/neda-$(date -u +%Y%m%dT%H%M%SZ).tgz data secrets/encryption_key
 docker compose start neda
 ```
 
@@ -185,10 +236,20 @@ Restore:
 
 1. Stop the service.
 2. Restore the database and key together to a fresh `data/`/`secrets/` pair.
-3. Keep the key owner/mode; start the service.
-4. Check `/readyz`, `PRAGMA integrity_check`, and that encrypted settings/Push
-   keys decrypt (a wrong key fails startup closed).
+   Never restore only one of them.
+3. As the deployment user, restore the numeric owner and mode:
+   ```sh
+   sudo chown -R "$(id -u):$(id -g)" data secrets/encryption_key
+   sudo chmod 0400 secrets/encryption_key
+   ```
+4. Start the service and check `/readyz`, `PRAGMA integrity_check`, and that
+   encrypted settings/Push keys decrypt (a wrong key fails startup closed before
+   migrations or settings seeding).
 5. Re-enable scheduling and verify a synthetic/fake-provider check only.
+
+A database restored with a different valid key is not recoverable by retrying:
+startup fails because a persisted secret setting cannot be authenticated.
+Restore the original key or the matching database+key backup.
 
 A local drill on 2026-10-25 restored a database and key to a fresh directory,
 preserved mode 0400, kept the VAPID public key stable, passed
@@ -198,26 +259,48 @@ not a substitute for the production-volume drill.
 
 ## 8. Rolling update and rollback
 
-Update:
+Update from the reviewed commit, or pull a digest-pinned image if the deployment
+uses a registry. The current Compose file builds `neda:local`, so the
+single-host path uses `build --pull`, not `pull`:
 
 ```sh
 cd /opt/neda
-docker compose pull   # or build from the reviewed commit
+git fetch --tags
+git checkout <reviewed-commit>
+docker compose build --pull
 docker compose up -d
 docker compose ps
 curl -fsS https://neda.example.com/readyz
 ```
 
-Migrations are forward-only. Before an update, take a database+key backup and
-record the current image digest. Rollback means:
+Migrations are forward-only. Before an update, take a database+key backup,
+preserve the current image under a rollback tag, and record its ID (Compose tags
+the local build `neda:local`, so that tag alone is not a rollback target):
 
-1. Stop the service.
+```sh
+docker tag neda:local "neda:rollback-$(date -u +%Y%m%dT%H%M%SZ)"
+docker image inspect neda:local --format '{{.Id}}'
+```
+
+Rollback means:
+
+1. Remove the service with `docker compose down` and record/retain the failing
+   version for diagnosis.
 2. Restore the previous database+key backup if the new version migrated data.
-3. Start the previous image digest.
-4. Verify health, readiness, login, and scheduling.
+   The database and key must come from the same backup set.
+3. Retag the preserved previous image as `neda:local` (or run the recorded
+   image ID directly), then start it without rebuilding:
+   ```sh
+   docker tag neda:rollback-<timestamp> neda:local
+   docker compose up -d --no-build
+   ```
+4. Verify `/healthz`, `/readyz`, login, scheduling, and decryption of stored
+   settings.
 
 Do not run an older binary against a database migrated by a newer schema. Do not
-force-push images or overwrite the only backup.
+force-push images or overwrite the only backup. A rollback that pairs the old
+database with a new key (or the new database with an old key) must be treated as
+failed: restore the matching database+key backup before retrying.
 
 ## 9. Operations
 
@@ -226,8 +309,11 @@ force-push images or overwrite the only backup.
 - Disk: monitor `data/neda.db`, `-wal`, and backups. SQLite needs free space for
   WAL/checkpoint and vacuum; do not fill the volume.
 - Resource limits: start at 1 CPU/512 MiB and adjust only from measured RSS/CPU.
-- Health: use the container healthcheck and an external HTTPS probe; alert on
-  `/readyz` failures, repeated provider-degraded events, and delivery failures.
+- Health: the container healthcheck calls `/readyz`, which verifies SQLite and
+  the applied migration count. Use an external HTTPS probe of `/readyz` as well;
+  alert on readiness failures, repeated provider-degraded events, and delivery
+  failures. `/healthz` remains the process-liveness endpoint, not a database or
+  provider check.
 - Time: the host clock must be NTP-synced; Tehran display/expiry relies on IANA
   zones embedded in the binary.
 - Security: keep Docker and the host patched; do not expose the API without TLS;
@@ -240,10 +326,16 @@ force-push images or overwrite the only backup.
 - [ ] Owner reviews this plan and `docs/SECURITY.md`.
 - [ ] Owner approves `GATE-004` explicitly.
 - [ ] Build/digest and rollback image recorded.
-- [ ] Key generated locally, installed 0400, owner matches runtime UID, backed up
-      separately from the database.
-- [ ] `docker compose config`, image smoke, read-only/non-root run, and volume
-      write test pass in CI or on the host.
+- [ ] `scripts/setup.sh` ran as the deployment user; key is a regular file owned
+      by the runtime UID with mode 0400, and is backed up with the database.
+- [ ] `docker compose config`, an actual `docker compose up` smoke, read-only/non-root
+      run, key mount, container recreation, and volume write test pass in CI or on
+      the host.
+- [ ] `NEDA_MRBILIT_ENABLED=true` is set explicitly (the image does not default
+      it); startup log shows the real provider registered, and active monitors
+      have no missing-provider coverage errors.
+- [ ] Previous image ID, database+key backup, and matching restore procedure are
+      recorded before the first update.
 - [ ] Backup/restore drill on the target volume passes.
 - [ ] Push/Telegram/live-provider actions are separately authorized; none are
       implied by deployment approval.

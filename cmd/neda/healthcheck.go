@@ -30,7 +30,7 @@ func runHealthcheck(stdout, stderr io.Writer) int {
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "neda: healthcheck request: %v\n", err)
+		fmt.Fprintf(stderr, "neda: readiness check request: %v\n", err)
 		return 1
 	}
 	if hostHeader != "" {
@@ -44,12 +44,12 @@ func runHealthcheck(stdout, stderr io.Writer) int {
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		fmt.Fprintf(stderr, "neda: healthcheck failed: %v\n", err)
+		fmt.Fprintf(stderr, "neda: readiness check failed: %v\n", err)
 		return 1
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		fmt.Fprintf(stderr, "neda: healthcheck returned HTTP %d\n", response.StatusCode)
+		fmt.Fprintf(stderr, "neda: readiness check GET %s returned HTTP %d\n", target, response.StatusCode)
 		return 1
 	}
 	fmt.Fprintln(stdout, "ok")
@@ -65,7 +65,7 @@ func healthTarget(cfg config.Config) (string, string, error) {
 		host = "127.0.0.1"
 	}
 	host = strings.Trim(host, "[]")
-	target := "http://" + net.JoinHostPort(host, port) + "/healthz"
+	target := "http://" + net.JoinHostPort(host, port) + "/readyz"
 	hostHeader := ""
 	if cfg.PublicURL != nil {
 		hostHeader = cfg.PublicURL.Host
