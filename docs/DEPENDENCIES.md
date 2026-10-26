@@ -11,7 +11,12 @@ No dependency was added without a concrete product need.
 |---|---|---|
 | Go | `go 1.27.3`; direct and indirect versions in `go.mod`; checksums in `go.sum` | `go mod tidy`; `git diff --exit-code -- go.mod go.sum` in CI |
 | Node/npm | `web/package-lock.json`; `npm ci` only; Node 24 in CI | `npm ci`; no floating install in CI |
-| Container base | Not yet added (`OPS-001`) | Pending |
+| Container base | `node:24-alpine`, `golang:1.27.3-alpine`, `gcr.io/distroless/static-debian12:nonroot` | Pinned to multi-arch manifest-list digests on 2026-10-26: `node@sha256:06d7adf3e0ef61a13f1d28682726366f97a15aa1888c934d3ecec86c33918b53`, `golang@sha256:b8c9b82affbbb82a020bbcf998dad2ba9516944ac7e883524642a481a9505e9c`, `distroless@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab`. Source: Docker Hub `library/node:24-alpine`, `library/golang:1.27.3-alpine`, and `gcr.io/distroless/static-debian12:nonroot`; resolved through registry manifest-list HEAD requests. Verified amd64/arm64 platforms. Update with `docker buildx imagetools inspect <ref>` (or the registry API), review the upstream release, replace the digest, and rebuild/retest. |
+
+The tag-to-digest mappings were re-checked on 2026-10-26 through the Docker Hub
+and gcr.io registry APIs. Each digest still resolves to an OCI image index with
+`linux/amd64` and `linux/arm64` entries. This verifies the pins, not an image
+build or image vulnerability scan.
 
 No `replace` directives, Git-ref requirements, or unverified lifecycle scripts
 are used. The one `npm ci` install-script warning is `fsevents` (optional macOS
@@ -101,6 +106,16 @@ Result on 2026-10-25: `found 0 vulnerabilities`.
 `npm outdated`/version freshness is not treated as a security result. Major
 upgrades are deliberate and tested; the lockfile is the deployment artifact.
 
+### 2026-10-26 re-run
+
+- `go run golang.org/x/vuln/cmd/govulncheck@latest ./...`: no called
+  vulnerabilities; one module-level advisory remains for the unimported
+  `golang.org/x/crypto/openpgp` package.
+- `cd web && npm audit --audit-level=low`: `found 0 vulnerabilities`.
+- No image scanner (`trivy`, `grype`, `syft`, `snyk`) or Docker runtime was
+  available locally. Image scanning remains blocked until an approved scanner
+  and image build environment are available.
+
 ## 5. Maintenance and review notes
 
 - `webpush-go` is the only library that handles Push encryption. Its VAPID key
@@ -123,5 +138,6 @@ upgrades are deliberate and tested; the lockfile is the deployment artifact.
   package is not imported. Do not use `golang.org/x/crypto/openpgp`.
 - `npm audit` covers the npm advisory database only; browser/platform Push
   behavior and provider services are outside its scope.
-- Docker base-image scanning is not yet available because `OPS-001`/`OPS-003`
-  are pending.
+- Docker base images are now digest-pinned, but no local/CI image build or image
+  vulnerability scan was executed in this session. Docker runtime validation
+  remains a release action.

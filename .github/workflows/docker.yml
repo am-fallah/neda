@@ -14,33 +14,134 @@ jobs:
     name: Docker image and runtime smoke
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    env:
+      COMPOSE_PROJECT_NAME: neda-ci
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Validate Compose file
         run: |
-          mkdir -p data secrets
-          openssl rand -base64 32 > secrets/encryption_key
-          chmod 0400 secrets/encryption_key
+          COMPOSE_DIR="$RUNNER_TEMP/neda-compose"
+          mkdir -p "$COMPOSE_DIR/data" "$COMPOSE_DIR/secrets"
+          cp compose.yaml "$COMPOSE_DIR/compose.yaml"
+          cp Dockerfile "$COMPOSE_DIR/Dockerfile"
+          openssl rand -base64 32 > "$COMPOSE_DIR/secrets/encryption_key"
+          chmod 0400 "$COMPOSE_DIR/secrets/encryption_key"
           NEDA_PUBLIC_URL=https://neda.example.com \
           NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+          NEDA_MRBILIT_ENABLED=true \
           NEDA_RUNTIME_UID="$(id -u)" \
           NEDA_RUNTIME_GID="$(id -g)" \
-          docker compose -f compose.yaml config >/dev/null
+          docker compose -f "$COMPOSE_DIR/compose.yaml" config >/dev/null
+          if NEDA_PUBLIC_URL=https://neda.example.com \
+            NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            NEDA_RUNTIME_UID="$(id -u)" \
+            NEDA_RUNTIME_GID="$(id -g)" \
+            docker compose -f "$COMPOSE_DIR/compose.yaml" config >"$COMPOSE_DIR/missing-provider.log" 2>&1; then
+            echo "Compose accepted a missing NEDA_MRBILIT_ENABLED" >&2
+            exit 1
+          fi
+          grep -q "NEDA_MRBILIT_ENABLED" "$COMPOSE_DIR/missing-provider.log"
 
-      - name: Build image
+      - name: Build image through Compose
+        env:
+          NEDA_PUBLIC_URL: https://neda.example.com
+          NEDA_VAPID_SUBJECT: mailto:ci@example.com
+          NEDA_MRBILIT_ENABLED: "true"
         run: |
-          docker build \
+          # Exercise the same build path the operator uses. The image tag is
+          # neda:local from compose.yaml; tag it for the runtime checks below.
+          docker compose build \
             --build-arg VERSION=ci \
             --build-arg COMMIT="${GITHUB_SHA}" \
-            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            -t neda:ci .
+            --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          docker tag neda:local neda:ci
 
       - name: Verify image defaults
         run: |
           test "$(docker inspect -f '{{.Config.User}}' neda:ci)" = "nonroot:nonroot"
+          if docker inspect -f '{{json .Config.Env}}' neda:ci | grep -q 'NEDA_MRBILIT_ENABLED='; then
+            echo "image must not enable the real provider by default" >&2
+            exit 1
+          fi
           docker run --rm --entrypoint /neda neda:ci version
+
+      - name: Missing production provider fails closed before database creation
+        run: |
+          mkdir -p "$RUNNER_TEMP/neda-fail-closed/data" "$RUNNER_TEMP/neda-fail-closed/key"
+          openssl rand -base64 32 > "$RUNNER_TEMP/neda-fail-closed/key/encryption_key"
+          chmod 0400 "$RUNNER_TEMP/neda-fail-closed/key/encryption_key"
+          set +e
+          timeout 20s docker run --rm --name neda-fail-closed \
+            --read-only \
+            --user "$(id -u):$(id -g)" \
+            -v "$RUNNER_TEMP/neda-fail-closed/data:/data" \
+            -v "$RUNNER_TEMP/neda-fail-closed/key/encryption_key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            neda:ci >"$RUNNER_TEMP/neda-fail-closed/run.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q "NEDA_MRBILIT_ENABLED" "$RUNNER_TEMP/neda-fail-closed/run.log"
+          test ! -e "$RUNNER_TEMP/neda-fail-closed/data/neda.db"
+
+      - name: Production fake provider fails closed
+        run: |
+          mkdir -p "$RUNNER_TEMP/neda-fake/data" "$RUNNER_TEMP/neda-fake/key"
+          openssl rand -base64 32 > "$RUNNER_TEMP/neda-fake/key/encryption_key"
+          chmod 0400 "$RUNNER_TEMP/neda-fake/key/encryption_key"
+          set +e
+          timeout 20s docker run --rm --name neda-fake \
+            --read-only \
+            --user "$(id -u):$(id -g)" \
+            -v "$RUNNER_TEMP/neda-fake/data:/data" \
+            -v "$RUNNER_TEMP/neda-fake/key/encryption_key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            -e NEDA_MRBILIT_ENABLED=true \
+            -e NEDA_FAKE_PROVIDER_ENABLED=true \
+            neda:ci >"$RUNNER_TEMP/neda-fake/run.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q "NEDA_FAKE_PROVIDER_ENABLED" "$RUNNER_TEMP/neda-fake/run.log"
+          test ! -e "$RUNNER_TEMP/neda-fake/data/neda.db"
+
+      - name: Production refuses effective UID 0
+        run: |
+          mkdir -p "$RUNNER_TEMP/neda-root/data" "$RUNNER_TEMP/neda-root/key"
+          openssl rand -base64 32 > "$RUNNER_TEMP/neda-root/key/encryption_key"
+          sudo chown 0:0 "$RUNNER_TEMP/neda-root/key/encryption_key"
+          sudo chmod 0400 "$RUNNER_TEMP/neda-root/key/encryption_key"
+          set +e
+          timeout 20s docker run --rm --name neda-root \
+            --read-only \
+            --user 0:0 \
+            -v "$RUNNER_TEMP/neda-root/data:/data" \
+            -v "$RUNNER_TEMP/neda-root/key/encryption_key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            -e NEDA_MRBILIT_ENABLED=true \
+            neda:ci >"$RUNNER_TEMP/neda-root/run.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q "production refuses to run as root" "$RUNNER_TEMP/neda-root/run.log"
+          test ! -e "$RUNNER_TEMP/neda-root/data/neda.db"
 
       - name: Run read-only container on a fresh volume
         run: |
@@ -60,12 +161,17 @@ jobs:
             -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
             -e NEDA_PUBLIC_URL=https://neda.example.com \
             -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            -e NEDA_MRBILIT_ENABLED=true \
             neda:ci
           for attempt in $(seq 1 60); do
-            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/healthz; then break; fi
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/readyz; then break; fi
             sleep 1
           done
-          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/healthz
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/readyz
+          PID="$(docker inspect -f '{{.State.Pid}}' neda-ci)"
+          test "$PID" -gt 0
+          test "$(awk '/^Uid:/{print $3}' "/proc/$PID/status")" = "$(id -u)"
+          test "$(awk '/^Gid:/{print $3}' "/proc/$PID/status")" = "$(id -g)"
           for attempt in $(seq 1 60); do
             HEALTH="$(docker inspect -f '{{.State.Health.Status}}' neda-ci)"
             [ "$HEALTH" = "healthy" ] && break
@@ -79,13 +185,14 @@ jobs:
           test -n "$ORIGINAL_PUBLIC"
           docker restart neda-ci >/dev/null
           for attempt in $(seq 1 60); do
-            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/healthz; then break; fi
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/readyz; then break; fi
             sleep 1
           done
-          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/healthz
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18080/readyz
           RESTORED_PUBLIC="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$RUNNER_TEMP/neda-data/neda.db")"
           test "$ORIGINAL_PUBLIC" = "$RESTORED_PUBLIC"
-          if docker logs neda-ci 2>&1 | grep -qF -f "$RUNNER_TEMP/neda-key/encryption_key"; then
+          docker logs neda-ci >"$RUNNER_TEMP/neda-ci.log" 2>&1
+          if grep -qF -f "$RUNNER_TEMP/neda-key/encryption_key" "$RUNNER_TEMP/neda-ci.log"; then
             echo "encryption key leaked to container logs" >&2
             exit 1
           fi
@@ -103,12 +210,12 @@ jobs:
           if result != 'ok':
               raise SystemExit('restored database integrity check failed')
           PYEOF
-          docker run -d --name neda-restored             --read-only             --tmpfs /tmp:size=16m,noexec,nosuid             --user "$(id -u):$(id -g)"             -p 127.0.0.1:18081:8080             -v "$RUNNER_TEMP/neda-restore:/data"             -v "$RUNNER_TEMP/neda-restore-key/encryption_key:/run/secrets/encryption_key:ro"             -e NEDA_ENV=production             -e NEDA_HTTP_ADDR=:8080             -e NEDA_DB_PATH=/data/neda.db             -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key             -e NEDA_PUBLIC_URL=https://neda.example.com             -e NEDA_VAPID_SUBJECT=mailto:ci@example.com             neda:ci
+          docker run -d --name neda-restored             --read-only             --tmpfs /tmp:size=16m,noexec,nosuid             --user "$(id -u):$(id -g)"             -p 127.0.0.1:18081:8080             -v "$RUNNER_TEMP/neda-restore:/data"             -v "$RUNNER_TEMP/neda-restore-key/encryption_key:/run/secrets/encryption_key:ro"             -e NEDA_ENV=production             -e NEDA_HTTP_ADDR=:8080             -e NEDA_DB_PATH=/data/neda.db             -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key             -e NEDA_PUBLIC_URL=https://neda.example.com             -e NEDA_VAPID_SUBJECT=mailto:ci@example.com             -e NEDA_MRBILIT_ENABLED=true             neda:ci
           for attempt in $(seq 1 60); do
-            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18081/healthz; then break; fi
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18081/readyz; then break; fi
             sleep 1
           done
-          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18081/healthz
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:18081/readyz
           for attempt in $(seq 1 60); do
             HEALTH="$(docker inspect -f '{{.State.Health.Status}}' neda-restored)"
             [ "$HEALTH" = "healthy" ] && break
@@ -137,13 +244,175 @@ jobs:
             -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
             -e NEDA_PUBLIC_URL=https://neda.example.com \
             -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            -e NEDA_MRBILIT_ENABLED=true \
             neda:ci >"$RUNNER_TEMP/bad-key.log" 2>&1
           status=$?
           set -e
           test "$status" -ne 0
           grep -q "NEDA_ENCRYPTION_KEY_FILE" "$RUNNER_TEMP/bad-key.log"
 
+      - name: Compose runtime smoke
+        run: |
+          COMPOSE_DIR="$RUNNER_TEMP/neda-compose"
+          mkdir -p "$COMPOSE_DIR/data" "$COMPOSE_DIR/secrets"
+          if [ ! -s "$COMPOSE_DIR/secrets/encryption_key" ]; then
+            openssl rand -base64 32 > "$COMPOSE_DIR/secrets/encryption_key"
+            chmod 0400 "$COMPOSE_DIR/secrets/encryption_key"
+          fi
+
+          export NEDA_PUBLIC_URL=https://neda.example.com
+          export NEDA_VAPID_SUBJECT=mailto:ci@example.com
+          export NEDA_MRBILIT_ENABLED=true
+          export NEDA_RUNTIME_UID="$(id -u)"
+          export NEDA_RUNTIME_GID="$(id -g)"
+
+          compose() {
+            docker compose -f "$COMPOSE_DIR/compose.yaml" "$@"
+          }
+          cleanup() {
+            compose down -v --remove-orphans >/dev/null 2>&1 || true
+            docker rm -f neda-wrong-key >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          compose up -d --no-build
+          CID="$(compose ps -q neda)"
+          test -n "$CID"
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz; then break; fi
+            sleep 1
+          done
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz
+          test "$(docker inspect -f '{{.Config.User}}' "$CID")" = "$(id -u):$(id -g)"
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$CID")" = "true"
+          test "$(docker inspect -f '{{json .HostConfig.CapDrop}}' "$CID")" = '["ALL"]'
+          test "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$CID")" = "unless-stopped"
+          PID="$(docker inspect -f '{{.State.Pid}}' "$CID")"
+          test "$PID" -gt 0
+          test "$(awk '/^Uid:/{print $3}' "/proc/$PID/status")" = "$(id -u)"
+          test "$(awk '/^Gid:/{print $3}' "/proc/$PID/status")" = "$(id -g)"
+          test -s "$COMPOSE_DIR/data/neda.db"
+          test "$(stat -c '%u' "$COMPOSE_DIR/data/neda.db")" = "$(id -u)"
+          test "$(stat -c '%u' "$COMPOSE_DIR/secrets/encryption_key")" = "$(id -u)"
+          test "$(stat -c '%a' "$COMPOSE_DIR/secrets/encryption_key")" = "400"
+          KEY_HASH="$(sha256sum "$COMPOSE_DIR/secrets/encryption_key" | awk '{print $1}')"
+          DB_INODE="$(stat -c '%i' "$COMPOSE_DIR/data/neda.db")"
+          for attempt in $(seq 1 60); do
+            HEALTH="$(docker inspect -f '{{.State.Health.Status}}' "$CID")"
+            [ "$HEALTH" = "healthy" ] && break
+            sleep 1
+          done
+          test "$HEALTH" = "healthy"
+
+          PUBLIC_BEFORE="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$COMPOSE_DIR/data/neda.db")"
+          test -n "$PUBLIC_BEFORE"
+          compose restart neda
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz; then break; fi
+            sleep 1
+          done
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz
+          PUBLIC_AFTER="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$COMPOSE_DIR/data/neda.db")"
+          test "$PUBLIC_BEFORE" = "$PUBLIC_AFTER"
+          test "$(sha256sum "$COMPOSE_DIR/secrets/encryption_key" | awk '{print $1}')" = "$KEY_HASH"
+          test "$(stat -c '%i' "$COMPOSE_DIR/data/neda.db")" = "$DB_INODE"
+
+          # Recreate the container (not just restart it) and prove the host key
+          # and database are not regenerated or replaced.
+          compose up -d --no-build --force-recreate
+          NEW_CID="$(compose ps -q neda)"
+          test -n "$NEW_CID"
+          test "$NEW_CID" != "$CID"
+          CID="$NEW_CID"
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz; then break; fi
+            sleep 1
+          done
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz
+          PUBLIC_AFTER_RECREATE="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$COMPOSE_DIR/data/neda.db")"
+          test "$PUBLIC_BEFORE" = "$PUBLIC_AFTER_RECREATE"
+          test "$(sha256sum "$COMPOSE_DIR/secrets/encryption_key" | awk '{print $1}')" = "$KEY_HASH"
+          test "$(stat -c '%i' "$COMPOSE_DIR/data/neda.db")" = "$DB_INODE"
+
+          BEFORE_RESTARTS="$(docker inspect -f '{{.RestartCount}}' "$CID")"
+          docker kill "$CID" >/dev/null
+          AFTER_RESTARTS="$BEFORE_RESTARTS"
+          for attempt in $(seq 1 60); do
+            AFTER_RESTARTS="$(docker inspect -f '{{.RestartCount}}' "$CID" 2>/dev/null || echo 0)"
+            [ "$AFTER_RESTARTS" -gt "$BEFORE_RESTARTS" ] && break
+            sleep 1
+          done
+          test "$AFTER_RESTARTS" -gt "$BEFORE_RESTARTS"
+          for attempt in $(seq 1 60); do
+            if curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz; then break; fi
+            sleep 1
+          done
+          curl -fsS -H "Host: neda.example.com" http://127.0.0.1:8080/readyz
+          PUBLIC_AFTER_KILL="$(python3 -c "import sqlite3,sys; print(sqlite3.connect(sys.argv[1]).execute(\"SELECT value FROM settings WHERE key='push.vapid_public_key'\").fetchone()[0])" "$COMPOSE_DIR/data/neda.db")"
+          test "$PUBLIC_BEFORE" = "$PUBLIC_AFTER_KILL"
+          compose logs neda >"$COMPOSE_DIR/compose.log" 2>&1
+          if grep -qF -f "$COMPOSE_DIR/secrets/encryption_key" "$COMPOSE_DIR/compose.log"; then
+            echo "encryption key leaked to Compose logs" >&2
+            exit 1
+          fi
+
+          compose down
+          trap - EXIT
+
+          # A valid but different key must fail against the restored database.
+          rm -rf "$COMPOSE_DIR/data-wrong-key"
+          cp -a "$COMPOSE_DIR/data" "$COMPOSE_DIR/data-wrong-key"
+          openssl rand -base64 32 > "$COMPOSE_DIR/wrong-key"
+          chmod 0400 "$COMPOSE_DIR/wrong-key"
+          set +e
+          timeout 20s docker run --rm --name neda-wrong-key \
+            --read-only \
+            --tmpfs /tmp:size=16m,noexec,nosuid \
+            --user "$(id -u):$(id -g)" \
+            -v "$COMPOSE_DIR/data-wrong-key:/data" \
+            -v "$COMPOSE_DIR/wrong-key:/run/secrets/encryption_key:ro" \
+            -e NEDA_ENV=production \
+            -e NEDA_HTTP_ADDR=:8080 \
+            -e NEDA_DB_PATH=/data/neda.db \
+            -e NEDA_ENCRYPTION_KEY_FILE=/run/secrets/encryption_key \
+            -e NEDA_PUBLIC_URL=https://neda.example.com \
+            -e NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            -e NEDA_MRBILIT_ENABLED=true \
+            neda:ci >"$COMPOSE_DIR/wrong-key.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q "cannot be decrypted with the configured key" "$COMPOSE_DIR/wrong-key.log"
+
       - name: Show image size
         run: |
           docker image inspect neda:ci --format 'uncompressed={{.Size}} bytes'
           docker save neda:ci | gzip -1 | wc -c | awk '{print "compressed=" $1 " bytes"}'
+
+      - name: Clean up runtime smoke resources
+        if: always()
+        run: |
+          COMPOSE_DIR="$RUNNER_TEMP/neda-compose"
+          if [ -f "$COMPOSE_DIR/compose.yaml" ]; then
+            NEDA_PUBLIC_URL=https://neda.example.com \
+            NEDA_VAPID_SUBJECT=mailto:ci@example.com \
+            NEDA_MRBILIT_ENABLED=true \
+            NEDA_RUNTIME_UID="$(id -u)" \
+            NEDA_RUNTIME_GID="$(id -g)" \
+            docker compose -f "$COMPOSE_DIR/compose.yaml" down -v --remove-orphans >/dev/null 2>&1 || true
+          fi
+          for name in neda-ci neda-restored neda-bad neda-fail-closed neda-fake neda-root neda-wrong-key; do
+            docker rm -f "$name" >/dev/null 2>&1 || true
+          done
+          rm -rf "$COMPOSE_DIR" \
+            "$RUNNER_TEMP/neda-data" \
+            "$RUNNER_TEMP/neda-key" \
+            "$RUNNER_TEMP/neda-restore" \
+            "$RUNNER_TEMP/neda-restore-key" \
+            "$RUNNER_TEMP/neda-bad" \
+            "$RUNNER_TEMP/neda-bad-key" \
+            "$RUNNER_TEMP/neda-fail-closed" \
+            "$RUNNER_TEMP/neda-fake"
+          sudo rm -rf "$RUNNER_TEMP/neda-root" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/bad-key.log" "$RUNNER_TEMP/neda-ci.log"

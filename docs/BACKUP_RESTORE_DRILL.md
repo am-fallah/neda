@@ -60,6 +60,28 @@ After stopping with `SIGTERM`, the database was checkpointed and copied with the
 key to a fresh directory. The restored service used the same command with the
 restored paths. The wrong-key run used a second independently generated key.
 
+## 2026-10-26 production-mode re-check
+
+A second local drill used the production-mode binary with
+`NEDA_MRBILIT_ENABLED=true`, a temporary SQLite database, a temporary
+owner-only key, and an empty monitor set. It verified:
+
+- `/readyz` returned 200 after first startup and after restoring the database
+  and key to a fresh directory;
+- the VAPID public key was identical before and after restore;
+- the database contained all five migrations and `PRAGMA integrity_check`
+  returned `ok`;
+- starting with an independently generated key exited 1 at the pre-migration
+  key/database consistency check (`cannot be decrypted with the configured key`);
+  the older `VAPID key initialization failed` path remains the fallback for a
+  missing or corrupt VAPID pair;
+- no provider request was made because the temporary database had no monitors.
+
+The updated Docker workflow is intended to repeat the valid-but-different-key
+check against a restored copy of the volume; it has not been run locally because
+Docker is unavailable. This remains a local filesystem drill, not a Docker
+volume or target-host drill.
+
 ## Limitations / not claimed
 
 - A host directory is not a Docker named volume. The Compose/CI tasks

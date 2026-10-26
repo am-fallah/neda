@@ -3,18 +3,26 @@
 # Required:
 #   NEDA_PUBLIC_URL=https://neda.example.com
 #   NEDA_VAPID_SUBJECT=mailto:owner@example.com
+#   NEDA_MRBILIT_ENABLED=true (must be set explicitly; real provider required)
 #   NEDA_RUNTIME_UID / NEDA_RUNTIME_GID matching the owner of ./data
-#   ./secrets/encryption_key (base64, exactly 32 bytes, mode 0400/0600 on host)
+#   ./secrets/encryption_key (base64, exactly 32 bytes, mode 0400/0600 on host,
+#   owned by NEDA_RUNTIME_UID)
 #
-# The long-form secret below mounts the key at /run/secrets/encryption_key with
-# the requested uid/gid and mode. /data is a host bind mount so SQLite and the
-# key can be backed up together; it must be writable by the runtime UID.
+# The key is a read-only bind mount, not a Compose secret: file-based Compose
+# secrets are bind mounts in non-swarm Compose and their uid/gid/mode fields are
+# ignored, so the host file's owner and mode are authoritative. The service
+# enforces owner == runtime UID and mode 0400/0600. /data is also a host bind
+# mount so SQLite and the key can be backed up together; it must be writable by
+# the runtime UID. Run scripts/setup.sh once before the first start.
 services:
   neda:
     build:
       context: .
       dockerfile: Dockerfile
     image: neda:local
+    # Never pull the mutable tag from Docker Hub before building. Without this,
+    # Compose tries the registry first and only falls back to a local build.
+    pull_policy: build
     restart: unless-stopped
     user: "${NEDA_RUNTIME_UID:-1000}:${NEDA_RUNTIME_GID:-1000}"
     read_only: true
@@ -35,6 +43,7 @@ services:
       NEDA_ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
       NEDA_PUBLIC_URL: "${NEDA_PUBLIC_URL:?set NEDA_PUBLIC_URL to the HTTPS origin}"
       NEDA_VAPID_SUBJECT: "${NEDA_VAPID_SUBJECT:?set NEDA_VAPID_SUBJECT to a mailto: or HTTPS contact}"
+      NEDA_MRBILIT_ENABLED: "${NEDA_MRBILIT_ENABLED:?set NEDA_MRBILIT_ENABLED=true (real provider required in production)}"
       NEDA_TRUST_PROXY: "${NEDA_TRUST_PROXY:-false}"
       NEDA_LOG_LEVEL: "${NEDA_LOG_LEVEL:-info}"
       NEDA_WORKERS: "${NEDA_WORKERS:-2}"
@@ -42,14 +51,9 @@ services:
       NEDA_SESSION_IDLE_HOURS: "${NEDA_SESSION_IDLE_HOURS:-168}"
     volumes:
       - ./data:/data
+      - ./secrets/encryption_key:/run/secrets/encryption_key:ro
     tmpfs:
       - /tmp:size=16m,noexec,nosuid
-    secrets:
-      - source: encryption_key
-        target: encryption_key
-        uid: "${NEDA_RUNTIME_UID:-1000}"
-        gid: "${NEDA_RUNTIME_GID:-1000}"
-        mode: 0400
     healthcheck:
       test: ["CMD", "/neda", "healthcheck"]
       interval: 30s
@@ -64,7 +68,3 @@ services:
         max-file: "3"
     deploy:
       replicas: 1
-
-secrets:
-  encryption_key:
-    file: ./secrets/encryption_key
