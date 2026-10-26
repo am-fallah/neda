@@ -20,7 +20,7 @@ builds through Compose and includes an actual Compose start check plus effective
 UID/GID, read-only root, dropped capabilities, restart-policy, container
 recreation with stable key/database, wrong-valid-key, UID-0/fake-provider
 fail-closed, and cleanup checks. That workflow passed CI run
-[40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450);
+[40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143);
 Docker is still unavailable on the local development machine.
 `scripts/setup.sh` provides the first-time host layout and key without
 overwriting existing files.
@@ -44,7 +44,7 @@ advisory remains for an unimported `openpgp` package), and
 `npm audit --audit-level=low` reported 0 vulnerabilities. No image scanner or
 local Docker runtime was available, so image scanning remains pending. The
 Docker image build and Compose runtime checks passed in CI run
-[40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450).
+[40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143).
 A production-only UID-0 guard is implemented and unit-tested.
 
 ## 1. Verified facts
@@ -64,7 +64,7 @@ A production-only UID-0 guard is implemented and unit-tested.
 | Dependency scans pass with documented exception | `docs/DEPENDENCIES.md`; 2026-10-26 `govulncheck` reported no called vulnerabilities (one unimported module advisory) and `npm audit` reported 0. No image scanner available. |
 | 1-hour synthetic resource measurement completed | `docs/RESOURCE_MEASUREMENT.md`: RSS avg 22.6 MiB, CPU avg 0.12%, WAL max 3.94 MiB, 482 checks |
 | Bounded MrBilit live validation completed | `docs/MRBILIT_LIVE_VALIDATION.md`: 2 unauthenticated GETs, HTTP 200, 1 journey/6 classes, 2 Reservable, 4 NotReservable, 0 Unknown, 6 booking URLs |
-| Docker image/Compose validation | CI run [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450) passed the Compose build, actual Compose start, effective UID/GID, read-only root, dropped capabilities, restart-policy, container recreation, key/DB persistence, VAPID stability, wrong-valid-key, UID-0/fake-provider fail-closed, and cleanup checks. Local Docker remains unavailable. |
+| Docker image/Compose validation | CI run [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143) passed the Compose build, actual Compose start, effective UID/GID, read-only root, dropped capabilities, restart-policy, container recreation, key/DB persistence, VAPID stability, wrong-valid-key, UID-0/fake-provider fail-closed, and cleanup checks. Local Docker remains unavailable. |
 
 ## 2. Definition-of-done audit
 
@@ -97,7 +97,7 @@ A production-only UID-0 guard is implemented and unit-tested.
 | Real browser-to-Push-service delivery and closed-browser acceptance | Owner authorization + HTTPS deployment + live Push service |
 | Real Telegram delivery | Owner credentials + explicit authorization |
 | Production provider registration (`PRV-009`) | Implemented locally; live production provider behavior still not exercised |
-| Actual Compose runtime and target-volume drill | Compose runtime passed CI run [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450); the target-host volume drill remains owner-approved |
+| Actual Compose runtime and target-volume drill | Compose runtime passed CI run [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143); the target-host volume drill remains owner-approved |
 | Target-host resource/soak measurement | Owner-approved deployment/soak window (local synthetic result is complete) |
 | Deployment plan review (`OPS-005`/`GATE-004`) | Explicit owner approval |
 
@@ -117,7 +117,7 @@ A production-only UID-0 guard is implemented and unit-tested.
   private key is present.
 - Real Push/Telegram/provider/HTTPS behavior is not proven by unit tests or CI.
 - Docker/Compose runtime validation passed in CI run
-  [40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450),
+  [40367281143](https://github.com/am-fallah/neda/actions/runs/40367281143),
   including the actual `docker compose up` smoke and the additional UID/GID,
   read-only, capability, restart/recreation, wrong-key, and fail-closed checks.
   The target Ubuntu host, proxy, TLS, firewall, key ownership, and backup volume
