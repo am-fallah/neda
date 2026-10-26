@@ -55,7 +55,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "Commands:")
 	fmt.Fprintln(w, "  serve          Run the Neda service (default)")
 	fmt.Fprintln(w, "  set-password   Set the owner password interactively (TTY only)")
-	fmt.Fprintln(w, "  healthcheck    Probe the local health endpoint")
+	fmt.Fprintln(w, "  healthcheck    Probe the local readiness endpoint")
 	fmt.Fprintln(w, "  version        Print build version information")
 	fmt.Fprintln(w, "  help           Print this help")
 }

@@ -213,7 +213,7 @@ One binary, one long-lived process, one container replica. The scheduler and not
 neda                     # default: serve
 neda serve               # explicit serve
 neda set-password        # interactive TTY only; no password argument
-neda healthcheck         # local HTTP health probe for container HEALTHCHECK
+neda healthcheck         # local HTTP readiness probe for container HEALTHCHECK
 neda version
 ```
 
@@ -252,7 +252,8 @@ Secrets are supplied as files, not committed. Values below are placeholders in `
 | `NEDA_VAPID_SUBJECT` | for Push | — | no | `mailto:` or HTTPS contact required by VAPID. |
 | `NEDA_LOG_LEVEL` | no | `info` | no | `debug`/`info`/`warn`/`error`. |
 | `NEDA_TRUST_PROXY` | no | `false` | no | Trust `X-Forwarded-*` only behind a known proxy. |
-| `NEDA_FAKE_PROVIDER_ENABLED` | no | `false` | no | Development/test only; UI labels fake provider clearly. |
+| `NEDA_MRBILIT_ENABLED` | yes in production | `false` | no | Registers the real MrBilit adapter. Development registers it automatically; production startup fails without it. |
+| `NEDA_FAKE_PROVIDER_ENABLED` | no | `false` | no | Development/test only; rejected in production. UI labels fake provider clearly. |
 | `NEDA_SESSION_TTL_HOURS` | no | `720` (30 days) | no | Absolute session lifetime. |
 | `NEDA_SESSION_IDLE_HOURS` | no | `168` (7 days) | no | Idle timeout. |
 | `NEDA_WORKERS` | no | `2` | no | Scheduler worker bound (small range; validate). |
@@ -263,10 +264,9 @@ Global polling interval is stored in SQLite settings (default 300s, bounds 60–
 ### 6.2 Key material
 
 - **Encryption key:** 32 random bytes, base64-encoded text (loader trims whitespace, decodes exactly 32 bytes); file mode must be owner-only (`0400` or `0600`), owned by the runtime UID/GID. Production startup fails closed if the key is missing, unreadable, or group/world-accessible. Never auto-generate silently in production.
-- **Key delivery (one coherent option per deployment):**
-  - **Compose secret with explicit permissions:** long-form service secret with `uid`/`gid` matching the runtime user and `mode: 0400`. This must be verified on the actual Compose/platform version; do not assume short-form secret defaults are `0600` or readable by a non-root user.
-  - **Read-only bind mount:** host file mode `0600`, owned by the runtime UID/GID, mounted read-only at `/run/secrets/neda_encryption_key`.
-  - The chosen option, actual UID/GID, and backup path are recorded in `docs/DEPLOYMENT.md`; final deployment values remain behind `GATE-004`.
+- **Key delivery (Docker Compose target):** a read-only bind mount of the host key file at `/run/secrets/encryption_key`. The host file must be a regular file owned by `NEDA_RUNTIME_UID`, mode `0400` or `0600`. File-backed Compose secrets are bind mounts in non-swarm Compose and their `uid`/`gid`/`mode` fields are ignored, so the repository does not use that layer. This design targets Linux Docker Engine/Compose v2; it is not verified for Docker Desktop, rootless UID remapping, or remote daemons.
+  - `scripts/setup.sh` creates a first-time key without printing it and refuses to overwrite existing configuration or data.
+  - The actual UID/GID and backup path are recorded in `docs/DEPLOYMENT.md`; final deployment values remain behind `GATE-004`.
 - **Startup validation:** verify key readability and permissions before opening encrypted settings; log only a safe configuration error category, never the path contents or key.
 - **VAPID keys:** generated once and persisted; private key encrypted with the master key in `settings`; public key stored plaintext. If the master key is lost, Push config/subscriptions cannot be decrypted and must be reset; document this.
 - **Backups:** DB + encryption key are both required. Backing up only one is insufficient. Key rotation is not v1; a version column allows future migration.
@@ -812,7 +812,7 @@ func (r *Registry) List() []Metadata
 ```
 
 - Explicit construction in `cmd/neda`; no reflection, `init()` side effects, or dynamic loading.
-- MrBilit is registered automatically in non-production environments for the URL-first local flow. Production registration remains deferred (`PRV-009`); the production registry stays empty until that gate is explicitly satisfied.
+- MrBilit is registered automatically in non-production environments for the URL-first local flow. Production requires `NEDA_MRBILIT_ENABLED=true`; the composition root fails startup if the real provider is not enabled, if the registry would be empty, or if active monitors reference an unregistered provider.
 - Fake provider is registered only when `NEDA_FAKE_PROVIDER_ENABLED=true` (development/test) or in tests. The UI must label it "Test provider — not a real ticket source" and it must never appear as a real provider by default.
 - Provider metadata and fixed provider base URLs are code-owned, not user-editable. Per-monitor user configuration is limited to provider selection, origin/destination IDs, optional booking slug, and optional validated gender code. Health/config state that is persisted is DB-owned; the Settings page displays read-only provider metadata/health and must not accept arbitrary provider base URLs.
 
@@ -988,10 +988,11 @@ the observed payload. A positive numeric provider amount is now preserved as
 `Offering.Price` without a currency; zero/missing/invalid values remain absent.
 Rial/Toman, per-passenger basis, and `sellType` semantics remain unverified, so
 notifications omit price until a currency is validated.
-The adapter is deliberately **not registered** in production; `PRV-009` remains
-a separate decision. Non-production composition registers it automatically for
-URL-first monitor creation. Full evidence: `docs/MRBILIT_LIVE_VALIDATION.md`
-and `docs/MRBILIT_URL_FIRST.md`.
+Non-production composition registers the adapter automatically for URL-first
+monitor creation. Production registers it only when
+`NEDA_MRBILIT_ENABLED=true`; an empty production registry or an active monitor
+whose provider is not registered is a startup failure. Full evidence:
+`docs/MRBILIT_LIVE_VALIDATION.md` and `docs/MRBILIT_URL_FIRST.md`.
 
 ### 9.8 URL-first monitor creation and selected options (2026-10-25)
 
@@ -1056,7 +1057,7 @@ the sole notification path.
 - In-flight guard: a scheduler-goroutine-confined set keyed by `monitor_id`; never enqueue a second target for a monitor while any check for that monitor is in flight, and never dispatch the same `(target, config_version, due)` generation twice in one process. Different monitors may run concurrently within the fixed worker pool. Single replica assumption. This is the owner decision recorded in `PRODUCT_SPEC.md` A-33 (2026-10-24), choosing monitor-wide serialization. `SCH-003` per-provider concurrency 1 remains a stricter provider-level limit; it is not a second scheduler loop.
 - Wake mechanism: timer until the next due time plus a wake channel for settings/monitor changes. No busy loop; no polling when no eligible targets.
 - Runner boundary: the scheduler dispatches a target to an injected `Runner` and receives `Result{Settled}` plus a diagnostic error. A settled result consumes the `(target, config_version, due)` generation; an unsettled result (for example, the SCH-010 discarded path) is re-read after a one-second protective pause. The scheduler loop never writes target scheduling state and never interprets raw provider errors. SCH-003 supplies a pure `DecideTargetSchedule` policy that consumes the normalized PRV-010 classification in the outcome path; SCH-010 persists that decision inside the outcome transaction.
-- On startup: in a recovery transaction, change every `check_runs` row with `outcome='running'` to `outcome='abandoned'` and set `finished_at`; do not change target scheduling, availability, episodes, provider health, events, or outbox. Then schedule active targets with a small stagger/jitter so a restart does not fire all monitors at once. Preserve persisted `next_due_at` when still in the future; otherwise schedule now + jitter. `SCH-010` composes the `SCH-004` check stage into the production `OutcomeRunner`; with the empty production provider registry, no target is dispatched until provider integration is authorized.
+- On startup: in a recovery transaction, change every `check_runs` row with `outcome='running'` to `outcome='abandoned'` and set `finished_at`; do not change target scheduling, availability, episodes, provider health, events, or outbox. Then schedule active targets with a small stagger/jitter so a restart does not fire all monitors at once. Preserve persisted `next_due_at` when still in the future; otherwise schedule now + jitter. `SCH-010` composes the `SCH-004` check stage into the production `OutcomeRunner`; production startup fails if the real provider is not enabled or active targets reference an unregistered provider.
 - Jitter: normal per-check delay of ±10% of the configured interval, clamped so the effective interval never drops below 60s or exceeds 3600s. Near-term jitter (create/resume/restart) uses the same 10% basis but is non-negative and capped at 30s: a 300s interval yields 0–30s and a 60s interval yields 0–6s. This normal-interval jitter is distinct from target-backoff jitter, which is ±10% of the exponential backoff delay **after** the cap is applied, not ±10% of the configured interval (see the transient-failure rule below). Inject randomness for deterministic tests; do not use two alternative jitter formulas.
 - Next due after success: `now + interval + jitter`.
 - On monitor create or resume, schedule a near-term check (`now + small jitter`, defined above) rather than waiting a full interval.
@@ -1482,7 +1483,7 @@ injected foreign-key violation, and canceled contexts.
 
 ### 14.6 Container and deployment hardening
 
-- Multi-stage build; final image non-root (fixed UID/GID), read-only root filesystem, `/data` persistent volume, `/run/secrets` read-only key.
+- Multi-stage build; final image non-root (fixed UID/GID), read-only root filesystem, `/data` persistent volume, `/run/secrets` read-only key. Production startup also refuses effective UID 0, so a Compose/launcher override cannot silently run as root.
 - `cap_drop: [ALL]`, `security_opt: [no-new-privileges:true]`, `pids_limit`, memory/CPU limits, restart policy.
 - No package manager/shell needed at runtime (if Alpine, keep it minimal; do not install tools in the final image).
 - `.dockerignore` excludes `.git`, `.env*`, data, keys, `node_modules`, `dist`, `.codegraph`, tests/fixtures? Keep build inputs only.
@@ -1674,11 +1675,11 @@ No deployment occurs without `GATE-004`. The following is the design to be valid
 
 ### 18.1 Image
 
-- Stage 1: Node build (`npm ci`, lint/test/build) → `web/dist`.
+- Stage 1: Node build (`npm ci`, `npm run build`; lint/typecheck/tests run in frontend CI) → `web/dist`.
 - Stage 2: Go build (`CGO_ENABLED=0`, static binary) with frontend assets available to embed.
 - Final: minimal non-root image with CA certificates and embedded tzdata; no shell/package manager required at runtime if using distroless; if Alpine, keep minimal and non-root.
-- `/data` directory owned by the runtime user and `/run/secrets` read-only. The image must include `/data` with the runtime UID/GID so an empty named volume inherits ownership; an existing volume must be chowned or initialized explicitly. Startup verifies the database directory is writable.
-- `HEALTHCHECK` runs `neda healthcheck` against `/healthz`.
+- `/data` directory owned by the runtime user and `/run/secrets` read-only. The repository Compose file uses host bind mounts for `./data` and the key, so the host directories/files must be owned by `NEDA_RUNTIME_UID` before start. For a named-volume deployment, the volume must be initialized/chowned explicitly. Startup verifies the database directory is writable.
+- `HEALTHCHECK` runs `neda healthcheck` against `/readyz` so container health reflects database/migration readiness.
 - Image contains no `.env`, DB, keys, tests, or `.git`.
 
 ### 18.2 Compose
@@ -1688,26 +1689,26 @@ Illustrative (placeholders only):
 ```yaml
 services:
   neda:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: neda:local
+    pull_policy: build
     restart: unless-stopped
     user: "10001:10001"
     read_only: true
     tmpfs:
       - /tmp
     volumes:
-      - neda-data:/data
-    secrets:
-      - source: neda_encryption_key
-        target: neda_encryption_key
-        uid: "10001"
-        gid: "10001"
-        mode: 0400
+      - ./data:/data
+      - ./secrets/encryption_key:/run/secrets/encryption_key:ro
     environment:
       NEDA_ENV: production
       NEDA_DB_PATH: /data/neda.db
-      NEDA_ENCRYPTION_KEY_FILE: /run/secrets/neda_encryption_key
+      NEDA_ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
       NEDA_PUBLIC_URL: https://neda.example.com
       NEDA_VAPID_SUBJECT: mailto:owner@example.com
+      NEDA_MRBILIT_ENABLED: "true"
       NEDA_TRUST_PROXY: "true"
     ports:
       - "127.0.0.1:8080:8080"   # or expose only to the proxy network
@@ -1724,23 +1725,20 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/neda", "healthcheck"]
+      test: ["CMD", "/neda", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
-volumes:
-  neda-data:
-secrets:
-  neda_encryption_key:
-    file: ./secrets/neda_encryption_key
 ```
 
 - One replica only (SQLite).
 - Resource limits are provisional design targets; adjust after measurement/server facts.
 - App port not exposed publicly; reverse proxy on host or internal network.
+- `./data` and `./secrets/encryption_key` are host bind mounts; both must be
+  owned by `NEDA_RUNTIME_UID` before first start (`scripts/setup.sh` does this).
 - `docker compose config` validates; no secrets committed.
-- **Secret delivery is platform-sensitive.** The long-form `uid`/`gid`/`mode` fields above must be verified on the target Compose/container runtime. If unsupported or if the runtime changes ownership, use the documented fallback: a read-only bind mount of a host file with mode `0600`, owned by the runtime UID/GID, at `/run/secrets/neda_encryption_key`. Do not rely on short-form secret defaults.
-- Startup acceptance: with the correctly owned/readable key, the service starts and decrypts settings; with a missing, unreadable, group/world-readable, or wrong-mode key, production startup fails closed with a safe error. The DB and key remain usable after container restart, and an empty named `/data` volume receives runtime-user ownership.
+- **Key delivery is platform-sensitive.** The read-only bind mount relies on the host file's owner and mode; the service enforces owner == runtime UID and mode `0400`/`0600`. File-backed Compose secrets do not remap those values in non-swarm Compose. Re-check the mount on non-Linux/rootless/remote Docker targets before deployment.
+- Startup acceptance: with the correctly owned/readable key, the service starts and decrypts settings; with a missing, unreadable, group/world-readable, or wrong-mode key, production startup fails closed with a safe error. The DB and key remain usable after container restart, and the host `data/` directory is owned by the runtime user.
 
 ### 18.3 Reverse proxy / HTTPS / network
 
@@ -1971,7 +1969,7 @@ Additional optional: `govulncheck ./...`, `npm audit`, `staticcheck ./...`. Do n
 | No positive real fixture | Positive path unverified | Synthetic tests only; clearly labeled; do not fabricate observations. |
 | Single SQLite writer | Read latency under long writes | Short transactions, no HTTP in tx, single user; measure. |
 | SQLite volume/key permissions | Startup failure/data loss | Document UID/volume/key setup; healthcheck; backup drill. |
-| Compose secret permissions vary by platform | Startup/security risk | Explicit long-form `mode`/`uid`/`gid` or read-only bind mount; verify on target; startup fail-closed tests. |
+| Bind-mount ownership varies by platform | Startup/security risk | Read-only host mount with owner == runtime UID and mode `0400`/`0600`; app-enforced ownership/mode; verify on target; startup fail-closed tests. |
 | Push DNS rebinding/redirect SSRF | Security risk | DNS/IP validation at dial time, exact allowlist, disabled redirects, per-send revalidation, tests. |
 | CodeGraph nested index exists under `docs/` | Repository hygiene | Root `.gitignore` must include `.codegraph/` and `**/.codegraph/` before the first commit; removal/move requires owner approval. |
 | At-least-once delivery | Duplicate messages | Stable IDs/dedupe; bounded retries; document no exactly-once. |

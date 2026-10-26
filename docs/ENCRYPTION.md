@@ -1,8 +1,9 @@
 # Encryption and Key Lifecycle
 
 This document covers the encryption foundation implemented by `GATE-018` P2. It
-does not authorize deployment, key generation automation, or any production
-server access.
+does not authorize deployment or any production server access. The first-time
+setup script may create a random key; the service itself never generates or
+rotates a production key silently.
 
 ## Key file
 
@@ -14,17 +15,26 @@ server access.
 - containing base64 text that decodes to exactly 32 bytes;
 - at most 128 bytes of file content.
 
-The service never generates or rotates a production key automatically. An
-operator may create one manually with a trusted local tool, for example:
+The service never generates or rotates a production key automatically. On a
+Docker Compose host, `scripts/setup.sh` creates the first key without printing it
+and refuses to replace an existing file. To create one manually with a trusted
+local tool:
 
 ```sh
 umask 077
-openssl rand -base64 32 > ./secrets/neda_encryption_key
-chmod 0400 ./secrets/neda_encryption_key
+mkdir -p secrets
+test ! -e ./secrets/encryption_key
+set -C   # noclobber: fail rather than overwrite an existing key
+openssl rand -base64 32 > ./secrets/encryption_key
+chmod 0400 ./secrets/encryption_key
 ```
 
 The key file must stay outside the SQLite database and outside Git. Do not paste
-a real key into chat, logs, tickets, or documentation.
+a real key into chat, logs, tickets, or documentation. Compose mounts this file
+read-only at `/run/secrets/encryption_key`; the host owner must equal the
+container runtime UID (`NEDA_RUNTIME_UID`), and the mode must remain `0400` or
+`0600`. File-backed Compose secrets do not remap `uid`/`gid`/`mode` in non-swarm
+Compose, so the host file is the source of truth.
 
 ## Encrypted setting format
 
@@ -40,6 +50,11 @@ The associated data is derived from the setting key, so a ciphertext copied from
 The `settings.key_version` column stores the current key version (`1`). A
 missing `is_secret` flag, an unexpected key version, a malformed envelope, a
 tampered value, or a wrong key fails closed and returns no plaintext.
+
+At startup the configured key is checked against every encrypted settings row
+before migrations or settings seeding. A database restored with a different valid
+key therefore fails before schema or settings changes, rather than after a
+partial startup.
 
 ## Telegram settings
 
