@@ -1,12 +1,20 @@
 # Single-replica, non-root Neda deployment.
 #
-# Required:
+# Secure default:
 #   NEDA_PUBLIC_URL=https://neda.example.com
 #   NEDA_VAPID_SUBJECT=mailto:owner@example.com
 #   NEDA_MRBILIT_ENABLED=true (must be set explicitly; real provider required)
 #   NEDA_RUNTIME_UID / NEDA_RUNTIME_GID matching the owner of ./data
 #   ./secrets/encryption_key (base64, exactly 32 bytes, mode 0400/0600 on host,
 #   owned by NEDA_RUNTIME_UID)
+#
+# Direct public-IP HTTP mode (unencrypted; use only when the network is trusted
+# or an external VPN/TLS tunnel is used):
+#   NEDA_PUBLIC_URL=http://SERVER_PUBLIC_IP:PORT
+#   NEDA_ALLOW_INSECURE_HTTP=true
+#   NEDA_PUBLISH_HOST=0.0.0.0
+#   NEDA_PUBLISH_PORT=PORT
+#   NEDA_TRUST_PROXY=false
 #
 # The key is a read-only bind mount, not a Compose secret: file-based Compose
 # secrets are bind mounts in non-swarm Compose and their uid/gid/mode fields are
@@ -35,13 +43,14 @@ services:
     mem_limit: 512m
     cpus: 1.0
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${NEDA_PUBLISH_HOST:-127.0.0.1}:${NEDA_PUBLISH_PORT:-8080}:8080"
     environment:
       NEDA_ENV: production
       NEDA_HTTP_ADDR: ":8080"
       NEDA_DB_PATH: /data/neda.db
       NEDA_ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
-      NEDA_PUBLIC_URL: "${NEDA_PUBLIC_URL:?set NEDA_PUBLIC_URL to the HTTPS origin}"
+      NEDA_PUBLIC_URL: "${NEDA_PUBLIC_URL:?set NEDA_PUBLIC_URL to the public origin}"
+      NEDA_ALLOW_INSECURE_HTTP: "${NEDA_ALLOW_INSECURE_HTTP:-false}"
       NEDA_VAPID_SUBJECT: "${NEDA_VAPID_SUBJECT:?set NEDA_VAPID_SUBJECT to a mailto: or HTTPS contact}"
       NEDA_MRBILIT_ENABLED: "${NEDA_MRBILIT_ENABLED:?set NEDA_MRBILIT_ENABLED=true (real provider required in production)}"
       NEDA_TRUST_PROXY: "${NEDA_TRUST_PROXY:-false}"

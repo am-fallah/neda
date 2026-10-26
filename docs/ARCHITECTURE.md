@@ -244,11 +244,12 @@ Secrets are supplied as files, not committed. Values below are placeholders in `
 
 | Variable | Required | Default | Secret | Purpose |
 |---|---|---|---|---|
-| `NEDA_ENV` | no | `production` | no | `development`/`production`; controls secure cookies/log format. |
-| `NEDA_HTTP_ADDR` | no | `:8080` | no | Listen address inside container. |
+| `NEDA_ENV` | no | `production` | no | `development`/`production`; controls production safeguards and log format. |
+| `NEDA_HTTP_ADDR` | no | `:8080` | no | Listen address. Use `0.0.0.0:PORT` for direct host access. |
 | `NEDA_DB_PATH` | no | `/data/neda.db` | no | SQLite path on persistent volume. |
 | `NEDA_ENCRYPTION_KEY_FILE` | yes | — | yes (file) | 32-byte master key file, owner-only (`0400`/`0600`), outside DB. |
-| `NEDA_PUBLIC_URL` | yes in production | — | no | Canonical HTTPS origin for links/cookies; also used for VAPID/event links. |
+| `NEDA_PUBLIC_URL` | yes in production | — | no | Canonical public origin for links, Host/origin checks, and VAPID/event links. HTTPS is the secure default; an HTTP IP-literal origin is allowed only with `NEDA_ALLOW_INSECURE_HTTP=true`. |
+| `NEDA_ALLOW_INSECURE_HTTP` | no | `false` | no | Explicitly permits a production HTTP public origin for direct IP access. Disables Secure cookies and HSTS; domain names require HTTPS. |
 | `NEDA_VAPID_SUBJECT` | for Push | — | no | `mailto:` or HTTPS contact required by VAPID. |
 | `NEDA_LOG_LEVEL` | no | `info` | no | `debug`/`info`/`warn`/`error`. |
 | `NEDA_TRUST_PROXY` | no | `false` | no | Trust `X-Forwarded-*` only behind a known proxy. |
@@ -1429,7 +1430,7 @@ injected foreign-key violation, and canceled contexts.
 | Asset | Threat | Mitigation |
 |---|---|---|
 | Dashboard/API | Unauthorized access | Single password, Argon2id, secure sessions, rate limits, no public bootstrap, all private routes protected. |
-| Session | Theft/CSRF | 256-bit random token, hashed at rest, HttpOnly/Secure/SameSite, idle/absolute expiry, per-session CSRF token, Origin checks, no CORS. |
+| Session | Theft/CSRF | 256-bit random token, hashed at rest, HttpOnly/SameSite, Secure when the public origin is HTTPS, idle/absolute expiry, per-session CSRF token, Origin checks, no CORS. |
 | Telegram token | DB/log/API leak | AES-256-GCM at rest with external key; never returned; redacted logs; file permissions. |
 | Push subscriptions | SSRF/abuse/leak | Subscription-time URL/key/allowlist validation; send-time DNS/IP validation, disabled redirects, encryption at rest; never logged; bounded payloads. |
 | Database | Theft | Secrets encrypted; password hash only; sessions hashed; key stored separately. |
@@ -1438,14 +1439,14 @@ injected foreign-key violation, and canceled contexts.
 | Availability correctness | False "sold out"/"available" | Conservative state machine; errors/unknown never negative; known-sample rule; tests. |
 | Notification channel | Spoof/abuse | Fixed Telegram/Push endpoints; authenticated settings; no user-supplied webhook; message labels. |
 | Host | Container escape/privilege | Non-root, read-only root FS, dropped caps, no-new-privileges, resource limits, minimal image. |
-| Reverse proxy | Misconfiguration | HTTPS/HSTS, host/origin checks, trusted-proxy setting, firewall, documented setup. |
+| Reverse proxy | Misconfiguration | HTTPS/HSTS in proxy mode, exact Host/origin checks, trusted-proxy setting, firewall, documented direct HTTP opt-in. |
 
 ### 14.2 Authentication and sessions
 
 - Password setup only via `neda set-password` on a TTY; read twice without echo; reject non-TTY/stdin piping; no password argument; no public bootstrap endpoint.
 - Argon2id with random salt, encoded parameters. Proposal: 64 MiB memory, 3 iterations, 2 lanes, 32-byte hash. Benchmark and adjust for the target server; rate-limit logins to avoid memory exhaustion.
 - Password minimum length 12 (proposal), maximum bounded to prevent DoS; no composition rules that encourage weak patterns. Reject whitespace-only.
-- Session token: 32 random bytes, base64url; store SHA-256 hash only. Cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` in production. No token in URLs/logs. Rotate the session token on successful login; never reuse a pre-auth session.
+- Session token: 32 random bytes, base64url; store SHA-256 hash only. Cookie: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when the public origin is HTTPS. Direct HTTP mode (explicit IP-only opt-in) omits the `Secure` flag because browsers will not send it over plain HTTP. No token in URLs/logs. Rotate the session token on successful login; never reuse a pre-auth session.
 - Absolute TTL 30 days; idle timeout 7 days (proposals). `last_seen_at` updated with throttling. Logout revokes; password change revokes other sessions.
 - CSRF: per-session random token, returned by `/auth/session` and login response; client sends `X-CSRF-Token`; server compares hashes in constant time; also verify `Origin`/`Referer` for state-changing requests. Login does not use a session CSRF token because no authenticated session exists; it requires same-origin `Origin`/`Referer` validation plus rate limiting. Every authenticated state-changing route requires the session CSRF token and origin validation. No CORS.
 - Login rate limiting: in-memory per-IP and global; e.g. 5 failures → short delay, 10 → 15-minute lock; reset on success; generic errors; do not lock the owner out permanently. Trust proxy only when configured.
@@ -1474,11 +1475,11 @@ injected foreign-key violation, and canceled contexts.
 ### 14.5 HTTP/web security headers
 
 - `Content-Security-Policy`: API/auth responses use `default-src 'none'`; the SPA HTML shell uses `default-src 'self'`, scripts self only, styles self plus `'unsafe-inline'` because Radix/shadcn positioning uses style attributes, images self/data, fonts self, connect-src self, worker-src self, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, and `form-action 'self'`. Inline scripts are not allowed; the theme bootstrap is an external same-origin file. Document any future relaxation.
-- `Strict-Transport-Security` in production (behind HTTPS).
+- `Strict-Transport-Security` only for production HTTPS origins; it is omitted in opt-in direct HTTP mode.
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, `Permissions-Policy` minimal.
 - `Cache-Control: no-store` for API/auth; hashed static assets long cache; `index.html`/service worker no-cache.
 - No CORS by default; same-origin SPA. Dev uses Vite proxy, not permissive CORS.
-- Host header validation: when `NEDA_PUBLIC_URL` is configured, require the request `Host` to match its host (and optional port) for all routes; return `421 Misdirected Request` on mismatch. In `development`, allow `localhost`/`127.0.0.1` only when `NEDA_PUBLIC_URL` is unset. `NEDA_TRUST_PROXY` affects forwarded scheme/client-IP handling, not Host validation. Add deterministic tests for matching, mismatched, missing, and proxy-forwarded Host values.
+- Host header validation: when `NEDA_PUBLIC_URL` is configured, require the request `Host` to match its host (and optional port) for all routes; return `421 Misdirected Request` on mismatch. HTTP IP origins are accepted only with `NEDA_ALLOW_INSECURE_HTTP=true`; domain origins use HTTPS. In `development`, allow `localhost`/`127.0.0.1` only when `NEDA_PUBLIC_URL` is unset. `NEDA_TRUST_PROXY` affects forwarded scheme/client-IP handling, not Host validation. Add deterministic tests for matching, mismatched, missing, and proxy-forwarded Host values.
 - Request/response timeouts: ReadHeader 5s, Read 15s, Write 30s, Idle 60s; graceful shutdown 15s; body limits.
 
 ### 14.6 Container and deployment hardening
@@ -1489,7 +1490,8 @@ injected foreign-key violation, and canceled contexts.
 - `.dockerignore` excludes `.git`, `.env*`, data, keys, `node_modules`, `dist`, `.codegraph`, tests/fixtures? Keep build inputs only.
 - Healthcheck uses `neda healthcheck` (no curl dependency).
 - Log rotation via Compose `json-file` max-size/max-file; no secrets in logs.
-- Reverse proxy terminates TLS (Caddy automatic HTTPS or Nginx); app port not publicly exposed; firewall only 80/443; HSTS.
+- Reverse proxy terminates TLS (Caddy automatic HTTPS or Nginx); app port not publicly exposed by default; firewall only 80/443; HSTS in HTTPS mode.
+- Direct public-IP HTTP is an explicit alternative for deployments without DNS/TLS: bind `0.0.0.0:<port>`, expose only that port, set `NEDA_PUBLIC_URL=http://<IP>:<port>` and `NEDA_ALLOW_INSECURE_HTTP=true`, and accept that traffic is unencrypted. Prefer a VPN/TLS tunnel for anything sensitive.
 - No production access/deploy until `GATE-004`.
 
 ### 14.7 Security review checklist
@@ -1561,7 +1563,7 @@ injected foreign-key violation, and canceled contexts.
 | POST | `/api/v1/push/test` | private | Send test Push. |
 | POST | `/api/v1/monitors/{id}/check` | private | Optional P2 manual check. |
 
-**API-001/API-005 implementation (2026-10-24).** The HTTP layer exposes `POST /api/v1/auth/login`, `GET /api/v1/auth/session`, `POST /api/v1/auth/logout`, and `POST /api/v1/auth/password`. Login is public but requires same-origin `Origin`/`Referer` and the in-memory rate limiter; it returns the CSRF token and sets HttpOnly session/CSRF cookies (`SameSite=Lax`, `Secure` in production). Logout/password use the private session + CSRF + origin wrappers. Session probing returns only authenticated/setup-required state, CSRF token, and expiry. JSON decoding is strict and bounded; no CORS headers are emitted; existing Host validation (421), security headers, request IDs, and no-store caching remain in force. Monitor/settings read/write endpoints remain later API tasks.
+**API-001/API-005 implementation (2026-10-24).** The HTTP layer exposes `POST /api/v1/auth/login`, `GET /api/v1/auth/session`, `POST /api/v1/auth/logout`, and `POST /api/v1/auth/password`. Login is public but requires same-origin `Origin`/`Referer` and the in-memory rate limiter; it returns the CSRF token and sets HttpOnly session/CSRF cookies (`SameSite=Lax`, `Secure` for HTTPS origins; the explicit direct HTTP IP mode is unencrypted and omits Secure). Logout/password use the private session + CSRF + origin wrappers. Session probing returns only authenticated/setup-required state, CSRF token, and expiry. JSON decoding is strict and bounded; no CORS headers are emitted; existing Host validation (421), security headers, request IDs, and no-store caching remain in force. Monitor/settings read/write endpoints remain later API tasks.
 
 **API-002/API-008 implementation (2026-10-24).** Private monitor routes provide list/create/detail/partial-edit/delete and idempotent pause/resume with camelCase DTOs, field-keyed validation errors, and an expired-resume 409. `GET /api/v1/monitors/{id}` is the API-008 detail view: it keeps the monitor/provider fields and adds per-active-provider `observations` and `recentChecks`. Observations are restricted to the target's current `config_version`, ordered deterministically by state (`reservable`, `not_reservable`, `unknown`) and stable journey/offering keys, capped at 100, and accompanied by `observationsTruncated`. Recent checks are ordered newest-first by start time/id, capped at 10, and accompanied by `recentChecksTruncated`. Only sanitized check diagnostics are exposed: outcome, error category, HTTP status, duration, and counts. List/create/update/pause/resume responses do not include diagnostics. Inactive historical targets remain in the provider list but expose no stale observations/checks. `state` is the last persisted confirmed state; `missing=true` means the latest successful check did not return that offering, so current availability must be presented as unknown. Provider errors, timeouts, malformed responses, and discarded/abandoned checks never overwrite the persisted availability state. Delivery target keys, leases, tokens, subscription endpoints, and raw provider bodies are never returned.
 
@@ -1707,11 +1709,12 @@ services:
       NEDA_DB_PATH: /data/neda.db
       NEDA_ENCRYPTION_KEY_FILE: /run/secrets/encryption_key
       NEDA_PUBLIC_URL: https://neda.example.com
+      NEDA_ALLOW_INSECURE_HTTP: "false"
       NEDA_VAPID_SUBJECT: mailto:owner@example.com
       NEDA_MRBILIT_ENABLED: "true"
       NEDA_TRUST_PROXY: "true"
     ports:
-      - "127.0.0.1:8080:8080"   # or expose only to the proxy network
+      - "${NEDA_PUBLISH_HOST:-127.0.0.1}:${NEDA_PUBLISH_PORT:-8080}:8080"
     mem_limit: 256m
     cpus: 1.0
     pids_limit: 100
@@ -1733,7 +1736,7 @@ services:
 
 - One replica only (SQLite).
 - Resource limits are provisional design targets; adjust after measurement/server facts.
-- App port not exposed publicly; reverse proxy on host or internal network.
+- App port not exposed publicly by default; use a reverse proxy on the host or internal network. Direct HTTP mode is an explicit exception described in §18.3.
 - `./data` and `./secrets/encryption_key` are host bind mounts; both must be
   owned by `NEDA_RUNTIME_UID` before first start (`scripts/setup.sh` does this).
 - `docker compose config` validates; no secrets committed.
@@ -1743,9 +1746,10 @@ services:
 ### 18.3 Reverse proxy / HTTPS / network
 
 - Caddy (automatic HTTPS) or Nginx; terminate TLS, set `X-Forwarded-Proto`, forward to `127.0.0.1:8080` (or container network).
-- Firewall: allow 80/443; deny direct app port from the internet.
-- HSTS, request size/timeouts, no directory listing.
-- DNS/domain/TLS are owner inputs. Push requires HTTPS.
+- Direct HTTP mode instead publishes the configured container port to `0.0.0.0`; firewall only that port and accept the documented lack of transport encryption.
+- Firewall: allow 80/443 for proxy mode, or only the chosen direct HTTP port; never expose the Docker socket or database.
+- HSTS for HTTPS mode, request size/timeouts, no directory listing.
+- DNS/domain/TLS are owner inputs. Push requires HTTPS (or localhost).
 - Host header/origin allowlist aligned with `NEDA_PUBLIC_URL`; trust proxy only when configured.
 - No SSH/server access during planning; deployment plan after server facts.
 

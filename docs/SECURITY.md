@@ -43,11 +43,12 @@ webhook, or public admin API.
 
 | Threat | Control | Residual risk |
 |---|---|---|
-| Unauthenticated dashboard/API access | Argon2id password hash; opaque 256-bit sessions stored hashed; `HttpOnly`, `SameSite=Lax`, `Secure` in production; idle and absolute expiry; all private routes wrapped by session+CSRF middleware | Single factor; no MFA or account recovery. A compromised owner password grants full control. |
+| Unauthenticated dashboard/API access | Argon2id password hash; opaque 256-bit sessions stored hashed; `HttpOnly`, `SameSite=Lax`, `Secure` for HTTPS origins; idle and absolute expiry; all private routes wrapped by session+CSRF middleware | Single factor; no MFA or account recovery. A compromised owner password grants full control. |
 | Session theft / fixation | Random session ID and token; token hashed at rest; session created fresh on login; logout revokes; password change revokes other sessions | A stolen live cookie can be replayed until expiry/revocation. |
 | CSRF | Double-submit CSRF cookie plus `X-CSRF-Token` header on every unsafe method; same-origin `Origin`/`Referer` check; no CORS; `SameSite=Lax` | Browser extensions or a compromised same-origin page can act with the owner's authority. |
 | Login brute force | Per-IP and global in-memory soft/hard limits with `Retry-After`; password hashing concurrency bound | Limiter resets on restart and is process-local; distributed attacks are not fully represented. |
-| Host-header attacks / DNS rebinding | Exact `Host` match against `NEDA_PUBLIC_URL` in production; localhost-only in development; mismatch returns 421 | Reverse proxy must preserve the public Host and terminate TLS correctly. |
+| Host-header attacks / DNS rebinding | Exact `Host` match against `NEDA_PUBLIC_URL` in production; localhost-only in development; mismatch returns 421 | Proxy mode must preserve the public Host and terminate TLS correctly. Direct HTTP mode relies on the exact IP/port origin and is unencrypted. |
+| Plaintext HTTP exposure | Direct IP HTTP is disabled by default and requires `NEDA_ALLOW_INSECURE_HTTP=true`; HSTS and Secure cookies are omitted in that mode; docs warn to use a trusted network/VPN/TLS tunnel | Anyone on the network path can read or modify login credentials, session cookies, and application data. This mode is unsuitable for sensitive use without external encryption. |
 | Clickjacking / MIME sniffing / referrer leakage | `X-Frame-Options: DENY`, `frame-ancestors 'none'`, `nosniff`, `no-referrer`, restricted `Permissions-Policy`, `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`, no CORS | Browser-specific header behavior is not a substitute for a correct TLS/proxy setup. |
 | XSS | React escaping; no `dangerouslySetInnerHTML`; strict SPA CSP (`script-src 'self'`); Telegram HTML escaping; Push payload is JSON, not HTML | Third-party frontend dependencies remain in the trust base. |
 | SQL injection | Parameterized queries throughout; no string-built SQL from request values | Repository code must continue to avoid dynamic SQL. |
@@ -60,7 +61,7 @@ webhook, or public admin API.
 | Notification spoofing/abuse | Fixed Telegram/Push destinations; authenticated settings; no user-supplied webhook; message labels distinguish availability from provider health; service worker accepts only same-origin or validated mrbilit.com click URLs | The Push service itself is trusted to deliver the payload. |
 | False "sold out" / false availability | Conservative availability state machine; errors/timeouts/malformed/missing/stale data never close an episode; provider errors never overwrite confirmed state; transactional events/outbox | Provider semantics remain provisional until `PRV-006` live validation. |
 | Delivery loss/duplication | Durable outbox, deterministic delivery IDs, unique targets, leases, bounded retries, at-least-once semantics, independent channels | Exactly-once external delivery is not claimed. |
-| Container/host compromise | Multi-stage distroless image/Compose run non-root, read-only root FS, dropped capabilities, no-new-privileges, bounded PIDs/CPU/memory, loopback port, and a read-only key bind mount whose owner/mode are enforced by the service; the image does not enable the real provider by default. Prior CI ran it on a fresh volume and after restore; the updated Compose build/start/restart/recreation smoke passed CI run 40367281143. | Target-host Docker/host hardening and deployment are not yet verified. Bind-mount ownership differs on Docker Desktop/rootless/remote engines. |
+| Container/host compromise | Multi-stage distroless image/Compose run non-root, read-only root FS, dropped capabilities, no-new-privileges, bounded PIDs/CPU/memory, loopback port by default, and a read-only key bind mount whose owner/mode are enforced by the service; the image does not enable the real provider by default. Direct HTTP mode must explicitly change the published host/port. Prior CI ran it on a fresh volume and after restore; the updated Compose build/start/restart/recreation smoke passed CI run 40367281143. | Target-host Docker/host hardening and deployment are not yet verified. Bind-mount ownership differs on Docker Desktop/rootless/remote engines. |
 | Dependency compromise | `go.sum` + `package-lock.json`; `govulncheck` and `npm audit`; maintained libraries; no floating installs in CI | Third-party supply chain remains a residual risk; the openpgp module is present but unused. |
 | Internal error disclosure | Sanitized JSON error model; provider/Telegram/Push errors mapped to stable categories; panic recovery returns generic 500; readiness errors are not echoed | New handlers must keep using the shared error helpers. |
 
@@ -74,8 +75,9 @@ webhook, or public admin API.
 - Session tokens are random, 32-byte values; only SHA-256 hashes are stored.
   Idle expiry is throttled; absolute expiry is enforced.
 - Session and CSRF cookies are `HttpOnly`, `SameSite=Lax`, `Path=/`, and
-  `Secure` when production is enabled. Cookies are cleared on logout and invalid
-  sessions.
+  `Secure` for HTTPS public origins. The explicit direct HTTP IP mode omits
+  `Secure` because browsers do not send such cookies over plain HTTP. Cookies
+  are cleared on logout and invalid sessions.
 - All private route families (monitors, settings, providers, events,
   deliveries, overview, Push) pass through `RequireSession` and `RequireCSRF`.
   Safe methods still require a session but skip the CSRF token.
@@ -154,7 +156,8 @@ applicable to the current scope.
 
 - [x] Private repository; no secrets, databases, keys, or generated graph data tracked.
 - [x] Owner-only password hash; no default credentials; offline setup only.
-- [x] Session cookies HttpOnly/SameSite/Secure-in-production; idle/absolute expiry; logout revocation.
+- [x] Session cookies HttpOnly/SameSite, Secure for HTTPS origins; idle/absolute expiry; logout revocation.
+- [x] Direct HTTP access is an explicit IP-only opt-in that omits Secure cookies/HSTS and is documented as unencrypted.
 - [x] Login same-origin policy and rate limit with `Retry-After`.
 - [x] Authenticated CSRF double-submit on every unsafe private route; no CORS.
 - [x] Host-header validation returns 421 on mismatch.
@@ -172,6 +175,7 @@ applicable to the current scope.
 - [x] Dependency vulnerability scan and lockfile review.
 - [x] English-only UI; no secret prefilling.
 - [ ] HTTPS/reverse-proxy/HSTS behavior on the real host (`OPS-005`/`GATE-004`).
+- [ ] If direct IP HTTP mode is used, the exact Host/Origin and unencrypted-transport warning are verified on the target (`OPS-005`/`GATE-004`).
 - [x] Backup/restore drill with key and database on a fresh directory and fresh Docker volume (`OPS-009`/`SEC-003`); target-host drill remains deployment-gated.
 - [x] Production startup refuses effective UID 0; Docker image/Compose defaults remain non-root.
 - [x] Docker image/Compose build, non-root/read-only runtime, healthcheck, restart, key-mode failure, and fresh-volume restore in prior CI (run 40133170885); the updated Compose build/start/restart/recreation smoke passed CI run 40367281143.
@@ -199,3 +203,7 @@ applicable to the current scope.
 6. **Target-host hardening pending.** The image/Compose pass CI runtime and
    restore checks, but the production host's proxy/TLS/firewall, key ownership
    on the real volume, backup target, and deployment remain approval-gated.
+7. **Plaintext HTTP mode.** Direct public-IP HTTP is deliberately supported only
+   with an explicit opt-in. It does not encrypt the login password, session
+   cookies, or application data. Use it only on a trusted network or behind a
+   VPN/TLS tunnel; HTTPS remains the recommended deployment.

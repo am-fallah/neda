@@ -146,7 +146,9 @@ func NewManager(st *store.Store, cfg Config) (*Manager, error) {
 		return nil, errors.New("auth: production requires a public URL for origin checks")
 	}
 	if cfg.Production {
-		cfg.Secure = true
+		// Secure cookies only work over HTTPS. Production may deliberately use
+		// plain HTTP for direct IP access, but that mode is gated by config.
+		cfg.Secure = strings.EqualFold(cfg.PublicURL.Scheme, "https")
 	}
 
 	return &Manager{

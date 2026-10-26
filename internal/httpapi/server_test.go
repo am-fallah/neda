@@ -204,6 +204,33 @@ func TestProductionHSTS(t *testing.T) {
 	}
 }
 
+func TestProductionHTTPIPHostValidationAndNoHSTS(t *testing.T) {
+	publicURL, _ := url.Parse("http://203.0.113.10:8080")
+	server, _ := testServer(t, Config{PublicURL: publicURL, Production: true}, &fakeReadiness{})
+
+	cases := []struct {
+		name string
+		host string
+		want int
+	}{
+		{"matching-ip-and-port", "203.0.113.10:8080", http.StatusOK},
+		{"missing-nondefault-port", "203.0.113.10", http.StatusMisdirectedRequest},
+		{"wrong-port", "203.0.113.10:9090", http.StatusMisdirectedRequest},
+		{"wrong-host", "198.51.100.10:8080", http.StatusMisdirectedRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := request(t, server, http.MethodGet, "http://203.0.113.10:8080/healthz", tc.host, nil)
+			if response.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%s", response.Code, tc.want, response.Body.String())
+			}
+			if got := response.Header().Get("Strict-Transport-Security"); got != "" {
+				t.Fatalf("HTTP response has HSTS %q", got)
+			}
+		})
+	}
+}
+
 func TestRecoveryPanic(t *testing.T) {
 	server, logs := testServer(t, Config{}, &fakeReadiness{})
 	panicking := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
