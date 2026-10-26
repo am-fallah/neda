@@ -77,10 +77,11 @@ owner-only key, and an empty monitor set. It verified:
   missing or corrupt VAPID pair;
 - no provider request was made because the temporary database had no monitors.
 
-The updated Docker workflow is intended to repeat the valid-but-different-key
-check against a restored copy of the volume; it has not been run locally because
-Docker is unavailable. This remains a local filesystem drill, not a Docker
-volume or target-host drill.
+The updated Docker workflow repeated the valid-but-different-key check against a
+restored copy of the volume in CI run
+[40365784450](https://github.com/am-fallah/neda/actions/runs/40365784450) and
+passed. The preceding local filesystem drill remains distinct from the
+target-host volume drill.
 
 ## Limitations / not claimed
 
