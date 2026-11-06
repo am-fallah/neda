@@ -40,6 +40,11 @@ const (
 	// whose runner reported an unsettled result. It is loop protection, not the
 	// target backoff policy owned by SCH-003.
 	unsettledRetryDelay = time.Second
+
+	// monitoringOffRetry bounds how long the scheduler waits before re-reading
+	// the global switch while monitoring is paused. The settings update also
+	// wakes the scheduler, so this is a fallback for external state changes.
+	monitoringOffRetry = 30 * time.Second
 )
 
 var (
@@ -94,6 +99,13 @@ type IntervalSource interface {
 	PollInterval(ctx context.Context) (time.Duration, error)
 }
 
+// MonitoringSwitch is the global monitoring on/off gate. A nil switch means
+// enabled, so existing tests and callers keep their previous behavior.
+// A read error fails closed: no new provider checks are dispatched.
+type MonitoringSwitch interface {
+	MonitoringEnabled(ctx context.Context) (bool, error)
+}
+
 // Repository is the persistence boundary used by the scheduler.
 type Repository interface {
 	ListScheduleTargets(ctx context.Context, now time.Time) ([]domain.ScheduleTarget, error)
@@ -126,7 +138,8 @@ type Config struct {
 	Repository Repository
 	Providers  ProviderLookup
 	Interval   IntervalSource
-	Runner     Runner // nil keeps the scheduler safely idle after recovery
+	Monitoring MonitoringSwitch // nil means enabled
+	Runner     Runner           // nil keeps the scheduler safely idle after recovery
 	Workers    int
 	// ProviderSpacing is the start-to-start minimum per provider. Nil uses
 	// DefaultProviderSpacing; a non-nil zero explicitly disables spacing for
@@ -144,6 +157,7 @@ type Scheduler struct {
 	repo            Repository
 	providers       ProviderLookup
 	interval        IntervalSource
+	monitoring      MonitoringSwitch
 	runner          Runner
 	workers         int
 	providerSpacing time.Duration
@@ -197,6 +211,7 @@ func New(cfg Config) (*Scheduler, error) {
 		repo:            cfg.Repository,
 		providers:       cfg.Providers,
 		interval:        cfg.Interval,
+		monitoring:      cfg.Monitoring,
 		runner:          cfg.Runner,
 		workers:         cfg.Workers,
 		providerSpacing: *cfg.ProviderSpacing,
@@ -251,6 +266,39 @@ func (s *Scheduler) Run(ctx context.Context) error {
 		return nil
 	}
 
+	enabled, switchErr := s.monitoringEnabled(ctx)
+	if switchErr != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		s.logger.Error("scheduler monitoring switch read failed; treating monitoring as disabled", "error", switchErr)
+		enabled = false
+	}
+	paused := !enabled
+	if paused {
+		s.logger.Info("scheduler paused: global monitoring is off")
+	} else if err := s.staggerDueTargets(ctx, now); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+
+	return s.runLoop(ctx, paused)
+}
+
+// monitoringEnabled reads the optional switch. A nil switch is enabled.
+func (s *Scheduler) monitoringEnabled(ctx context.Context) (bool, error) {
+	if s.monitoring == nil {
+		return true, nil
+	}
+	return s.monitoring.MonitoringEnabled(ctx)
+}
+
+// staggerDueTargets spreads already-due targets over the near-term jitter
+// window. It is used at startup and when monitoring resumes after an off
+// period so a large backlog does not produce a provider-request burst.
+func (s *Scheduler) staggerDueTargets(ctx context.Context, now time.Time) error {
 	interval, err := s.interval.PollInterval(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -273,8 +321,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	if staggered > 0 {
 		s.logger.Info("scheduler staggered due targets", "count", staggered)
 	}
-
-	return s.runLoop(ctx)
+	return nil
 }
 
 type completion struct {
@@ -282,7 +329,7 @@ type completion struct {
 	result Result
 }
 
-func (s *Scheduler) runLoop(ctx context.Context) error {
+func (s *Scheduler) runLoop(ctx context.Context, paused bool) error {
 	jobs := make(chan Target, s.workers)
 	done := make(chan completion, s.workers)
 
@@ -305,7 +352,7 @@ func (s *Scheduler) runLoop(ctx context.Context) error {
 		}()
 	}
 
-	loopErr := s.loop(ctx, jobs, done)
+	loopErr := s.loop(ctx, jobs, done, paused)
 	close(jobs)
 
 	finished := make(chan struct{})
@@ -341,7 +388,7 @@ func (s *Scheduler) execute(ctx context.Context, target Target) (result Result, 
 	return s.runner.Run(ctx, target)
 }
 
-func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion) error {
+func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion, paused bool) error {
 	running := 0
 	inflight := make(map[string]bool)
 	settled := make(map[int64]generation)
@@ -373,6 +420,43 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			s.logger.Error("scheduler expiry reconciliation failed", "error", expiryErr)
 			expiryAt = now.Add(storeErrorRetry)
 			hasExpiry = true
+		}
+
+		enabled, switchErr := s.monitoringEnabled(ctx)
+		if switchErr != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			s.logger.Error("scheduler monitoring switch read failed; monitoring stays paused", "error", switchErr)
+			enabled = false
+		}
+		if !enabled {
+			if !paused {
+				s.logger.Info("scheduler paused: global monitoring is off")
+				paused = true
+			}
+			waitAt := now.Add(monitoringOffRetry)
+			if hasExpiry && expiryAt.Before(waitAt) {
+				waitAt = expiryAt
+			}
+			completed, got, ok := s.waitUntil(ctx, waitAt, true, done)
+			if !ok {
+				return nil
+			}
+			if got {
+				s.complete(completed, &running, inflight, settled, hold, providers)
+			}
+			continue
+		}
+		if paused {
+			s.logger.Info("scheduler resumed: global monitoring is on")
+			paused = false
+			if err := s.staggerDueTargets(ctx, now); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				s.logger.Error("scheduler resume stagger failed", "error", err)
+			}
 		}
 
 		targets, err := s.repo.ListScheduleTargets(ctx, now)

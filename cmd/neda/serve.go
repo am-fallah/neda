@@ -124,6 +124,10 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("push setting initialization failed", "error", err)
 		return 1
 	}
+	if err := appStore.EnsureMonitoringEnabled(ctx, time.Now().UTC()); err != nil {
+		logger.Error("monitoring setting initialization failed", "error", err)
+		return 1
+	}
 	pollInterval, err := appStore.PollInterval(ctx)
 	if err != nil {
 		logger.Error("poll interval configuration is invalid", "error", err)
@@ -195,15 +199,16 @@ func runServe(stdout, stderr io.Writer) int {
 	if pushService != nil && !pushService.Available() {
 		logger.Warn("web push keys exist but NEDA_VAPID_SUBJECT is not configured; push stays unavailable")
 	}
+	// The waker is the scheduler's wake source and the post-commit hook for
+	// monitor CRUD and global-switch changes.
+	waker := scheduler.NewWaker()
+
 	settingsService, err := appsettings.New(appStore, telegramSettings, telegramClient, time.Now)
 	if err != nil {
 		logger.Error("settings service initialization failed", "error", err)
 		return 1
 	}
-
-	// The waker is the scheduler's wake source and the post-commit hook for
-	// monitor CRUD changes.
-	waker := scheduler.NewWaker()
+	settingsService.SetWake(waker.Wake)
 	monitorService, err := domain.NewMonitorService(appStore, providerRegistry, domain.MonitorServiceConfig{
 		Now: time.Now,
 		NearTermSchedule: func(now time.Time) time.Time {
@@ -222,6 +227,7 @@ func runServe(stdout, stderr io.Writer) int {
 	checkStage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
 		Repository: appStore,
 		Providers:  providerRegistry,
+		Monitoring: appStore,
 		Logger:     logger,
 	})
 	if err != nil {
@@ -234,6 +240,7 @@ func runServe(stdout, stderr io.Writer) int {
 	outcomeRunner, err := scheduler.NewOutcomeRunner(scheduler.OutcomeRunnerConfig{
 		Stage:      checkStage,
 		Store:      appStore,
+		Monitoring: appStore,
 		Deliveries: deliverySource,
 		Logger:     logger,
 	})
@@ -245,6 +252,7 @@ func runServe(stdout, stderr io.Writer) int {
 		Repository: appStore,
 		Providers:  providerRegistry,
 		Interval:   appStore,
+		Monitoring: appStore,
 		Runner:     outcomeRunner,
 		Workers:    cfg.Workers,
 		Wake:       waker.C(),
@@ -269,9 +277,10 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	if len(senders) > 0 {
 		deliveryWorker, err = notifydelivery.New(notifydelivery.Config{
-			DB:      database.DB,
-			Senders: senders,
-			Logger:  logger,
+			DB:         database.DB,
+			Senders:    senders,
+			Monitoring: appStore,
+			Logger:     logger,
 		})
 		if err != nil {
 			logger.Error("delivery worker initialization failed", "error", err)
@@ -279,8 +288,14 @@ func runServe(stdout, stderr io.Writer) int {
 		}
 	}
 
+	monitoringEnabled, err := appStore.MonitoringEnabled(ctx)
+	if err != nil {
+		logger.Error("monitoring setting read failed", "error", err)
+		return 1
+	}
 	logger.Info("scheduler configured",
 		"workers", cfg.Workers,
+		"monitoring_enabled", monitoringEnabled,
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
 		"delivery_worker", deliveryWorker != nil,

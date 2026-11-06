@@ -409,12 +409,14 @@ export interface TelegramSettings {
 export interface Settings {
   pollIntervalSeconds: number;
   pushEnabled: boolean;
+  monitoringEnabled: boolean;
   telegram: TelegramSettings;
 }
 
 export interface SettingsUpdateRequest {
   pollIntervalSeconds?: number;
   pushEnabled?: boolean;
+  monitoringEnabled?: boolean;
 }
 
 export interface TelegramConfigRequest {

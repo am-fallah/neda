@@ -34,6 +34,7 @@ type CheckRepository interface {
 type CheckStageConfig struct {
 	Repository CheckRepository
 	Providers  ProviderLookup
+	Monitoring MonitoringSwitch
 	Now        func() time.Time
 	Timeout    time.Duration
 	Logger     *slog.Logger
@@ -43,11 +44,12 @@ type CheckStageConfig struct {
 // Runner itself: SCH-010's OutcomeRunner wraps it and owns finalization and the
 // post-I/O validity gate.
 type CheckStage struct {
-	repo      CheckRepository
-	providers ProviderLookup
-	now       func() time.Time
-	timeout   time.Duration
-	logger    *slog.Logger
+	repo       CheckRepository
+	providers  ProviderLookup
+	monitoring MonitoringSwitch
+	now        func() time.Time
+	timeout    time.Duration
+	logger     *slog.Logger
 }
 
 // CheckAttempt is the handoff from SCH-004 to SCH-010. CheckRunID is non-zero
@@ -70,6 +72,9 @@ type CheckAttempt struct {
 	SelectionRequired bool
 	Err               error
 	Classification    provider.Classification
+	// MonitoringDisabled means the global switch was off (or unreadable) before
+	// provider I/O. No running check row was created.
+	MonitoringDisabled bool
 }
 
 // NewCheckStage validates dependencies and applies safe defaults.
@@ -93,11 +98,12 @@ func NewCheckStage(cfg CheckStageConfig) (*CheckStage, error) {
 		cfg.Logger = slog.Default()
 	}
 	return &CheckStage{
-		repo:      cfg.Repository,
-		providers: cfg.Providers,
-		now:       cfg.Now,
-		timeout:   cfg.Timeout,
-		logger:    cfg.Logger,
+		repo:       cfg.Repository,
+		providers:  cfg.Providers,
+		monitoring: cfg.Monitoring,
+		now:        cfg.Now,
+		timeout:    cfg.Timeout,
+		logger:     cfg.Logger,
 	}, nil
 }
 
@@ -130,6 +136,29 @@ func (s *CheckStage) RunCheck(ctx context.Context, target Target) (CheckAttempt,
 	}
 	if persisted.MonitorID != target.MonitorID || persisted.ProviderID != target.ProviderID {
 		return s.fail(target, fmt.Errorf("scheduler: target %d identity does not match the dispatched target", target.ID))
+	}
+
+	// Re-check the global switch immediately before the attempt-start row and
+	// provider I/O. This closes the race between scheduler dispatch and a
+	// settings update. A read error fails closed: monitoring is safety-gated.
+	if s.monitoring != nil {
+		enabled, err := s.monitoring.MonitoringEnabled(ctx)
+		if err != nil {
+			s.logger.Error("check stage monitoring switch read failed; skipping provider I/O",
+				"monitor_id", persisted.MonitorID,
+				"target_id", persisted.ID,
+				"provider_id", string(persisted.ProviderID),
+			)
+			return skippedAttempt(persisted), nil
+		}
+		if !enabled {
+			s.logger.Info("check stage skipped: global monitoring is off",
+				"monitor_id", persisted.MonitorID,
+				"target_id", persisted.ID,
+				"provider_id", string(persisted.ProviderID),
+			)
+			return skippedAttempt(persisted), nil
+		}
 	}
 
 	// Build the request from the freshly loaded row and retain its version.
@@ -228,6 +257,19 @@ func configurationFailure(err error) error {
 		return err
 	}
 	return &provider.Error{Kind: provider.ErrConfiguration, Op: "ValidateConfig", Err: err}
+}
+
+// skippedAttempt reports a global-switch gate before provider I/O. No check run
+// row is created and no scheduling or availability state changes.
+func skippedAttempt(target domain.MonitorProvider) CheckAttempt {
+	return CheckAttempt{
+		TargetID:           target.ID,
+		MonitorID:          target.MonitorID,
+		ProviderID:         target.ProviderID,
+		ConfigVersion:      target.ConfigVersion,
+		BookingSlug:        target.BookingSlug,
+		MonitoringDisabled: true,
+	}
 }
 
 // unstartedAttempt reports a caller cancellation or deadline that occurred

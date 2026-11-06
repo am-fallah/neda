@@ -20,6 +20,7 @@ const (
 type settingsPayload struct {
 	PollIntervalSeconds int                     `json:"pollIntervalSeconds"`
 	PushEnabled         bool                    `json:"pushEnabled"`
+	MonitoringEnabled   bool                    `json:"monitoringEnabled"`
 	Telegram            telegramSettingsPayload `json:"telegram"`
 }
 
@@ -44,12 +45,19 @@ func decodeSettings(t *testing.T, body []byte) settingsPayload {
 }
 
 func settingsUpdateBody(poll *int, push *bool) string {
+	return settingsUpdateBodyWithMonitoring(poll, push, nil)
+}
+
+func settingsUpdateBodyWithMonitoring(poll *int, push, monitoring *bool) string {
 	payload := map[string]any{}
 	if poll != nil {
 		payload["pollIntervalSeconds"] = *poll
 	}
 	if push != nil {
 		payload["pushEnabled"] = *push
+	}
+	if monitoring != nil {
+		payload["monitoringEnabled"] = *monitoring
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -82,7 +90,7 @@ func TestSettingsGetUpdateAndValidation(t *testing.T) {
 		t.Fatalf("GET settings status = %d, body=%s", recorder.Code, recorder.Body.String())
 	}
 	payload := decodeSettings(t, recorder.Body.Bytes())
-	if payload.PollIntervalSeconds != 300 || payload.PushEnabled {
+	if payload.PollIntervalSeconds != 300 || payload.PushEnabled || !payload.MonitoringEnabled {
 		t.Fatalf("default settings = %+v", payload)
 	}
 	if !payload.Telegram.Available || payload.Telegram.Configured || payload.Telegram.Readable {
@@ -98,19 +106,22 @@ func TestSettingsGetUpdateAndValidation(t *testing.T) {
 	}
 	poll := 120
 	push := true
-	updated := fixture.request(t, http.MethodPut, "/api/v1/settings", settingsUpdateBody(&poll, &push), session, csrf, authOrigin)
+	monitoring := false
+	updated := fixture.request(t, http.MethodPut, "/api/v1/settings",
+		settingsUpdateBodyWithMonitoring(&poll, &push, &monitoring), session, csrf, authOrigin)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("PUT settings status = %d, body=%s", updated.Code, updated.Body.String())
 	}
 	updatedPayload := decodeSettings(t, updated.Body.Bytes())
-	if updatedPayload.PollIntervalSeconds != 120 || !updatedPayload.PushEnabled {
+	if updatedPayload.PollIntervalSeconds != 120 || !updatedPayload.PushEnabled || updatedPayload.MonitoringEnabled {
 		t.Fatalf("updated settings = %+v", updatedPayload)
 	}
 	reloaded := fixture.request(t, http.MethodGet, "/api/v1/settings", "", session, "", "")
 	if reloaded.Code != http.StatusOK {
 		t.Fatalf("reloaded settings status = %d", reloaded.Code)
 	}
-	if got := decodeSettings(t, reloaded.Body.Bytes()); got.PollIntervalSeconds != 120 || !got.PushEnabled {
+	if got := decodeSettings(t, reloaded.Body.Bytes()); got.PollIntervalSeconds != 120 ||
+		!got.PushEnabled || got.MonitoringEnabled {
 		t.Fatalf("reloaded settings = %+v", got)
 	}
 

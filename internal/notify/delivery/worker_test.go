@@ -363,6 +363,65 @@ func TestLeaseReclaim(t *testing.T) {
 	}
 }
 
+type testMonitoring struct {
+	enabled bool
+	err     error
+}
+
+func (m testMonitoring) MonitoringEnabled(context.Context) (bool, error) {
+	return m.enabled, m.err
+}
+
+func TestMonitoringOffSkipsAvailabilityButSendsProviderHealth(t *testing.T) {
+	database := newDeliveryDB(t)
+	clock := &testClock{now: workerNow}
+	availability := enqueueAvailability(t, database, false, "monitoring-availability")
+	health := enqueueHealth(t, database, "monitoring-health", notify.ChannelTelegram)
+	telegram := &fakeSender{}
+	worker := workerFor(t, database, clock, map[notify.Channel]delivery.Sender{notify.ChannelTelegram: telegram},
+		func(cfg *delivery.Config) {
+			cfg.Monitoring = testMonitoring{enabled: false}
+			cfg.Concurrency = 2
+		})
+
+	if _, err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, attempts, next, kind, sentAt, _ := deliveryRow(t, database, deliveryID(t, database, availability.EventID))
+	if status != "skipped" || attempts != 1 || next.Valid || kind.String != "monitoring_disabled" || sentAt.Valid {
+		t.Fatalf("availability delivery = %s/%d next=%v kind=%v", status, attempts, next, kind)
+	}
+	status, _, _, kind, sentAt, _ = deliveryRow(t, database, deliveryID(t, database, health.EventID))
+	if status != "sent" || kind.Valid || !sentAt.Valid {
+		t.Fatalf("provider-health delivery = %s/%v sent=%v", status, kind, sentAt.Valid)
+	}
+	if telegram.count() != 1 {
+		t.Fatalf("sender calls = %d, want only the provider-health message", telegram.count())
+	}
+}
+
+func TestMonitoringReadErrorFailsClosedForAvailability(t *testing.T) {
+	database := newDeliveryDB(t)
+	clock := &testClock{now: workerNow}
+	availability := enqueueAvailability(t, database, false, "monitoring-read-error")
+	telegram := &fakeSender{}
+	worker := workerFor(t, database, clock, map[notify.Channel]delivery.Sender{notify.ChannelTelegram: telegram},
+		func(cfg *delivery.Config) {
+			cfg.Monitoring = testMonitoring{enabled: true, err: errors.New("settings unavailable")}
+		})
+
+	if _, err := worker.ProcessOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	status, _, _, kind, _, _ := deliveryRow(t, database, deliveryID(t, database, availability.EventID))
+	if status != "skipped" || kind.String != "monitoring_disabled" {
+		t.Fatalf("delivery = %s/%v", status, kind)
+	}
+	if telegram.count() != 0 {
+		t.Fatalf("sender calls = %d, want 0", telegram.count())
+	}
+}
+
 func TestExpiredMonitorSkipsAvailability(t *testing.T) {
 	database := newDeliveryDB(t)
 	clock := &testClock{now: workerNow}

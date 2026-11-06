@@ -36,6 +36,30 @@ func (p stubProvider) Check(context.Context, provider.CheckRequest) (provider.Re
 	return provider.Result{}, nil
 }
 
+type blockingProvider struct {
+	id      provider.ID
+	started chan struct{}
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (p *blockingProvider) Metadata() provider.Metadata {
+	return provider.Metadata{ID: p.id, DisplayName: "blocking " + string(p.id)}
+}
+
+func (p *blockingProvider) ValidateConfig(provider.MonitorProviderConfig) error { return nil }
+
+func (p *blockingProvider) Check(ctx context.Context, _ provider.CheckRequest) (provider.Result, error) {
+	p.calls.Add(1)
+	close(p.started)
+	select {
+	case <-p.release:
+		return provider.Result{}, nil
+	case <-ctx.Done():
+		return provider.Result{}, ctx.Err()
+	}
+}
+
 func registryFor(t *testing.T, ids ...provider.ID) *provider.Registry {
 	t.Helper()
 	providers := make([]provider.Provider, 0, len(ids))
@@ -53,6 +77,30 @@ type fixedInterval time.Duration
 
 func (f fixedInterval) PollInterval(context.Context) (time.Duration, error) {
 	return time.Duration(f), nil
+}
+
+type fakeMonitoring struct {
+	mu      sync.Mutex
+	enabled bool
+	err     error
+}
+
+func (f *fakeMonitoring) MonitoringEnabled(context.Context) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enabled, f.err
+}
+
+func (f *fakeMonitoring) setEnabled(enabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enabled = enabled
+}
+
+func (f *fakeMonitoring) setError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 type scriptedRandom struct {
@@ -296,6 +344,22 @@ func startSchedulerWithSpacing(
 	grace time.Duration,
 	spacing time.Duration,
 ) *runningScheduler {
+	return startSchedulerWithMonitoring(t, repo, registry, clock, runner, workers, random, wake, grace, spacing, nil)
+}
+
+func startSchedulerWithMonitoring(
+	t *testing.T,
+	repo scheduler.Repository,
+	registry *provider.Registry,
+	clock *fakeClock,
+	runner scheduler.Runner,
+	workers int,
+	random scheduler.Random,
+	wake *scheduler.Waker,
+	grace time.Duration,
+	spacing time.Duration,
+	monitoring scheduler.MonitoringSwitch,
+) *runningScheduler {
 	t.Helper()
 	if random == nil {
 		random = zeroRandom()
@@ -304,6 +368,7 @@ func startSchedulerWithSpacing(
 		Repository:      repo,
 		Providers:       registry,
 		Interval:        fixedInterval(300 * time.Second),
+		Monitoring:      monitoring,
 		Runner:          runner,
 		Workers:         workers,
 		ProviderSpacing: durationPointer(spacing),
@@ -591,6 +656,236 @@ func TestWakeReevaluatesWithoutAdvancingClock(t *testing.T) {
 		t.Fatalf("clock advanced to %v; wake must not depend on the timer", clock.Now())
 	}
 	running.stop(t)
+}
+
+func TestMonitoringOffPreventsDispatchAndResumeStaggers(t *testing.T) {
+	st, _ := newSchedulerStore(t)
+	now := schedulerNow
+	past := now.Add(-time.Minute)
+	monitor := createSchedulerMonitor(t, st, "monitoring", true, now.Add(24*time.Hour),
+		targetSpec{providerID: "fake", active: true, due: &past})
+	targetID := targetIDFor(t, monitor, "fake")
+
+	monitoring := &fakeMonitoring{enabled: false}
+	starts := make(chan scheduler.Target, 2)
+	clock := newFakeClock(now)
+	wake := scheduler.NewWaker()
+	running := startSchedulerWithMonitoring(t, st, registryFor(t, "fake"), clock,
+		runnerFunc(func(_ context.Context, target scheduler.Target) (scheduler.Result, error) {
+			starts <- target
+			return scheduler.Result{Settled: true}, nil
+		}),
+		1, zeroRandom(), wake, time.Second, 0, monitoring)
+
+	assertNoStart(t, starts, 100*time.Millisecond)
+
+	// The global switch does not mutate the individual monitor or its target.
+	reloaded, err := st.GetMonitor(context.Background(), monitor.ID)
+	if err != nil {
+		t.Fatalf("GetMonitor: %v", err)
+	}
+	if !reloaded.Enabled {
+		t.Fatal("global monitoring off changed monitor.enabled")
+	}
+	if reloaded.Providers[0].NextDueAt == nil || !reloaded.Providers[0].NextDueAt.Equal(past) {
+		t.Fatalf("global monitoring off changed next_due_at to %v", reloaded.Providers[0].NextDueAt)
+	}
+
+	monitoring.setEnabled(true)
+	wake.Wake()
+	dispatched := waitStart(t, starts)
+	if dispatched.ID != targetID {
+		t.Fatalf("resumed dispatch target = %d, want %d", dispatched.ID, targetID)
+	}
+
+	// Resume staggering moves the overdue target to the near-term window
+	// instead of leaving it in the past; this prevents an immediate backlog
+	// burst when many targets become eligible together.
+	reloaded, err = st.GetMonitor(context.Background(), monitor.ID)
+	if err != nil {
+		t.Fatalf("GetMonitor after resume: %v", err)
+	}
+	if due := reloaded.Providers[0].NextDueAt; due == nil || due.Before(now) {
+		t.Fatalf("resume did not stagger next_due_at: %v", due)
+	}
+	running.stop(t)
+}
+
+func TestMonitoringOffStillReconcilesExpiry(t *testing.T) {
+	st, _ := newSchedulerStore(t)
+	now := schedulerNow
+	past := now.Add(-time.Minute)
+	expired := createSchedulerMonitor(t, st, "expired-while-off", true, now.Add(-time.Minute),
+		targetSpec{providerID: "fake", active: true, due: &past})
+
+	monitoring := &fakeMonitoring{enabled: false}
+	clock := newFakeClock(now)
+	running := startSchedulerWithMonitoring(t, st, registryFor(t, "fake"), clock,
+		runnerFunc(func(context.Context, scheduler.Target) (scheduler.Result, error) {
+			t.Error("monitoring-off scheduler dispatched a check")
+			return scheduler.Result{Settled: true}, nil
+		}),
+		1, zeroRandom(), scheduler.NewWaker(), time.Second, 0, monitoring)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		reloaded, err := st.GetMonitor(context.Background(), expired.ID)
+		if err != nil {
+			t.Fatalf("GetMonitor: %v", err)
+		}
+		if reloaded.ExpiredAt != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expiry reconciliation did not run while monitoring was off")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	running.stop(t)
+}
+
+func TestCheckStageDoesNotStartProviderIOWhenMonitoringIsOff(t *testing.T) {
+	st, sqlDB := newSchedulerStore(t)
+	now := schedulerNow
+	past := now.Add(-time.Minute)
+	monitor := createSchedulerMonitor(t, st, "off-before-io", true, now.Add(24*time.Hour),
+		targetSpec{providerID: "blocking", active: true, due: &past})
+	targetID := targetIDFor(t, monitor, "blocking")
+
+	providerStub := &blockingProvider{
+		id:      "blocking",
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	registry, err := provider.NewRegistry(providerStub)
+	if err != nil {
+		t.Fatalf("provider.NewRegistry: %v", err)
+	}
+	monitoring := &fakeMonitoring{enabled: false}
+	stage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
+		Repository: st,
+		Providers:  registry,
+		Monitoring: monitoring,
+		Now:        func() time.Time { return now },
+		Logger:     discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewCheckStage: %v", err)
+	}
+	attempt, err := stage.RunCheck(context.Background(), scheduler.Target{
+		ID:            targetID,
+		MonitorID:     monitor.ID,
+		ProviderID:    "blocking",
+		ConfigVersion: 1,
+		NextDueAt:     past,
+	})
+	if err != nil {
+		t.Fatalf("RunCheck: %v", err)
+	}
+	if !attempt.MonitoringDisabled || attempt.CheckRunID != 0 {
+		t.Fatalf("attempt = %+v, want monitoring-disabled with no check run", attempt)
+	}
+	if providerStub.calls.Load() != 0 {
+		t.Fatalf("provider calls = %d, want 0", providerStub.calls.Load())
+	}
+	var count int
+	if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM check_runs`).Scan(&count); err != nil {
+		t.Fatalf("count check runs: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("check_runs count = %d, want 0", count)
+	}
+}
+
+func TestInFlightCheckIsDiscardedWhenMonitoringTurnsOff(t *testing.T) {
+	st, sqlDB := newSchedulerStore(t)
+	now := schedulerNow
+	past := now.Add(-time.Minute)
+	monitor := createSchedulerMonitor(t, st, "off-during-io", true, now.Add(24*time.Hour),
+		targetSpec{providerID: "blocking", active: true, due: &past})
+	targetID := targetIDFor(t, monitor, "blocking")
+
+	providerStub := &blockingProvider{
+		id:      "blocking",
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	registry, err := provider.NewRegistry(providerStub)
+	if err != nil {
+		t.Fatalf("provider.NewRegistry: %v", err)
+	}
+	monitoring := &fakeMonitoring{enabled: true}
+	stage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
+		Repository: st,
+		Providers:  registry,
+		Monitoring: monitoring,
+		Now:        func() time.Time { return now },
+		Logger:     discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewCheckStage: %v", err)
+	}
+	runner, err := scheduler.NewOutcomeRunner(scheduler.OutcomeRunnerConfig{
+		Stage:      stage,
+		Store:      st,
+		Monitoring: monitoring,
+		Now:        func() time.Time { return now },
+		Random:     zeroRandom(),
+		Logger:     discardLogger(),
+	})
+	if err != nil {
+		t.Fatalf("NewOutcomeRunner: %v", err)
+	}
+
+	type outcome struct {
+		result scheduler.Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, runErr := runner.Run(context.Background(), scheduler.Target{
+			ID:            targetID,
+			MonitorID:     monitor.ID,
+			ProviderID:    "blocking",
+			ConfigVersion: 1,
+			NextDueAt:     past,
+		})
+		done <- outcome{result: result, err: runErr}
+	}()
+
+	select {
+	case <-providerStub.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("provider I/O did not start")
+	}
+	monitoring.setEnabled(false)
+	close(providerStub.release)
+	completed := <-done
+	if completed.err != nil {
+		t.Fatalf("runner.Run: %v", completed.err)
+	}
+	if completed.result.Settled {
+		t.Fatal("discarded in-flight check consumed the due generation")
+	}
+
+	var checkOutcome, errorKind string
+	var finishedAt sql.NullString
+	if err := sqlDB.QueryRow(`SELECT outcome, COALESCE(error_kind, ''), finished_at FROM check_runs`).
+		Scan(&checkOutcome, &errorKind, &finishedAt); err != nil {
+		t.Fatalf("load check run: %v", err)
+	}
+	if checkOutcome != "discarded" || errorKind != "monitoring_disabled" || !finishedAt.Valid {
+		t.Fatalf("check run = %s/%s finished=%v, want discarded/monitoring_disabled/finished", checkOutcome, errorKind, finishedAt.Valid)
+	}
+	for _, table := range []string{"inventory_states", "events", "notification_deliveries"} {
+		var count int
+		if err := sqlDB.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&count); err != nil {
+			t.Fatalf("count %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s rows = %d, want 0 after a discarded in-flight check", table, count)
+		}
+	}
 }
 
 func TestRestartStaggerPreservesFutureAndSkipsIneligibleTargets(t *testing.T) {

@@ -64,6 +64,7 @@ type TelegramStatus struct {
 type View struct {
 	PollIntervalSeconds int
 	PushEnabled         bool
+	MonitoringEnabled   bool
 	Telegram            TelegramStatus
 }
 
@@ -71,6 +72,7 @@ type View struct {
 type Update struct {
 	PollIntervalSeconds *int
 	PushEnabled         *bool
+	MonitoringEnabled   *bool
 }
 
 // TestResult reports the persisted post-test settings view and the test
@@ -87,6 +89,7 @@ type Service struct {
 	telegram *telegramsettings.Settings
 	tester   TelegramTester
 	now      func() time.Time
+	wake     func()
 }
 
 // New validates dependencies. Telegram may be nil when no encryption key is
@@ -104,6 +107,18 @@ func New(st *store.Store, telegram *telegramsettings.Settings, tester TelegramTe
 	return &Service{store: st, telegram: telegram, tester: tester, now: now}, nil
 }
 
+// SetWake installs the post-commit scheduler wake hook. It is safe to call
+// after construction because the HTTP server and scheduler share this service.
+func (s *Service) SetWake(wake func()) {
+	if s == nil {
+		return
+	}
+	if wake == nil {
+		wake = func() {}
+	}
+	s.wake = wake
+}
+
 // View returns the current non-secret settings. A missing poll-interval row
 // falls back to the documented default rather than failing the whole view.
 func (s *Service) View(ctx context.Context) (View, error) {
@@ -118,9 +133,14 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	monitoringEnabled, err := s.store.MonitoringEnabled(ctx)
+	if err != nil {
+		return View{}, err
+	}
 	view := View{
 		PollIntervalSeconds: int(interval / time.Second),
 		PushEnabled:         pushEnabled,
+		MonitoringEnabled:   monitoringEnabled,
 	}
 	if s.telegram == nil {
 		return view, nil
@@ -163,7 +183,7 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 	if s == nil || s.store == nil {
 		return View{}, errors.New("settings: not initialized")
 	}
-	if update.PollIntervalSeconds == nil && update.PushEnabled == nil {
+	if update.PollIntervalSeconds == nil && update.PushEnabled == nil && update.MonitoringEnabled == nil {
 		return View{}, &ValidationError{Message: "at least one setting is required"}
 	}
 	var interval time.Duration
@@ -194,10 +214,20 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 				return err
 			}
 		}
+		if update.MonitoringEnabled != nil {
+			if err := tx.SetMonitoringEnabled(ctx, *update.MonitoringEnabled, now); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
 		return View{}, err
+	}
+	// The scheduler must re-evaluate a paused/resumed switch immediately rather
+	// than waiting for its next timer. The hook runs only after commit.
+	if update.MonitoringEnabled != nil && s.wake != nil {
+		s.wake()
 	}
 	return s.View(ctx)
 }
