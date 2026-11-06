@@ -4,7 +4,7 @@ Neda is a single-user, self-hosted train-ticket availability monitor for Iranian
 
 Neda is intentionally **not a booking engine**. It never buys, reserves, or holds a ticket. When a booking link can be built safely, it takes the owner to the provider's site to complete the purchase.
 
-**Status (2026-10-26): local release candidate, not production-deployed.** Core monitoring, scheduling, the private API, the dashboard, persistence, the notification pipeline, and retention are implemented and covered by automated tests. Docker/Compose packaging exists. Real Telegram and browser Push delivery, live production provider checks, and target-host deployment have not been validated. See [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) for the current audit.
+**Status (2026-11-06): local release candidate, not production-deployed.** Core monitoring, scheduling, the private API, the dashboard, persistence, the notification pipeline, and retention are implemented and covered by automated tests. The 2026-11-06 approved enhancements — global monitoring switch, confirmed-unavailability grace period, daily silent Telegram report, and app-wide Add Train Link design consistency — are merged. Docker/Compose packaging exists. Real Telegram and browser Push delivery, live production provider checks, and target-host deployment have not been validated. See [`docs/RELEASE_READINESS.md`](docs/RELEASE_READINESS.md) for the current audit.
 
 ## The problem it solves
 
