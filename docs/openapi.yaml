@@ -28,6 +28,8 @@ tags:
     description: Private monitor CRUD, pause/resume, and detail diagnostics.
   - name: Providers
     description: Registered provider metadata and global provider health.
+  - name: Observability
+    description: Scheduler runtime snapshot, logical provider-check traffic, adaptive throttling, and queue history.
   - name: History
     description: Durable availability/health events and notification delivery history.
   - name: Overview
@@ -508,6 +510,59 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/observability:
+    get:
+      tags: [Observability]
+      summary: Scheduler and logical provider-check telemetry
+      operationId: getObservability
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: Global scheduler state, traffic summary, and provider rows
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservabilityOverview"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /api/v1/observability/providers/{providerId}:
+    get:
+      tags: [Observability]
+      summary: Provider traffic, adaptive state, queue history, and target schedule
+      operationId: getProviderObservability
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: providerId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: window
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [1h, 6h, 24h, 7d]
+            default: 24h
+      responses:
+        "200":
+          description: Provider observability detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObservabilityProviderDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
   /api/v1/overview:
@@ -1867,6 +1922,569 @@ components:
           type: array
           items:
             type: string
+    ObservabilityOverview:
+      type: object
+      required: [generatedAt, coverage, scheduling, scheduler, trafficSummary, providers]
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        coverage:
+          $ref: "#/components/schemas/ObservabilityCoverage"
+        scheduling:
+          $ref: "#/components/schemas/ObservabilityScheduling"
+        scheduler:
+          $ref: "#/components/schemas/ObservabilityScheduler"
+        trafficSummary:
+          $ref: "#/components/schemas/ObservabilityTrafficSummary"
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ObservabilityProvider"
+    ObservabilityCoverage:
+      type: object
+      required: [checkDetailDays, rollupDays, rateLimitHistoryDays]
+      properties:
+        checkDetailDays:
+          type: integer
+        rollupDays:
+          type: integer
+        rateLimitHistoryDays:
+          type: integer
+    ObservabilityScheduling:
+      type: object
+      required: [intervalScope, configuredIntervalSeconds, providerSpacingSeconds, queueSampleIntervalSeconds, workers]
+      properties:
+        intervalScope:
+          type: string
+          enum: [global]
+          description: The configured polling interval is global; adaptive/effective intervals are provider-level.
+        configuredIntervalSeconds:
+          type: integer
+          format: int64
+        providerSpacingSeconds:
+          type: integer
+          format: int64
+        queueSampleIntervalSeconds:
+          type: integer
+          format: int64
+          description: Maximum cadence for durable point-in-time queue samples.
+        workers:
+          type: integer
+    ObservabilityScheduler:
+      type: object
+      required: [available, running, stopped, monitoringEnabled, paused, dueTargets, overdueTargets, queuedTargets, deferredTargets, inFlightTargets, stale, activeCooldowns, degradedProviders, incompleteChecks, rateLimitEventsDropped]
+      properties:
+        available:
+          type: boolean
+        running:
+          type: boolean
+        stopped:
+          type: boolean
+          description: True after a graceful scheduler stop. Last queue values remain visible.
+        monitoringEnabled:
+          type: boolean
+        paused:
+          type: boolean
+        lastExecutionAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastDispatchAt:
+          type: string
+          format: date-time
+          nullable: true
+        dueTargets:
+          type: integer
+        overdueTargets:
+          type: integer
+        queuedTargets:
+          type: integer
+        deferredTargets:
+          type: integer
+        inFlightTargets:
+          type: integer
+        nextEligibleDispatchAt:
+          type: string
+          format: date-time
+          nullable: true
+        sampledAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last scheduler pass or heartbeat.
+        stale:
+          type: boolean
+        activeCooldowns:
+          type: integer
+        degradedProviders:
+          type: integer
+        incompleteChecks:
+          type: integer
+          format: int64
+          description: Crash-abandoned attempts with no durable provider-request marker in the last 24h. Never counted as success or ordinary failure.
+        rateLimitEventsDropped:
+          type: integer
+          format: int64
+        lastErrorKind:
+          type: string
+    ObservabilityTrafficSummary:
+      type: object
+      required: [windowSeconds, providerChecks, successes, failures, discarded, rateLimitedChecks, interrupted, incomplete, p95Method, dispatchAttempts, recorded7d, recordedWindowDays, historyAvailable]
+      properties:
+        windowSeconds:
+          type: integer
+          format: int64
+        providerChecks:
+          type: integer
+          format: int64
+          description: Completed logical adapter.Check calls, not HTTP requests.
+        successes:
+          type: integer
+          format: int64
+        failures:
+          type: integer
+          format: int64
+        discarded:
+          type: integer
+          format: int64
+        rateLimitedChecks:
+          type: integer
+          format: int64
+        interrupted:
+          type: integer
+          format: int64
+        incomplete:
+          type: integer
+          format: int64
+        successRate:
+          type: number
+          format: double
+          nullable: true
+          description: successes / (successes + failures). Interrupted and discarded checks are excluded.
+        averageDurationMs:
+          type: integer
+          format: int64
+          nullable: true
+        p95DurationMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Nearest-rank P95 upper bound from disjoint buckets. Null when empty or when P95 falls in the open overflow bucket (>20000ms).
+        p95Method:
+          type: string
+          enum: [disjoint_histogram_upper_bound]
+        dispatchAttempts:
+          type: integer
+          format: int64
+        recorded7d:
+          type: integer
+          format: int64
+        recordedWindowDays:
+          type: integer
+        historyAvailable:
+          type: boolean
+    ObservabilityProvider:
+      type: object
+      required: [id, displayName, testOnly, healthState, healthReasons, flags, activeTargets, consecutiveFailures, openEpisode, adaptive, providerChecks]
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        testOnly:
+          type: boolean
+        healthState:
+          type: string
+          enum: [healthy, degraded, rate_limited, cooling_down, recovering, idle, unknown]
+        healthReasons:
+          type: array
+          items:
+            type: string
+        flags:
+          $ref: "#/components/schemas/ObservabilityFlags"
+        activeTargets:
+          type: integer
+        lastProviderCheckAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastFailureAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastErrorKind:
+          type: string
+        consecutiveFailures:
+          type: integer
+        openEpisode:
+          type: boolean
+        adaptive:
+          $ref: "#/components/schemas/ObservabilityAdaptive"
+        providerChecks:
+          $ref: "#/components/schemas/ObservabilityChecks"
+        queue:
+          allOf:
+            - $ref: "#/components/schemas/ObservabilityQueue"
+          nullable: true
+    ObservabilityFlags:
+      type: object
+      required: [degraded, stale, rateLimited, coolingDown, recovering, idle, unknown]
+      properties:
+        degraded:
+          type: boolean
+        stale:
+          type: boolean
+          description: Secondary qualifier; may accompany any primary state. Computed with the documented effective-interval/next-due/cooldown formula.
+        rateLimited:
+          type: boolean
+        coolingDown:
+          type: boolean
+        recovering:
+          type: boolean
+        idle:
+          type: boolean
+        unknown:
+          type: boolean
+    ObservabilityAdaptive:
+      type: object
+      required: [level, adaptiveIntervalSeconds, effectiveIntervalSeconds, recoverySuccesses, requiredSuccesses, remainingSuccesses, cooldown, historyCompleteness, historyAvailable]
+      properties:
+        level:
+          type: integer
+        adaptiveIntervalSeconds:
+          type: integer
+          format: int64
+        effectiveIntervalSeconds:
+          type: integer
+          format: int64
+        recoverySuccesses:
+          type: integer
+        requiredSuccesses:
+          type: integer
+        remainingSuccesses:
+          type: integer
+        cooldown:
+          type: object
+          required: [status, remainingSeconds]
+          properties:
+            status:
+              type: string
+              enum: [none, active, expired]
+            until:
+              type: string
+              format: date-time
+              nullable: true
+            remainingSeconds:
+              type: integer
+              format: int64
+        last429At:
+          type: string
+          format: date-time
+          nullable: true
+        lastSuccessAt:
+          type: string
+          format: date-time
+          nullable: true
+        historyCompleteness:
+          type: string
+          enum: [best_effort]
+        historyAvailable:
+          type: boolean
+    ObservabilityChecks:
+      type: object
+      required: [last1m, last5m, last15m, last1h, last24h, successes24h, failures24h, discarded24h, rateLimitedChecks24h, interrupted24h, incomplete24h, recorded7d, p95Method]
+      properties:
+        last1m:
+          type: integer
+          format: int64
+        last5m:
+          type: integer
+          format: int64
+        last15m:
+          type: integer
+          format: int64
+        last1h:
+          type: integer
+          format: int64
+        last24h:
+          type: integer
+          format: int64
+        successes24h:
+          type: integer
+          format: int64
+        failures24h:
+          type: integer
+          format: int64
+        discarded24h:
+          type: integer
+          format: int64
+        rateLimitedChecks24h:
+          type: integer
+          format: int64
+        interrupted24h:
+          type: integer
+          format: int64
+        incomplete24h:
+          type: integer
+          format: int64
+        recorded7d:
+          type: integer
+          format: int64
+        successRate:
+          type: number
+          format: double
+          nullable: true
+        averageDurationMs:
+          type: integer
+          format: int64
+          nullable: true
+        p95DurationMs:
+          type: integer
+          format: int64
+          nullable: true
+        p95Method:
+          type: string
+          enum: [disjoint_histogram_upper_bound]
+    ObservabilityQueue:
+      type: object
+      required: [available, stale, sampleIntervalSeconds, aggregation, due, inFlight, queued, overdue, deferred, deferredByCooldown, deferredBySpacing, deferredByConcurrency, blockedByConcurrency]
+      properties:
+        available:
+          type: boolean
+        sampledAt:
+          type: string
+          format: date-time
+          nullable: true
+        stale:
+          type: boolean
+        sampleIntervalSeconds:
+          type: integer
+          format: int64
+        aggregation:
+          type: string
+          enum: [sampled_point_in_time]
+          description: Point-in-time samples. Avg values are arithmetic means over available samples, not time-weighted measurements.
+        due:
+          type: integer
+        inFlight:
+          type: integer
+        queued:
+          type: integer
+        overdue:
+          type: integer
+        deferred:
+          type: integer
+        deferredByCooldown:
+          type: integer
+        deferredBySpacing:
+          type: integer
+        deferredByConcurrency:
+          type: integer
+        oldestPendingAgeSeconds:
+          type: integer
+          format: int64
+          nullable: true
+        nextEligibleAt:
+          type: string
+          format: date-time
+          nullable: true
+        blockedByConcurrency:
+          type: boolean
+    ObservabilityTrafficPoint:
+      type: object
+      required: [bucketStart, providerChecks, successes, failures, discarded, rateLimitedChecks, interrupted, incomplete]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+        providerChecks:
+          type: integer
+          format: int64
+        successes:
+          type: integer
+          format: int64
+        failures:
+          type: integer
+          format: int64
+        discarded:
+          type: integer
+          format: int64
+        rateLimitedChecks:
+          type: integer
+          format: int64
+        interrupted:
+          type: integer
+          format: int64
+        incomplete:
+          type: integer
+          format: int64
+        averageDurationMs:
+          type: integer
+          format: int64
+          nullable: true
+        p95DurationMs:
+          type: integer
+          format: int64
+          nullable: true
+    ObservabilityQueuePoint:
+      type: object
+      required: [bucketStart, dueAvg, dueMax, overdueMax, deferredAvg, deferredMax, inFlightMax, oldestDueAgeMaxMs, dispatchAttempts, deferralEpisodesCooldown, deferralEpisodesSpacing, deferralEpisodesConcurrency]
+      properties:
+        bucketStart:
+          type: string
+          format: date-time
+        dueAvg:
+          type: integer
+          format: int64
+        dueMax:
+          type: integer
+          format: int64
+        overdueMax:
+          type: integer
+          format: int64
+        deferredAvg:
+          type: integer
+          format: int64
+        deferredMax:
+          type: integer
+          format: int64
+        inFlightMax:
+          type: integer
+          format: int64
+        oldestDueAgeMaxMs:
+          type: integer
+          format: int64
+        dispatchAttempts:
+          type: integer
+          format: int64
+        deferralEpisodesCooldown:
+          type: integer
+          format: int64
+        deferralEpisodesSpacing:
+          type: integer
+          format: int64
+        deferralEpisodesConcurrency:
+          type: integer
+          format: int64
+    ObservabilityRateLimitEvent:
+      type: object
+      required: [occurredAt, kind, previousLevel, escalationLevel, escalated, maintained, previousAdaptiveMs, adaptiveMs, retryAfterMs, derived]
+      properties:
+        occurredAt:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum: [rate_limited, cooldown_extended, recovery_progress, recovery_step, recovered]
+          description: rate_limited covers every observed logical 429; escalated vs maintained is derived from previousLevel/escalationLevel.
+        previousLevel:
+          type: integer
+        escalationLevel:
+          type: integer
+        escalated:
+          type: boolean
+        maintained:
+          type: boolean
+        previousAdaptiveMs:
+          type: integer
+          format: int64
+        adaptiveMs:
+          type: integer
+          format: int64
+        previousCooldownUntil:
+          type: string
+          format: date-time
+          nullable: true
+        cooldownUntil:
+          type: string
+          format: date-time
+          nullable: true
+        retryAfterMs:
+          type: integer
+          format: int64
+        derived:
+          type: boolean
+    ObservabilityCheckActivity:
+      type: object
+      required: [occurredAt, outcome, durationMs, queueWaitMs, monitorId, monitorLabel, incomplete]
+      properties:
+        occurredAt:
+          type: string
+          format: date-time
+        outcome:
+          type: string
+          enum: [success, empty, error, discarded, abandoned]
+        providerErrorKind:
+          type: string
+        durationMs:
+          type: integer
+          format: int64
+          nullable: true
+        queueWaitMs:
+          type: integer
+          format: int64
+          nullable: true
+        monitorId:
+          type: string
+        monitorLabel:
+          type: string
+        incomplete:
+          type: boolean
+          description: Crash-abandoned attempt with no durable provider-request marker.
+    ObservabilityTarget:
+      type: object
+      required: [monitorId, monitorLabel, consecutiveFailures, queueState]
+      properties:
+        monitorId:
+          type: string
+        monitorLabel:
+          type: string
+        nextDueAt:
+          type: string
+          format: date-time
+          nullable: true
+        consecutiveFailures:
+          type: integer
+        lastOutcome:
+          type: string
+        lastErrorKind:
+          type: string
+        queueState:
+          type: string
+    ObservabilityProviderDetail:
+      allOf:
+        - $ref: "#/components/schemas/ObservabilityProvider"
+        - type: object
+          required: [windowSeconds, trafficHistory, queueHistory, rateLimitEvents, recentChecks, targets]
+          properties:
+            windowSeconds:
+              type: integer
+              format: int64
+            trafficHistory:
+              type: array
+              items:
+                $ref: "#/components/schemas/ObservabilityTrafficPoint"
+            queueHistory:
+              type: array
+              items:
+                $ref: "#/components/schemas/ObservabilityQueuePoint"
+            rateLimitEvents:
+              type: array
+              items:
+                $ref: "#/components/schemas/ObservabilityRateLimitEvent"
+            recentChecks:
+              type: array
+              items:
+                $ref: "#/components/schemas/ObservabilityCheckActivity"
+            targets:
+              type: array
+              items:
+                $ref: "#/components/schemas/ObservabilityTarget"
     OverviewResponse:
       type: object
       required: [generatedAt, monitors, providers, deliveries, recentEvents, recentDeliveries]

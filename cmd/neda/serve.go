@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/am-fallah/neda/internal/notify"
 	notifydelivery "github.com/am-fallah/neda/internal/notify/delivery"
 	"github.com/am-fallah/neda/internal/notify/telegramsettings"
+	"github.com/am-fallah/neda/internal/observability"
 	"github.com/am-fallah/neda/internal/provider"
 	"github.com/am-fallah/neda/internal/provider/fake"
 	"github.com/am-fallah/neda/internal/provider/mrbilit"
@@ -108,6 +110,22 @@ func runServe(stdout, stderr io.Writer) int {
 	logger.Info("database ready", "migrations", applied)
 
 	appStore := store.New(database.DB)
+
+	// Dashboard observability uses a second query-only handle. It is optional:
+	// if it cannot open, the application keeps monitoring and the dashboard
+	// reports observability as unavailable. It must never fall back to the
+	// scheduler's writer handle.
+	var observabilityStore *store.Store
+	if readDB, err := db.OpenReadOnly(ctx, cfg.DBPath); err != nil {
+		logger.Warn("observability read store unavailable; dashboard metrics disabled", "code", "observability_read_store_failed")
+	} else {
+		observabilityStore = store.New(readDB)
+		defer func() {
+			if err := readDB.Close(); err != nil {
+				logger.Warn("observability read store close failed", "code", "observability_close_failed")
+			}
+		}()
+	}
 
 	// Check persisted provider references before seeding any settings so a
 	// production coverage failure does not write defaults to the database.
@@ -233,6 +251,8 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("monitor service initialization failed", "error", err)
 		return 1
 	}
+	telemetryRecorder := observability.NewRecorder()
+	rateLimitEvents := observability.NewEventWriter(appStore, logger)
 	checkStage, err := scheduler.NewCheckStage(scheduler.CheckStageConfig{
 		Repository: appStore,
 		Providers:  providerRegistry,
@@ -247,11 +267,12 @@ func runServe(stdout, stderr io.Writer) int {
 	// destinations remain owned by PSH-002/PSH-004. The runner still commits
 	// events atomically even when no delivery destination is configured.
 	outcomeRunner, err := scheduler.NewOutcomeRunner(scheduler.OutcomeRunnerConfig{
-		Stage:      checkStage,
-		Store:      appStore,
-		Monitoring: appStore,
-		Deliveries: deliverySource,
-		Logger:     logger,
+		Stage:           checkStage,
+		Store:           appStore,
+		Monitoring:      appStore,
+		Deliveries:      deliverySource,
+		Logger:          logger,
+		RateLimitEvents: rateLimitEvents,
 	})
 	if err != nil {
 		logger.Error("outcome runner initialization failed", "error", err)
@@ -266,6 +287,7 @@ func runServe(stdout, stderr io.Writer) int {
 		Workers:    cfg.Workers,
 		Wake:       waker.C(),
 		Logger:     logger,
+		Recorder:   telemetryRecorder,
 	})
 	if err != nil {
 		logger.Error("scheduler initialization failed", "error", err)
@@ -343,18 +365,21 @@ func runServe(stdout, stderr io.Writer) int {
 
 	webHandler := webui.New(webassets.Dist())
 	server := httpapi.New(httpapi.Config{
-		Addr:       cfg.HTTPAddr,
-		Production: cfg.IsProduction(),
-		PublicURL:  cfg.PublicURL,
-		Auth:       authManager,
-		LoginGuard: loginGuard,
-		Monitors:   monitorService,
-		Settings:   settingsService,
-		Store:      appStore,
-		Providers:  providerRegistry,
-		Push:       pushService,
-		PushTester: pushSender,
-		WebUI:      webHandler,
+		Addr:                   cfg.HTTPAddr,
+		Production:             cfg.IsProduction(),
+		PublicURL:              cfg.PublicURL,
+		Auth:                   authManager,
+		LoginGuard:             loginGuard,
+		Monitors:               monitorService,
+		Settings:               settingsService,
+		Store:                  appStore,
+		Providers:              providerRegistry,
+		Push:                   pushService,
+		PushTester:             pushSender,
+		Observability:          observabilityStore,
+		SchedulerSnapshot:      telemetryRecorder.Snapshot,
+		RateLimitEventsDropped: rateLimitEvents.Dropped,
+		WebUI:                  webHandler,
 	}, logger, database, applied)
 	if !webHandler.Built() {
 		logger.Warn("frontend assets are not embedded; serving API only (run npm run build in web/)")
@@ -362,6 +387,34 @@ func runServe(stdout, stderr io.Writer) int {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	var telemetryWG sync.WaitGroup
+	telemetryWG.Add(1)
+	go func() {
+		defer telemetryWG.Done()
+		_ = rateLimitEvents.Run(runCtx)
+	}()
+	// The dashboard read handle is preferred, but the background aggregator may
+	// read through the writer handle if the optional read-only handle could not
+	// open. The HTTP layer never receives the writer handle.
+	aggregatorReadStore := observabilityStore
+	if aggregatorReadStore == nil {
+		aggregatorReadStore = appStore
+	}
+	aggregator := observability.NewAggregator(observability.AggregatorConfig{
+		ReadStore:  aggregatorReadStore,
+		WriteStore: appStore,
+		Recorder:   telemetryRecorder,
+		Logger:     logger,
+	})
+	if err := aggregator.Restore(runCtx); err != nil {
+		logger.Warn("observability deferral restore failed; active episodes may be recounted", "code", "deferral_restore_failed")
+	}
+	telemetryWG.Add(1)
+	go func() {
+		defer telemetryWG.Done()
+		_ = aggregator.Run(runCtx)
+	}()
 
 	retentionWorker, err := retention.New(database.DB, retention.Config{Logger: logger})
 	if err != nil {
@@ -398,6 +451,7 @@ func runServe(stdout, stderr io.Writer) int {
 	schedErr := sched.Run(runCtx)
 	unexpectedStop := schedErr == nil && runCtx.Err() == nil
 	cancel()
+	telemetryWG.Wait()
 	<-retentionDone
 	serverRunErr := <-serverErr
 	var deliveryRunErr error

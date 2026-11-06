@@ -36,6 +36,16 @@ const MonitorEditPage = lazy(() =>
     default: module.MonitorEditPage,
   })),
 );
+const ProvidersPage = lazy(() =>
+  import("@/pages/ProvidersPage").then((module) => ({
+    default: module.ProvidersPage,
+  })),
+);
+const ProviderDetailPage = lazy(() =>
+  import("@/pages/ProviderDetailPage").then((module) => ({
+    default: module.ProviderDetailPage,
+  })),
+);
 const HistoryPage = lazy(() =>
   import("@/pages/HistoryPage").then((module) => ({
     default: module.HistoryPage,
@@ -133,6 +143,8 @@ export function App() {
                       path="monitors/:id/edit"
                       element={<MonitorEditPage />}
                     />
+                    <Route path="providers" element={<ProvidersPage />} />
+                    <Route path="providers/:id" element={<ProviderDetailPage />} />
                     <Route path="events" element={<HistoryPage />} />
                     <Route path="events/:id" element={<EventDetailPage />} />
                     <Route path="settings" element={<SettingsPage />} />

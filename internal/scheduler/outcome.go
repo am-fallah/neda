@@ -27,17 +27,25 @@ const outcomeFinalizeTimeout = 5 * time.Second
 // is never committed with a partially resolved outbox.
 type DeliverySource func(ctx context.Context, tx *sql.Tx) ([]notify.Delivery, error)
 
+// RateLimitEventSink receives best-effort adaptive/cooldown transition events
+// after the outcome transaction commits. Implementations must be non-blocking;
+// failures must never affect the outcome.
+type RateLimitEventSink interface {
+	RecordRateLimitEvent(event store.ProviderRateLimitEvent)
+}
+
 // OutcomeRunnerConfig controls the SCH-010 per-check outcome orchestrator.
 type OutcomeRunnerConfig struct {
-	Stage      *CheckStage
-	Store      *store.Store
-	Monitoring MonitoringSwitch
-	Deliveries DeliverySource
-	Wake       func()
-	Now        func() time.Time
-	Random     Random
-	Adaptive   AdaptivePolicy
-	Logger     *slog.Logger
+	Stage           *CheckStage
+	Store           *store.Store
+	Monitoring      MonitoringSwitch
+	Deliveries      DeliverySource
+	Wake            func()
+	Now             func() time.Time
+	Random          Random
+	Adaptive        AdaptivePolicy
+	Logger          *slog.Logger
+	RateLimitEvents RateLimitEventSink
 }
 
 // OutcomeRunner composes the SCH-004 check stage with the caller-owned
@@ -45,15 +53,16 @@ type OutcomeRunnerConfig struct {
 // scheduler loop itself still never interprets provider results or writes
 // state.
 type OutcomeRunner struct {
-	stage      *CheckStage
-	store      *store.Store
-	monitoring MonitoringSwitch
-	deliveries DeliverySource
-	wake       func()
-	now        func() time.Time
-	random     Random
-	adaptive   AdaptivePolicy
-	logger     *slog.Logger
+	stage           *CheckStage
+	store           *store.Store
+	monitoring      MonitoringSwitch
+	deliveries      DeliverySource
+	wake            func()
+	now             func() time.Time
+	random          Random
+	adaptive        AdaptivePolicy
+	logger          *slog.Logger
+	rateLimitEvents RateLimitEventSink
 }
 
 var _ Runner = (*OutcomeRunner)(nil)
@@ -107,15 +116,16 @@ func NewOutcomeRunner(cfg OutcomeRunnerConfig) (*OutcomeRunner, error) {
 		return nil, errors.New("scheduler: adaptive max escalations must not be negative")
 	}
 	return &OutcomeRunner{
-		stage:      cfg.Stage,
-		store:      cfg.Store,
-		monitoring: cfg.Monitoring,
-		deliveries: cfg.Deliveries,
-		wake:       cfg.Wake,
-		now:        cfg.Now,
-		random:     cfg.Random,
-		adaptive:   cfg.Adaptive,
-		logger:     cfg.Logger,
+		stage:           cfg.Stage,
+		store:           cfg.Store,
+		monitoring:      cfg.Monitoring,
+		deliveries:      cfg.Deliveries,
+		wake:            cfg.Wake,
+		now:             cfg.Now,
+		random:          cfg.Random,
+		adaptive:        cfg.Adaptive,
+		logger:          cfg.Logger,
+		rateLimitEvents: cfg.RateLimitEvents,
 	}, nil
 }
 
@@ -341,6 +351,7 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	}
 	if limitChange != nil {
 		r.logRateLimitChange(attempt, "recovered", *limitChange, limitSnapshot)
+		r.emitRateLimitSuccessEvent(attempt, *limitChange, limitSnapshot)
 	}
 	if len(events) > 0 && hasOutbox {
 		r.wake()
@@ -454,6 +465,7 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	}
 	if limitChange != nil {
 		r.logRateLimitChange(attempt, "escalated", *limitChange, limitSnapshot)
+		r.emitRateLimit429Event(attempt, *limitChange, limitSnapshot)
 	}
 	if len(events) > 0 && hasOutbox {
 		r.wake()
@@ -550,6 +562,7 @@ func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAtte
 	}
 	if limitChange != nil {
 		r.logRateLimitChange(attempt, "escalated", *limitChange, limitSnapshot)
+		r.emitRateLimit429Event(attempt, *limitChange, limitSnapshot)
 	}
 	r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 	return Result{Settled: false}, nil
@@ -582,6 +595,14 @@ func (r *OutcomeRunner) finalizeCheckTx(
 		NotReservableCount: counts.notReservable,
 		UnknownCount:       counts.unknown,
 		WarningCount:       counts.warnings,
+		ProviderRequest:    attempt.ProviderRequest,
+		ProviderStartedAt:  attempt.ProviderStartedAt,
+		ProviderDuration:   attempt.ProviderDuration,
+		ProviderErrorKind:  string(attempt.ProviderErrorKind),
+		QueueWait:          attempt.QueueWait,
+		ExpectedSpacing:    attempt.ExpectedSpacing,
+		ConfiguredInterval: attempt.ConfiguredInterval,
+		AdaptiveInterval:   attempt.AdaptiveInterval,
 	})
 }
 
@@ -607,11 +628,66 @@ func (r *OutcomeRunner) logOutcomeCommitted(attempt CheckAttempt, outcome string
 	)
 }
 
+func (r *OutcomeRunner) emitRateLimit429Event(attempt CheckAttempt, change RateLimitChange, state domain.ProviderRateLimit) {
+	// Every observed logical 429 is recorded. The previous/current levels make
+	// escalation versus maintenance explicit without labeling every 429 as an
+	// escalation.
+	r.emitRateLimitEvent(attempt, store.RateLimitEventRateLimited, change, state)
+	if change.CooldownExtended {
+		r.emitRateLimitEvent(attempt, store.RateLimitEventCooldownExtended, change, state)
+	}
+}
+
+func (r *OutcomeRunner) emitRateLimitSuccessEvent(attempt CheckAttempt, change RateLimitChange, state domain.ProviderRateLimit) {
+	switch {
+	case change.FullyRecovered:
+		r.emitRateLimitEvent(attempt, store.RateLimitEventRecovered, change, state)
+	case change.Recovered:
+		r.emitRateLimitEvent(attempt, store.RateLimitEventRecoveryStep, change, state)
+	case change.RecoveryProgress:
+		r.emitRateLimitEvent(attempt, store.RateLimitEventRecoveryProgress, change, state)
+	}
+}
+
+func (r *OutcomeRunner) emitRateLimitEvent(attempt CheckAttempt, kind string, change RateLimitChange, state domain.ProviderRateLimit) {
+	if r.rateLimitEvents == nil {
+		return
+	}
+	scope := state.Scope
+	if scope == "" {
+		scope = domain.ProviderRateLimitScopeProvider
+	}
+	occurredAt := r.now().UTC()
+	event := store.ProviderRateLimitEvent{
+		ProviderID:            attempt.ProviderID,
+		Scope:                 scope,
+		OccurredAt:            occurredAt,
+		Kind:                  kind,
+		PreviousLevel:         change.PreviousLevel,
+		EscalationLevel:       change.Level,
+		PreviousAdaptive:      change.PreviousInterval,
+		Adaptive:              change.NewInterval,
+		PreviousCooldownUntil: change.PreviousCooldownUntil,
+		CooldownUntil:         state.CooldownUntil,
+		RetryAfter:            change.RetryAfter,
+		CreatedAt:             occurredAt,
+	}
+	if attempt.CheckRunID > 0 {
+		checkRunID := attempt.CheckRunID
+		event.CheckRunID = &checkRunID
+	}
+	func() {
+		defer func() { _ = recover() }()
+		r.rateLimitEvents.RecordRateLimitEvent(event)
+	}()
+}
+
 func (r *OutcomeRunner) logRateLimitChange(attempt CheckAttempt, action string, change RateLimitChange, state domain.ProviderRateLimit) {
 	cooldown := ""
 	if state.CooldownUntil != nil {
 		cooldown = state.CooldownUntil.UTC().Format(time.RFC3339)
 	}
+	action = rateLimitAction(change)
 	message := "provider rate limit " + action
 	r.logger.Info(message,
 		"provider_id", string(attempt.ProviderID),
@@ -622,6 +698,21 @@ func (r *OutcomeRunner) logRateLimitChange(attempt CheckAttempt, action string, 
 		"retry_after", change.RetryAfter.String(),
 		"cooldown_until", cooldown,
 	)
+}
+
+func rateLimitAction(change RateLimitChange) string {
+	switch {
+	case change.FullyRecovered:
+		return "recovered"
+	case change.Recovered:
+		return "recovery_step"
+	case change.RecoveryProgress:
+		return "recovery_progress"
+	case change.Escalated:
+		return "escalated"
+	default:
+		return "maintained"
+	}
 }
 
 func (r *OutcomeRunner) logOutcomeError(message string, attempt CheckAttempt, code string) {

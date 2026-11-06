@@ -589,6 +589,9 @@ function ProviderHealthSection({
           <p className="text-xs text-muted-foreground">
             Provider health is independent of ticket availability.
           </p>
+          <Button asChild variant="link" size="sm" className="h-auto w-fit p-0">
+            <Link to="/providers">Open provider monitoring</Link>
+          </Button>
         </>
       )}
     </section>

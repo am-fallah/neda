@@ -284,6 +284,247 @@ export interface ProviderListResponse {
   providers: ProviderInfo[];
 }
 
+export type ObservabilityProviderState =
+  | "healthy"
+  | "degraded"
+  | "rate_limited"
+  | "cooling_down"
+  | "recovering"
+  | "idle"
+  | "unknown";
+
+export interface ObservabilityFlags {
+  degraded: boolean;
+  stale: boolean;
+  rateLimited: boolean;
+  coolingDown: boolean;
+  recovering: boolean;
+  idle: boolean;
+  unknown: boolean;
+}
+
+export interface ObservabilityCooldown {
+  status: "none" | "active" | "expired";
+  until: string | null;
+  remainingSeconds: number;
+}
+
+export interface ObservabilityAdaptive {
+  level: number;
+  adaptiveIntervalSeconds: number;
+  effectiveIntervalSeconds: number;
+  recoverySuccesses: number;
+  requiredSuccesses: number;
+  remainingSuccesses: number;
+  cooldown: ObservabilityCooldown;
+  last429At: string | null;
+  lastSuccessAt: string | null;
+  historyCompleteness: "best_effort" | "degraded" | "unavailable";
+  historyAvailable: boolean;
+}
+
+export interface ObservabilityChecks {
+  last1m: number;
+  last5m: number;
+  last15m: number;
+  last1h: number;
+  last24h: number;
+  successes24h: number;
+  failures24h: number;
+  discarded24h: number;
+  rateLimitedChecks24h: number;
+  interrupted24h: number;
+  incomplete24h: number;
+  recorded7d: number;
+  successRate: number | null;
+  averageDurationMs: number | null;
+  p95DurationMs: number | null;
+  p95Method: string;
+}
+
+export interface ObservabilityQueue {
+  available: boolean;
+  sampledAt: string | null;
+  stale: boolean;
+  sampleIntervalSeconds: number;
+  aggregation: "sampled_point_in_time";
+  due: number;
+  inFlight: number;
+  queued: number;
+  overdue: number;
+  deferred: number;
+  deferredByCooldown: number;
+  deferredBySpacing: number;
+  deferredByConcurrency: number;
+  oldestPendingAgeSeconds: number | null;
+  nextEligibleAt: string | null;
+  blockedByConcurrency: boolean;
+}
+
+export interface ObservabilityProvider {
+  id: string;
+  displayName: string;
+  testOnly: boolean;
+  healthState: ObservabilityProviderState;
+  healthReasons: string[];
+  flags: ObservabilityFlags;
+  activeTargets: number;
+  lastProviderCheckAt: string | null;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  lastErrorKind?: string;
+  consecutiveFailures: number;
+  openEpisode: boolean;
+  adaptive: ObservabilityAdaptive;
+  providerChecks: ObservabilityChecks;
+  queue: ObservabilityQueue | null;
+}
+
+export interface ObservabilityScheduler {
+  available: boolean;
+  running: boolean;
+  stopped: boolean;
+  monitoringEnabled: boolean;
+  paused: boolean;
+  lastExecutionAt: string | null;
+  lastDispatchAt: string | null;
+  dueTargets: number;
+  overdueTargets: number;
+  queuedTargets: number;
+  deferredTargets: number;
+  inFlightTargets: number;
+  nextEligibleDispatchAt: string | null;
+  sampledAt: string | null;
+  stale: boolean;
+  activeCooldowns: number;
+  degradedProviders: number;
+  incompleteChecks: number;
+  rateLimitEventsDropped: number;
+  lastErrorKind?: string;
+}
+
+export interface ObservabilityScheduling {
+  intervalScope: "global";
+  configuredIntervalSeconds: number;
+  providerSpacingSeconds: number;
+  queueSampleIntervalSeconds: number;
+  workers: number;
+}
+
+export interface ObservabilityTrafficSummary {
+  windowSeconds: number;
+  providerChecks: number;
+  successes: number;
+  failures: number;
+  discarded: number;
+  rateLimitedChecks: number;
+  interrupted: number;
+  incomplete: number;
+  successRate: number | null;
+  averageDurationMs: number | null;
+  p95DurationMs: number | null;
+  p95Method: string;
+  dispatchAttempts: number;
+  recorded7d: number;
+  recordedWindowDays: number;
+  historyAvailable: boolean;
+}
+
+export interface ObservabilityCoverage {
+  checkDetailDays: number;
+  rollupDays: number;
+  rateLimitHistoryDays: number;
+}
+
+export interface ObservabilityOverview {
+  generatedAt: string;
+  coverage: ObservabilityCoverage;
+  scheduling: ObservabilityScheduling;
+  scheduler: ObservabilityScheduler;
+  trafficSummary: ObservabilityTrafficSummary;
+  providers: ObservabilityProvider[];
+}
+
+export interface ObservabilityTrafficPoint {
+  bucketStart: string;
+  providerChecks: number;
+  successes: number;
+  failures: number;
+  discarded: number;
+  rateLimitedChecks: number;
+  interrupted: number;
+  incomplete: number;
+  averageDurationMs: number | null;
+  p95DurationMs: number | null;
+}
+
+export interface ObservabilityQueuePoint {
+  bucketStart: string;
+  dueAvg: number;
+  dueMax: number;
+  overdueMax: number;
+  deferredAvg: number;
+  deferredMax: number;
+  inFlightMax: number;
+  oldestDueAgeMaxMs: number;
+  dispatchAttempts: number;
+  deferralEpisodesCooldown: number;
+  deferralEpisodesSpacing: number;
+  deferralEpisodesConcurrency: number;
+}
+
+export type ObservabilityRateLimitEventKind =
+  | "rate_limited"
+  | "cooldown_extended"
+  | "recovery_progress"
+  | "recovery_step"
+  | "recovered";
+
+export interface ObservabilityRateLimitEvent {
+  occurredAt: string;
+  kind: ObservabilityRateLimitEventKind;
+  previousLevel: number;
+  escalationLevel: number;
+  escalated: boolean;
+  maintained: boolean;
+  previousAdaptiveMs: number;
+  adaptiveMs: number;
+  previousCooldownUntil: string | null;
+  cooldownUntil: string | null;
+  retryAfterMs: number;
+  derived: boolean;
+}
+
+export interface ObservabilityTarget {
+  monitorId: string;
+  monitorLabel: string;
+  nextDueAt: string | null;
+  consecutiveFailures: number;
+  lastOutcome?: string;
+  lastErrorKind?: string;
+  queueState: string;
+}
+
+export interface ObservabilityCheckActivity {
+  occurredAt: string;
+  outcome: string;
+  providerErrorKind?: string;
+  durationMs: number | null;
+  queueWaitMs: number | null;
+  monitorId: string;
+  monitorLabel: string;
+  incomplete: boolean;
+}
+
+export interface ObservabilityProviderDetail extends ObservabilityProvider {
+  windowSeconds: number;
+  trafficHistory: ObservabilityTrafficPoint[];
+  queueHistory: ObservabilityQueuePoint[];
+  rateLimitEvents: ObservabilityRateLimitEvent[];
+  recentChecks: ObservabilityCheckActivity[];
+  targets: ObservabilityTarget[];
+}
+
 export interface DeliveryState {
   id: string;
   channel: DeliveryChannel;

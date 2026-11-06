@@ -70,6 +70,43 @@ func (d *DB) Ready(ctx context.Context, expectedMigrations int) error {
 	return nil
 }
 
+// OpenReadOnly opens a second SQLite handle for dashboard reads. Every
+// connection is forced into query_only mode by the driver DSN, so this handle
+// cannot write even if a caller attempts it. The writer handle remains the only
+// migrator/writer. Callers must close the returned handle.
+func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil, errors.New("db: read-only database path must not be empty")
+	}
+	sqlDB, err := sql.Open("sqlite", readOnlyDataSourceName(path))
+	if err != nil {
+		return nil, fmt.Errorf("db: open read-only: %w", err)
+	}
+	sqlDB.SetMaxOpenConns(2)
+	sqlDB.SetMaxIdleConns(2)
+	sqlDB.SetConnMaxLifetime(0)
+	if err := sqlDB.PingContext(ctx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("db: ping read-only: %w", err)
+	}
+	return sqlDB, nil
+}
+
+func readOnlyDataSourceName(path string) string {
+	values := url.Values{}
+	values.Add("_query_only", "1")
+	values.Add("_pragma", "busy_timeout(5000)")
+	if path != ":memory:" && !strings.HasPrefix(path, "file:") {
+		if absolute, err := filepath.Abs(path); err == nil {
+			path = absolute
+		}
+	}
+	parsed := &url.URL{Scheme: "file", Path: path}
+	parsed.RawQuery = values.Encode()
+	return parsed.String()
+}
+
 func dataSourceName(path string) string {
 	values := url.Values{}
 	for _, pragma := range []string{

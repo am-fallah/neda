@@ -788,6 +788,37 @@ Post-merge local verification on `0fedb96`: `make check`, `go test -race ./...`,
 | Verification | `gofmt -l .` clean; `go test ./...` passed; `go test -race ./...` passed; `make check` passed; adaptive/scheduler targeted suite passed `-count=10`; `TZ=UTC` and `TZ=America/New_York` scheduler/store/domain runs passed. |
 | PR/merge | [PR #55](https://github.com/am-fallah/neda/pull/55) merged as `d04564c` (2026-11-06). PR-head CI: Go [42215385356](https://github.com/am-fallah/neda/actions/runs/42215385356), frontend [42215385119](https://github.com/am-fallah/neda/actions/runs/42215385119), Docker [42215385157](https://github.com/am-fallah/neda/actions/runs/42215385157) passed. Merged-main CI: Go [42215680168](https://github.com/am-fallah/neda/actions/runs/42215680168), frontend [42215679936](https://github.com/am-fallah/neda/actions/runs/42215679936), Docker [42215680062](https://github.com/am-fallah/neda/actions/runs/42215680062) passed. |
 
+### 12.3 Scheduler observability implementation (2026-11-06)
+
+Owner instruction: “execute” on the revised Hybrid observability plan. Work is on branch `feat/scheduler-observability` from verified `origin/main` `ffafeae`. The separate dirty root working tree was not touched.
+
+| ID | Priority | Status | Scope / evidence |
+|---|---|---|---|
+| `GATE-022` | P0 | DONE | Owner authorized execution on 2026-11-06 with the revised recommendations: logical provider checks in Phase 1; HTTP-attempt telemetry deferred; read-only dashboard handle with no writer fallback; best-effort rate-limit history; provider-minute rollup; new Providers UI. |
+| `OBS-101` | P1 | DONE | `internal/observability` state model: global interval scope, seven primary states, separate stale qualifier, cooldown/recovery precedence, explicit next-due/cooldown/effective-interval stale formula with boundary tests. |
+| `OBS-102` | P1 | DONE | Additive `0009_check_request_metrics.sql`; per-check provider request, pure duration, provider error kind, queue wait, expected spacing, interval snapshots, and a partial incomplete-attempt index. Existing rows preserve `provider_request=0`. |
+| `OBS-103` | P1 | DONE | Scheduler runtime recorder: due/in-flight/queued/overdue/deferred reasons, bounded 15s point-in-time samples, heartbeat, stopped state, and durable target+reason deferral episodes. Due-time changes do not create episodes; reason transitions resolve+reopen; restart restores active episodes. Tests cover repeated passes, due/timeout changes, reason transitions, resolution/re-entry, restart, empty/sustained queues, minute rollover, paused/stopped, and bounded drops. |
+| `OBS-104` | P1 | DONE | Additive `0010_provider_minute_metrics.sql` with disjoint histogram buckets, discarded/incomplete classification, durable `provider_queue_samples`, and `provider_deferral_episodes`. Aggregator deterministically recomputes traffic from `check_runs` and queue metrics from durable sources; replay is idempotent; late samples and partial failures are corrected by recomputation. Tests cover duplicate processing, restart/replay, late samples, multiple samples/minute, source deletion, and retention boundaries. |
+| `OBS-105` | P1 | DONE | Additive `0011_provider_rate_limit_events.sql`; every logical 429 emits `rate_limited`, with previous/current level distinguishing escalation from maintenance; separate `cooldown_extended`, `recovery_progress`, `recovery_step`, and `recovered` kinds. Bounded non-blocking post-commit writer with dropped-event count; current `provider_rate_limits` state remains authoritative. |
+| `OBS-106` | P1 | DONE | `db.OpenReadOnly` with `_query_only=1`; read-only observability store; typed `GET /api/v1/observability` and provider-detail API; no writer fallback; read-only rejection, API contract, empty-history, stopped-scheduler, queue-staleness, and P95 tests. |
+| `OBS-107` | P1 | DONE | Providers page, overview provider-health link, navigation, status badges, logical-check terminology, `lastProviderCheckAt`, `recorded7d`, explicit empty-history/stopped/stale/dropped-event explanations. Frontend tests cover cooling-down, degraded/stale, empty, rate-limited, and incomplete states. |
+| `OBS-108` | P2 | DONE | Provider detail page: traffic table with discarded/interrupted/incomplete columns, adaptive/cooldown, queue sample semantics, target schedule, recent checks with incomplete marker, and rate-limit transition labels. Dedicated scheduler-activity timeline remains deferred. |
+| `OBS-109` | P1 | IN_PROGRESS | Local verification (2026-11-06): `make check` passed; `go test -race ./...` passed; frontend `npm run typecheck`, `npm run lint`, `npm test` (176 tests), and `npm run build` passed; OpenAPI YAML parsed (25 paths/61 schemas); `git diff --check` passed. PR/CI/merge evidence pending; status is finalized only after the merge commit is verified on `origin/main`. |
+| `OBS-110` | P2 | DEFERRED | HTTP-attempt telemetry (wire-level attempts/retries/intermediate 429s) requires separate owner approval and provider observer work; not implemented. |
+| `OBS-111` | P2 | DEFERRED | Global activity timeline and dedicated activity endpoint; provider detail already exposes bounded recent checks. |
+| `OBS-112` | P2 | DEFERRED | Full Overview numeric-card redesign; the existing overview links to provider monitoring. |
+
+Known limitations at this checkpoint:
+
+- HTTP-level attempts are intentionally not counted; `providerChecks` means logical `adapter.Check` calls.
+- A crash after provider I/O but before finalization leaves no durable `provider_request`/completion marker; startup recovery marks the row abandoned and the API surfaces it as incomplete, but whether the provider was contacted cannot be reconstructed.
+- Rate-limit event history is best-effort after commit; a bounded queue can drop events under saturation. Current state and final 429 outcomes remain authoritative.
+- Queue metrics are point-in-time samples, not time-weighted measurements. Samples buffered in the final unflushed aggregator interval can be lost on an abrupt process crash.
+- Traffic for checks deleted by target cascade before the next aggregation/recompute window can be missing; already-written provider-minute rollups survive target deletion because they have no target foreign key.
+- `provider_minute_metrics` is 7-day retention at one-minute resolution; `check_runs` detail must be retained at least as long (14-day default).
+- Activity endpoint, global activity timeline, and richer Overview cards remain deferred.
+- No production access, live provider request, or deployment is performed by this task.
+
 ## 13. Tracker maintenance rules
 
 - Update status when a task starts, becomes blocked, and completes.

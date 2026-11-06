@@ -41,12 +41,29 @@ type CheckFinalization struct {
 	NotReservableCount int
 	UnknownCount       int
 	WarningCount       int
+
+	// Logical provider request diagnostics. ProviderRequest is true only when
+	// adapter.Check was actually invoked. ProviderStartedAt and
+	// ProviderDuration describe that call, excluding database and validation
+	// work. ProviderErrorKind preserves the final classification even when the
+	// target outcome is discarded (for example a discarded 429).
+	ProviderRequest    bool
+	ProviderStartedAt  time.Time
+	ProviderDuration   time.Duration
+	ProviderErrorKind  string
+	QueueWait          time.Duration
+	ExpectedSpacing    time.Duration
+	ConfiguredInterval time.Duration
+	AdaptiveInterval   time.Duration
 }
 
 const finalizeCheckRunQuery = `UPDATE check_runs SET
 	outcome = ?, finished_at = ?, error_kind = ?, http_status = ?, duration_ms = ?,
 	journey_count = ?, offering_count = ?, reservable_count = ?,
-	not_reservable_count = ?, unknown_count = ?, warning_count = ?
+	not_reservable_count = ?, unknown_count = ?, warning_count = ?,
+	provider_request = ?, provider_started_at = ?, provider_duration_ms = ?,
+	provider_error_kind = ?, queue_wait_ms = ?, expected_spacing_ms = ?,
+	configured_interval_ms = ?, adaptive_interval_ms = ?
 WHERE id = ? AND outcome = 'running'`
 
 // FinalizeCheckRun conditionally transitions one running check_runs row to a
@@ -78,6 +95,17 @@ func (s *Store) FinalizeCheckRun(ctx context.Context, tx *sql.Tx, input CheckFin
 		}
 		httpStatus = *input.HTTPStatus
 	}
+	var providerStartedAt any
+	if input.ProviderRequest {
+		if input.ProviderStartedAt.IsZero() {
+			return errors.New("store: provider request start time must be set")
+		}
+		providerStartedAt = formatTime(input.ProviderStartedAt)
+	}
+	if input.ProviderDuration < 0 || input.QueueWait < 0 || input.ExpectedSpacing < 0 ||
+		input.ConfiguredInterval < 0 || input.AdaptiveInterval < 0 {
+		return errors.New("store: provider timing fields must not be negative")
+	}
 	result, err := tx.ExecContext(ctx, finalizeCheckRunQuery,
 		string(input.Outcome),
 		formatTime(input.FinishedAt),
@@ -90,6 +118,14 @@ func (s *Store) FinalizeCheckRun(ctx context.Context, tx *sql.Tx, input CheckFin
 		input.NotReservableCount,
 		input.UnknownCount,
 		input.WarningCount,
+		boolToInt(input.ProviderRequest),
+		providerStartedAt,
+		nullableDurationMillis(input.ProviderDuration, input.ProviderRequest),
+		nullableString(input.ProviderErrorKind),
+		nullableDurationMillis(input.QueueWait, input.ProviderRequest),
+		nullableDurationMillis(input.ExpectedSpacing, input.ProviderRequest),
+		nullableDurationMillis(input.ConfiguredInterval, input.ProviderRequest),
+		nullableDurationMillis(input.AdaptiveInterval, input.ProviderRequest),
 		input.CheckRunID,
 	)
 	if err != nil {
@@ -103,6 +139,13 @@ func (s *Store) FinalizeCheckRun(ctx context.Context, tx *sql.Tx, input CheckFin
 		return ErrNoRunningCheck
 	}
 	return nil
+}
+
+func nullableDurationMillis(value time.Duration, present bool) any {
+	if !present {
+		return nil
+	}
+	return value.Milliseconds()
 }
 
 func (in CheckFinalization) validate() error {

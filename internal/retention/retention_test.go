@@ -143,6 +143,41 @@ func seedRetentionFixture(t *testing.T, db *sql.DB) {
 		('p-recent', 'hash-recent', X'04', X'05', X'06', ?, 1, ?),
 		('p-active', 'hash-active', X'07', X'08', X'09', ?, 0, NULL)`,
 		format(old), format(oldDisabled), format(old), format(recent), format(old), format(old))
+
+	oldRollup := now.Add(-8 * 24 * time.Hour)
+	recentRollup := now.Add(-24 * time.Hour)
+	oldRateEvent := now.Add(-91 * 24 * time.Hour)
+	exec(`INSERT INTO provider_minute_metrics (minute_start, provider_id, provider_checks, successes)
+		VALUES (?, 'fake', 2, 2), (?, 'fake', 1, 1)`, format(oldRollup), format(recentRollup))
+	exec(`INSERT INTO provider_queue_samples (id, provider_id, sampled_at, minute_start, due, created_at)
+		VALUES ('q-old', 'fake', ?, ?, 1, ?), ('q-recent', 'fake', ?, ?, 0, ?)`,
+		format(oldRollup), format(oldRollup), format(oldRollup),
+		format(recentRollup), format(recentRollup), format(recentRollup))
+	exec(`INSERT INTO provider_deferral_episodes
+		(id, provider_id, target_id, reason, started_at, last_seen_at, resolved_at, created_at)
+		VALUES
+		('ep-active-old', 'fake', 1, 'cooldown', ?, ?, NULL, ?),
+		('ep-resolved-old', 'fake', 1, 'spacing', ?, ?, ?, ?),
+		('ep-resolved-recent', 'fake', 1, 'spacing', ?, ?, ?, ?)`,
+		format(oldRollup), format(recentRollup), format(oldRollup),
+		format(oldRollup), format(oldRollup), format(oldRollup), format(oldRollup),
+		format(recentRollup), format(recentRollup), format(recentRollup), format(recentRollup))
+	exec(`INSERT INTO provider_rate_limit_events
+		(provider_id, occurred_at, kind, previous_level, escalation_level, previous_adaptive_ms, adaptive_ms, created_at)
+		VALUES ('fake', ?, 'rate_limited', 0, 1, 0, 0, ?), ('fake', ?, 'rate_limited', 0, 1, 0, 0, ?)`,
+		format(oldRateEvent), format(oldRateEvent), format(recentRollup), format(recentRollup))
+}
+
+func TestNewRejectsCheckRetentionShorterThanRollup(t *testing.T) {
+	env := newTestEnv(t)
+	if _, err := New(env.db, Config{
+		CheckRuns:             24 * time.Hour,
+		ProviderMinuteMetrics: 7 * 24 * time.Hour,
+		Interval:              24 * time.Hour,
+		InitialDelay:          0,
+	}); err == nil {
+		t.Fatal("New accepted check-run retention shorter than rollup retention")
+	}
 }
 
 func TestRunOncePrunesInDeterministicOrderAndPreservesOpenOrPendingData(t *testing.T) {
@@ -155,14 +190,18 @@ func TestRunOncePrunesInDeterministicOrderAndPreservesOpenOrPendingData(t *testi
 		t.Fatalf("RunOnce: %v", err)
 	}
 	want := Summary{
-		Attempts:             1,
-		CheckRuns:            1,
-		Events:               1,
-		HealthEpisodes:       2,
-		AvailabilityEpisodes: 1,
-		InventoryStates:      1,
-		Sessions:             2,
-		PushSubscriptions:    1,
+		Attempts:              1,
+		CheckRuns:             1,
+		ProviderMinuteMetrics: 1,
+		ProviderQueueSamples:  1,
+		DeferralEpisodes:      1,
+		RateLimitEvents:       1,
+		Events:                1,
+		HealthEpisodes:        2,
+		AvailabilityEpisodes:  1,
+		InventoryStates:       1,
+		Sessions:              2,
+		PushSubscriptions:     1,
 	}
 	if summary != want {
 		t.Fatalf("summary = %+v, want %+v", summary, want)
@@ -188,6 +227,13 @@ func TestRunOncePrunesInDeterministicOrderAndPreservesOpenOrPendingData(t *testi
 	assertCount(t, env.db, `SELECT COUNT(*) FROM sessions WHERE id IN ('s-revoked-recent', 's-active')`, 2)
 	assertCount(t, env.db, `SELECT COUNT(*) FROM push_subscriptions`, 2)
 	assertCount(t, env.db, `SELECT COUNT(*) FROM push_subscriptions WHERE id IN ('p-recent', 'p-active')`, 2)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_minute_metrics`, 1)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_queue_samples`, 1)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_queue_samples WHERE id = 'q-recent'`, 1)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_deferral_episodes`, 2)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_deferral_episodes WHERE id = 'ep-active-old' AND resolved_at IS NULL`, 1)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_deferral_episodes WHERE id = 'ep-resolved-recent'`, 1)
+	assertCount(t, env.db, `SELECT COUNT(*) FROM provider_rate_limit_events`, 1)
 
 	assertForeignKeyCheck(t, env.db)
 

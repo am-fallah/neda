@@ -19,6 +19,7 @@ import (
 	"github.com/am-fallah/neda/internal/auth"
 	"github.com/am-fallah/neda/internal/domain"
 	"github.com/am-fallah/neda/internal/logging"
+	"github.com/am-fallah/neda/internal/observability"
 	"github.com/am-fallah/neda/internal/provider"
 	appsettings "github.com/am-fallah/neda/internal/settings"
 	"github.com/am-fallah/neda/internal/store"
@@ -61,6 +62,11 @@ type Config struct {
 	Providers  *provider.Registry
 	Push       PushService
 	PushTester PushTester
+	// Observability is a separate read-only Store. It must never be the
+	// scheduler's writer Store; nil disables observability endpoints.
+	Observability          *store.Store
+	SchedulerSnapshot      func() observability.SchedulerSnapshot
+	RateLimitEventsDropped func() uint64
 	// WebUI serves the embedded SPA for non-API routes. It is optional so
 	// health-only tests and API-only deployments remain valid.
 	WebUI http.Handler
@@ -114,6 +120,9 @@ type Server struct {
 	providers          *provider.Registry
 	push               PushService
 	pushTester         PushTester
+	observability      *store.Store
+	schedulerSnapshot  func() observability.SchedulerSnapshot
+	rateLimitDropped   func() uint64
 	webUI              http.Handler
 	now                func() time.Time
 }
@@ -158,6 +167,9 @@ func New(cfg Config, logger *slog.Logger, readiness ReadinessChecker, expectedMi
 		providers:          cfg.Providers,
 		push:               nonNilPushService(cfg.Push),
 		pushTester:         nonNilPushTester(cfg.PushTester),
+		observability:      cfg.Observability,
+		schedulerSnapshot:  cfg.SchedulerSnapshot,
+		rateLimitDropped:   cfg.RateLimitEventsDropped,
 		webUI:              cfg.WebUI,
 		now:                cfg.Now,
 	}
@@ -253,6 +265,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path == "/api/v1/overview" {
 		s.privateAuth(http.HandlerFunc(s.handleOverview)).ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/api/v1/observability" || strings.HasPrefix(r.URL.Path, "/api/v1/observability/") {
+		s.privateAuth(http.HandlerFunc(s.handleObservability)).ServeHTTP(w, r)
 		return
 	}
 	if r.URL.Path == "/api/v1/push" || strings.HasPrefix(r.URL.Path, "/api/v1/push/") {
