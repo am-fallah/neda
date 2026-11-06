@@ -17,6 +17,7 @@ import type {
   EventKind,
   MonitorStatus,
   ObservationState,
+  ObservabilityProviderState,
   ProviderInfo,
 } from "@/api/types";
 
@@ -209,6 +210,59 @@ export function ProviderHealthBadge({ provider }: { provider: ProviderInfo }) {
     );
   }
   return <Badge variant="muted">No success yet</Badge>;
+}
+
+export function ProviderStateBadge({
+  state,
+}: {
+  state: ObservabilityProviderState;
+}) {
+  switch (state) {
+    case "healthy":
+      return (
+        <Badge variant="success">
+          <CheckCircle2 aria-hidden="true" />
+          Healthy
+        </Badge>
+      );
+    case "degraded":
+      return (
+        <Badge variant="destructive">
+          <AlertTriangle aria-hidden="true" />
+          Degraded
+        </Badge>
+      );
+    case "rate_limited":
+      return (
+        <Badge variant="warning">
+          <AlertTriangle aria-hidden="true" />
+          Rate limited
+        </Badge>
+      );
+    case "cooling_down":
+      return (
+        <Badge variant="warning">
+          <Clock3 aria-hidden="true" />
+          Cooling down
+        </Badge>
+      );
+    case "recovering":
+      return (
+        <Badge variant="info">
+          <ShieldCheck aria-hidden="true" />
+          Recovering
+        </Badge>
+      );
+    case "idle":
+      return <Badge variant="muted">Idle</Badge>;
+    case "unknown":
+      return (
+        <Badge variant="outline">
+          <CircleDashed aria-hidden="true" />
+          Unknown
+        </Badge>
+      );
+  }
 }
 
 export function TestOnlyBadge() {

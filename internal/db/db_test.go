@@ -147,10 +147,10 @@ PRAGMA legacy_alter_table = OFF;
 
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 8 {
-		t.Fatalf("migration count = %d, want 8", count)
+	if count := migrateReal(t, database); count != 11 {
+		t.Fatalf("migration count = %d, want 11", count)
 	}
-	if err := database.Ready(context.Background(), 8); err != nil {
+	if err := database.Ready(context.Background(), 11); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
 	if err := database.Ready(context.Background(), 7); err == nil {
@@ -161,18 +161,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 8 {
-		t.Fatalf("schema_migrations count = %d, want 8", migrationsApplied)
+	if migrationsApplied != 11 {
+		t.Fatalf("schema_migrations count = %d, want 11", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 8 {
-		t.Fatalf("second migration count = %d, want 8", count)
+	if count := migrateReal(t, database); count != 11 {
+		t.Fatalf("second migration count = %d, want 11", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 8 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 8", migrationsApplied)
+	if migrationsApplied != 11 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 11", migrationsApplied)
 	}
 
 	var integrity string
@@ -217,6 +217,131 @@ INSERT INTO settings VALUES ('poll_interval_seconds', '300', 0, '2026-01-01T00:0
 		VALUES ('p', 'provider', 600000, '2026-01-01T00:00:00Z')`); err != nil {
 		t.Fatalf("insert migrated rate limit: %v", err)
 	}
+}
+
+func migrationsThrough(t *testing.T, last string) fstest.MapFS {
+	t.Helper()
+	entries, err := fs.ReadDir(migrations.FS, ".")
+	if err != nil {
+		t.Fatalf("read migrations: %v", err)
+	}
+	result := fstest.MapFS{}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".sql") || name > last {
+			continue
+		}
+		data, err := fs.ReadFile(migrations.FS, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		result[name] = &fstest.MapFile{Data: data}
+	}
+	return result
+}
+
+func TestObservabilityMigrationsPreserveExistingCheckRuns(t *testing.T) {
+	database := openTestDB(t)
+	if count, err := Migrate(context.Background(), database.DB, migrationsThrough(t, "0008_provider_rate_limits.sql")); err != nil || count != 8 {
+		t.Fatalf("migrate to 0008 = %d, %v", count, err)
+	}
+	mustExec(t, database.DB, `INSERT INTO monitors
+		(id, label, origin_name, destination_name, departure_date, adults, children, infants, enabled, expires_at, created_at, updated_at)
+		VALUES ('m1', 'Existing', 'Tehran', 'Mashhad', '2026-12-15', 1, 0, 0, 1, '2026-12-16T00:00:00Z', '2026-11-06T00:00:00Z', '2026-11-06T00:00:00Z')`)
+	mustExec(t, database.DB, `INSERT INTO monitor_providers
+		(monitor_id, provider_id, active, origin_id, destination_id, config_version, next_due_at, created_at, updated_at)
+		VALUES ('m1', 'fake', 1, 'o', 'd', 1, '2026-11-06T00:00:00Z', '2026-11-06T00:00:00Z', '2026-11-06T00:00:00Z')`)
+	mustExec(t, database.DB, `INSERT INTO check_runs
+		(monitor_provider_id, config_version, started_at, finished_at, outcome, duration_ms, created_at)
+		VALUES (1, 1, '2026-11-06T00:00:00Z', '2026-11-06T00:00:01Z', 'success', 1000, '2026-11-06T00:00:00Z')`)
+
+	if count, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil || count != 11 {
+		t.Fatalf("migrate to current = %d, %v", count, err)
+	}
+	var providerRequest int
+	var providerStarted, duration, errorKind, queueWait sql.NullString
+	if err := database.QueryRow(`SELECT provider_request, provider_started_at, provider_duration_ms,
+		provider_error_kind, queue_wait_ms FROM check_runs WHERE id = 1`).
+		Scan(&providerRequest, &providerStarted, &duration, &errorKind, &queueWait); err != nil {
+		t.Fatalf("read migrated check: %v", err)
+	}
+	if providerRequest != 0 || providerStarted.Valid || duration.Valid || errorKind.Valid || queueWait.Valid {
+		t.Fatalf("existing check gained provider metrics: %d/%v/%v/%v/%v",
+			providerRequest, providerStarted, duration, errorKind, queueWait)
+	}
+	var outcome string
+	if err := database.QueryRow(`SELECT outcome FROM check_runs WHERE id = 1`).Scan(&outcome); err != nil || outcome != "success" {
+		t.Fatalf("existing outcome = %q, %v", outcome, err)
+	}
+
+	for _, table := range []string{"provider_minute_metrics", "provider_queue_samples", "provider_deferral_episodes", "provider_rate_limit_events"} {
+		var exists int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != 1 {
+			t.Fatalf("table %s missing", table)
+		}
+	}
+	for _, index := range []string{
+		"idx_check_runs_provider_started",
+		"idx_check_runs_provider_target_started",
+		"idx_check_runs_provider_errors",
+		"idx_check_runs_incomplete",
+		"idx_provider_minute_metrics_provider",
+		"idx_provider_minute_metrics_time",
+		"idx_provider_queue_samples_minute",
+		"idx_provider_queue_samples_provider",
+		"idx_provider_deferral_episodes_provider_time",
+		"idx_provider_deferral_episodes_started",
+		"idx_provider_deferral_episodes_active",
+		"idx_provider_rate_limit_events_provider",
+		"idx_provider_rate_limit_events_time",
+	} {
+		var exists int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`, index).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != 1 {
+			t.Fatalf("index %s missing", index)
+		}
+	}
+
+	now := "2026-11-06T00:00:00Z"
+	mustExec(t, database.DB, `INSERT INTO provider_rate_limit_events
+		(provider_id, occurred_at, kind, previous_level, escalation_level, previous_adaptive_ms,
+		 adaptive_ms, retry_after_ms, check_run_id, created_at)
+		VALUES ('fake', ?, 'rate_limited', 1, 2, 0, 600000, 0, 1, ?)`, now, now)
+	mustExec(t, database.DB, `DELETE FROM check_runs WHERE id = 1`)
+	var checkRunID sql.NullInt64
+	if err := database.QueryRow(`SELECT check_run_id FROM provider_rate_limit_events`).Scan(&checkRunID); err != nil {
+		t.Fatal(err)
+	}
+	if checkRunID.Valid {
+		t.Fatalf("event check_run_id = %d after delete, want NULL", checkRunID.Int64)
+	}
+
+	mustExec(t, database.DB, `INSERT INTO provider_deferral_episodes
+		(id, provider_id, target_id, reason, started_at, last_seen_at, created_at)
+		VALUES ('e1', 'fake', 1, 'cooldown', ?, ?, ?)`, now, now, now)
+	mustExec(t, database.DB, `DELETE FROM monitors WHERE id = 'm1'`)
+	var targetID sql.NullInt64
+	if err := database.QueryRow(`SELECT target_id FROM provider_deferral_episodes WHERE id='e1'`).Scan(&targetID); err != nil {
+		t.Fatal(err)
+	}
+	if targetID.Valid {
+		t.Fatalf("episode target_id = %d after delete, want NULL", targetID.Int64)
+	}
+
+	mustFail(t, database.DB, `INSERT INTO provider_rate_limit_events
+		(provider_id, occurred_at, kind, escalation_level, previous_adaptive_ms, adaptive_ms, created_at)
+		VALUES ('fake', ?, 'escalated', 1, 0, 0, ?)`, now, now)
+	mustFail(t, database.DB, `INSERT INTO provider_queue_samples
+		(id, provider_id, sampled_at, minute_start, due, created_at)
+		VALUES ('bad', 'fake', ?, ?, -1, ?)`, now, now, now)
+	mustFail(t, database.DB, `INSERT INTO provider_deferral_episodes
+		(id, provider_id, reason, started_at, last_seen_at, created_at)
+		VALUES ('bad', 'fake', 'unknown', ?, ?, ?)`, now, now, now)
 }
 
 func TestMigrateRejectsChecksumMismatch(t *testing.T) {
@@ -494,7 +619,43 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 8); err != nil {
+	if err := database.Ready(context.Background(), 11); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
+	}
+}
+
+func TestOpenReadOnlyRejectsWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "readonly.db")
+	database, err := Open(context.Background(), path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+
+	readOnly, err := OpenReadOnly(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenReadOnly: %v", err)
+	}
+	t.Cleanup(func() { _ = readOnly.Close() })
+
+	var queryOnly int
+	if err := readOnly.QueryRow(`PRAGMA query_only`).Scan(&queryOnly); err != nil {
+		t.Fatalf("PRAGMA query_only: %v", err)
+	}
+	if queryOnly != 1 {
+		t.Fatalf("query_only = %d, want 1", queryOnly)
+	}
+	var count int
+	if err := readOnly.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&count); err != nil {
+		t.Fatalf("read query: %v", err)
+	}
+	if count != 11 {
+		t.Fatalf("migration count via read handle = %d, want 11", count)
+	}
+	if _, err := readOnly.Exec(`INSERT INTO settings(key, value, is_secret, updated_at) VALUES ('x','y',0,'2026-01-01T00:00:00Z')`); err == nil {
+		t.Fatal("read-only connection accepted a write")
 	}
 }

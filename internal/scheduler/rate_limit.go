@@ -43,16 +43,30 @@ type AdaptivePolicy struct {
 	MaxEscalations int
 }
 
-// RateLimitChange describes one adaptive state transition for logging and
-// tests. It contains no provider payload or credentials.
+// RateLimitChange describes one adaptive state transition for logging, tests,
+// and best-effort history events. It contains no provider payload or
+// credentials.
+//
+// Escalated means the adaptive level increased. Maintained means a 429 was
+// observed at the same level (including the capped maximum). CooldownExtended
+// means the new absolute cooldown deadline is later than the previous one.
+// RecoveryProgress means a success was recorded without releasing a level;
+// Recovered means one level was released; FullyRecovered means the penalty is
+// now clear.
 type RateLimitChange struct {
-	Escalated        bool
-	Recovered        bool
-	PreviousInterval time.Duration
-	NewInterval      time.Duration
-	Level            int
-	RetryAfter       time.Duration
-	CooldownUntil    time.Time
+	Escalated             bool
+	Maintained            bool
+	Recovered             bool
+	FullyRecovered        bool
+	RecoveryProgress      bool
+	CooldownExtended      bool
+	PreviousLevel         int
+	Level                 int
+	PreviousInterval      time.Duration
+	NewInterval           time.Duration
+	PreviousCooldownUntil *time.Time
+	CooldownUntil         time.Time
+	RetryAfter            time.Duration
 }
 
 // MaxAdaptiveInterval returns the configured safety cap for one polling
@@ -123,7 +137,14 @@ func ApplyProviderRateLimit429(
 	policy AdaptivePolicy,
 ) (domain.ProviderRateLimit, RateLimitChange) {
 	now = now.UTC()
-	change := RateLimitChange{PreviousInterval: state.AdaptiveInterval}
+	change := RateLimitChange{
+		PreviousInterval: state.AdaptiveInterval,
+		PreviousLevel:    state.Consecutive429s,
+	}
+	if state.CooldownUntil != nil {
+		previous := state.CooldownUntil.UTC()
+		change.PreviousCooldownUntil = &previous
+	}
 	if configured <= 0 || now.IsZero() {
 		return state, change
 	}
@@ -173,7 +194,10 @@ func ApplyProviderRateLimit429(
 		state.Scope = domain.ProviderRateLimitScopeProvider
 	}
 
-	change.Escalated = true
+	change.Escalated = level > change.PreviousLevel
+	change.Maintained = !change.Escalated
+	change.CooldownExtended = change.PreviousCooldownUntil != nil &&
+		cooldown.After(*change.PreviousCooldownUntil)
 	change.NewInterval = adaptive
 	change.Level = level
 	change.RetryAfter = retryAfter
@@ -193,7 +217,17 @@ func ApplyProviderRateLimitSuccess(
 	policy AdaptivePolicy,
 ) (domain.ProviderRateLimit, RateLimitChange) {
 	now = now.UTC()
-	change := RateLimitChange{PreviousInterval: state.AdaptiveInterval, Level: state.Consecutive429s}
+	change := RateLimitChange{
+		PreviousInterval: state.AdaptiveInterval,
+		PreviousLevel:    state.Consecutive429s,
+		Level:            state.Consecutive429s,
+		NewInterval:      state.AdaptiveInterval,
+	}
+	if state.CooldownUntil != nil {
+		previous := state.CooldownUntil.UTC()
+		change.PreviousCooldownUntil = &previous
+		change.CooldownUntil = previous
+	}
 	if now.IsZero() {
 		return state, change
 	}
@@ -205,11 +239,15 @@ func ApplyProviderRateLimitSuccess(
 	if state.Consecutive429s <= 0 {
 		state.ConsecutiveSuccesses = 0
 		state.AdaptiveInterval = 0
+		change.Level = 0
+		change.NewInterval = 0
 		return state, change
 	}
 
 	state.ConsecutiveSuccesses++
 	if state.ConsecutiveSuccesses < policy.recoverySuccesses() {
+		change.RecoveryProgress = true
+		change.NewInterval = state.AdaptiveInterval
 		return state, change
 	}
 
@@ -226,6 +264,7 @@ func ApplyProviderRateLimitSuccess(
 		state.AdaptiveInterval = recovered
 	}
 	change.Recovered = true
+	change.FullyRecovered = state.Consecutive429s == 0
 	change.NewInterval = state.AdaptiveInterval
 	change.Level = state.Consecutive429s
 	return state, change

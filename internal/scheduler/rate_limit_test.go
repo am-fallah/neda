@@ -15,7 +15,8 @@ func TestApplyProviderRateLimit429EscalatesAndCaps(t *testing.T) {
 	state := domain.ProviderRateLimit{ProviderID: "p"}
 
 	state, first := scheduler.ApplyProviderRateLimit429(now, configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
-	if !first.Escalated || state.Consecutive429s != 1 || state.AdaptiveInterval != 10*time.Minute {
+	if !first.Escalated || first.Maintained || first.PreviousLevel != 0 || first.Level != 1 ||
+		state.Consecutive429s != 1 || state.AdaptiveInterval != 10*time.Minute {
 		t.Fatalf("first 429 state=%+v change=%+v", state, first)
 	}
 	if state.CooldownUntil == nil || !state.CooldownUntil.Equal(now.Add(10*time.Minute)) {
@@ -26,21 +27,26 @@ func TestApplyProviderRateLimit429EscalatesAndCaps(t *testing.T) {
 	}
 
 	state, second := scheduler.ApplyProviderRateLimit429(now.Add(time.Minute), configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
-	if state.Consecutive429s != 2 || state.AdaptiveInterval != 20*time.Minute {
+	if state.Consecutive429s != 2 || state.AdaptiveInterval != 20*time.Minute ||
+		!second.Escalated || second.PreviousLevel != 1 || second.Level != 2 {
 		t.Fatalf("second 429 state=%+v change=%+v", state, second)
 	}
 	state, third := scheduler.ApplyProviderRateLimit429(now.Add(2*time.Minute), configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
 	if state.Consecutive429s != 3 || state.AdaptiveInterval != 30*time.Minute {
 		t.Fatalf("third 429 state=%+v change=%+v", state, third)
 	}
+	var capped scheduler.RateLimitChange
 	for index := 0; index < 20; index++ {
-		state, _ = scheduler.ApplyProviderRateLimit429(now, configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
+		state, capped = scheduler.ApplyProviderRateLimit429(now, configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
 	}
 	if state.AdaptiveInterval != 30*time.Minute {
 		t.Fatalf("capped adaptive interval = %v, want 30m", state.AdaptiveInterval)
 	}
 	if state.Consecutive429s != 8 {
 		t.Fatalf("escalation level = %d, want bounded 8", state.Consecutive429s)
+	}
+	if capped.Escalated || !capped.Maintained || capped.PreviousLevel != 8 || capped.Level != 8 {
+		t.Fatalf("capped 429 change = %+v, want maintained at level 8", capped)
 	}
 }
 
@@ -95,7 +101,8 @@ func TestApplyProviderRateLimitSuccessRecoversGradually(t *testing.T) {
 	}
 
 	state, first := scheduler.ApplyProviderRateLimitSuccess(now, configured, state, scheduler.AdaptivePolicy{})
-	if first.Recovered || state.AdaptiveInterval != 20*time.Minute || state.ConsecutiveSuccesses != 1 {
+	if first.Recovered || !first.RecoveryProgress || first.PreviousLevel != 2 || first.Level != 2 ||
+		state.AdaptiveInterval != 20*time.Minute || state.ConsecutiveSuccesses != 1 {
 		t.Fatalf("one success state=%+v change=%+v; penalty must survive", state, first)
 	}
 	if state.CooldownUntil == nil || !state.CooldownUntil.Equal(cooldown) {
@@ -106,22 +113,53 @@ func TestApplyProviderRateLimitSuccessRecoversGradually(t *testing.T) {
 		t.Fatalf("two successes state=%+v", state)
 	}
 	state, third := scheduler.ApplyProviderRateLimitSuccess(now, configured, state, scheduler.AdaptivePolicy{})
-	if !third.Recovered || state.Consecutive429s != 1 || state.AdaptiveInterval != 10*time.Minute || state.ConsecutiveSuccesses != 0 {
+	if !third.Recovered || third.FullyRecovered || state.Consecutive429s != 1 ||
+		state.AdaptiveInterval != 10*time.Minute || state.ConsecutiveSuccesses != 0 {
 		t.Fatalf("third success state=%+v change=%+v", state, third)
 	}
+	var final scheduler.RateLimitChange
 	for index := 0; index < 3; index++ {
-		state, _ = scheduler.ApplyProviderRateLimitSuccess(now, configured, state, scheduler.AdaptivePolicy{})
+		state, final = scheduler.ApplyProviderRateLimitSuccess(now, configured, state, scheduler.AdaptivePolicy{})
 	}
-	if state.Consecutive429s != 0 || state.AdaptiveInterval != 0 {
-		t.Fatalf("fully recovered state=%+v", state)
+	if state.Consecutive429s != 0 || state.AdaptiveInterval != 0 ||
+		!final.Recovered || !final.FullyRecovered {
+		t.Fatalf("fully recovered state=%+v change=%+v", state, final)
 	}
 
 	configuredSuccess := scheduler.AdaptivePolicy{RecoverySuccesses: 1}
 	one, change := scheduler.ApplyProviderRateLimitSuccess(now, configured, domain.ProviderRateLimit{
 		ProviderID: "p", Consecutive429s: 1, AdaptiveInterval: 10 * time.Minute,
 	}, configuredSuccess)
-	if !change.Recovered || one.AdaptiveInterval != 0 || one.Consecutive429s != 0 {
+	if !change.Recovered || !change.FullyRecovered || one.AdaptiveInterval != 0 || one.Consecutive429s != 0 {
 		t.Fatalf("configured recovery state=%+v change=%+v", one, change)
+	}
+}
+
+func TestApplyProviderRateLimitCooldownExtension(t *testing.T) {
+	now := schedulerNow
+	configured := 5 * time.Minute
+	existing := now.Add(5 * time.Minute)
+	state := domain.ProviderRateLimit{
+		ProviderID: "p", Consecutive429s: 1, AdaptiveInterval: 10 * time.Minute,
+		CooldownUntil: &existing,
+	}
+	updated, change := scheduler.ApplyProviderRateLimit429(now, configured, 45*time.Minute, state, midpointRandom{}, scheduler.AdaptivePolicy{})
+	if !change.CooldownExtended || change.PreviousCooldownUntil == nil ||
+		!change.PreviousCooldownUntil.Equal(existing) {
+		t.Fatalf("extension change = %+v", change)
+	}
+	if updated.CooldownUntil == nil || !updated.CooldownUntil.Equal(now.Add(45*time.Minute)) {
+		t.Fatalf("extended cooldown = %v", updated.CooldownUntil)
+	}
+
+	shorter := now.Add(50 * time.Minute)
+	state.CooldownUntil = &shorter
+	_, change = scheduler.ApplyProviderRateLimit429(now, configured, 0, state, midpointRandom{}, scheduler.AdaptivePolicy{})
+	if change.CooldownExtended {
+		t.Fatalf("shorter cooldown reported as extension: %+v", change)
+	}
+	if change.PreviousCooldownUntil == nil || !change.PreviousCooldownUntil.Equal(shorter) {
+		t.Fatalf("previous cooldown = %v, want %v", change.PreviousCooldownUntil, shorter)
 	}
 }
 

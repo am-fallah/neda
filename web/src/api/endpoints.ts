@@ -11,6 +11,8 @@ import type {
   MonitorDetail,
   MonitorListResponse,
   MonitorPatchRequest,
+  ObservabilityOverview,
+  ObservabilityProviderDetail,
   Overview,
   ProviderListResponse,
   ProviderSearchRequest,
@@ -134,6 +136,18 @@ export const deliveriesApi = {
 export const overviewApi = {
   get(signal?: AbortSignal) {
     return apiRequest<Overview>("/overview", { signal });
+  },
+};
+
+export const observabilityApi = {
+  overview(signal?: AbortSignal) {
+    return apiRequest<ObservabilityOverview>("/observability", { signal });
+  },
+  provider(id: string, window: "1h" | "6h" | "24h" | "7d", signal?: AbortSignal) {
+    return apiRequest<ObservabilityProviderDetail>(
+      `/observability/providers/${encodeURIComponent(id)}`,
+      { query: { window }, signal },
+    );
   },
 };
 

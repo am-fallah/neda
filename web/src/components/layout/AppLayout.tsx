@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
+  Activity,
   ChevronDown,
   History,
   LayoutDashboard,
@@ -28,6 +29,7 @@ import {
 const NAV_ITEMS = [
   { to: "/", label: "Overview", icon: LayoutDashboard, end: true },
   { to: "/monitors", label: "Monitors", icon: TrainFront },
+  { to: "/providers", label: "Providers", icon: Activity },
   { to: "/events", label: "History", icon: History },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;

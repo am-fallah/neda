@@ -154,6 +154,9 @@ func TestDiscarded429StillAppliesProviderPenalty(t *testing.T) {
 	if check.Outcome != "discarded" || check.ErrorKind.String != "monitor_disabled" {
 		t.Fatalf("discard check = %+v", check)
 	}
+	if check.ProviderRequest != 1 || check.ProviderErrorKind.String != "rate_limited" {
+		t.Fatalf("discard 429 provider diagnostics = %+v", check)
+	}
 	state, found, err := h.st.GetProviderRateLimit(context.Background(), "discard-rate", domain.ProviderRateLimitScopeProvider)
 	if err != nil || !found || state.Consecutive429s != 1 {
 		t.Fatalf("discarded 429 rate limit = %+v, found=%v, err=%v", state, found, err)

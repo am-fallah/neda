@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/am-fallah/neda/internal/domain"
+	"github.com/am-fallah/neda/internal/observability"
 	"github.com/am-fallah/neda/internal/provider"
 )
 
@@ -57,12 +58,22 @@ var (
 )
 
 // Target is one due monitor/provider pair.
+//
+// The dispatch-only fields are diagnostics captured by the scheduler at the
+// moment it selected the target. They are not used by scheduling decisions and
+// may be zero in tests or when a runner is invoked directly.
 type Target struct {
 	ID            int64
 	MonitorID     string
 	ProviderID    provider.ID
 	ConfigVersion int64
 	NextDueAt     time.Time
+
+	DispatchedAt       time.Time
+	QueueWait          time.Duration
+	ExpectedSpacing    time.Duration
+	ConfiguredInterval time.Duration
+	AdaptiveInterval   time.Duration
 }
 
 // Result reports how the scheduler should treat a completed attempt.
@@ -161,6 +172,9 @@ type Config struct {
 	Random        Random
 	Logger        *slog.Logger
 	ShutdownGrace time.Duration
+	// Recorder receives bounded runtime scheduler metrics. It is optional and
+	// must never perform blocking I/O.
+	Recorder *observability.Recorder
 }
 
 // Scheduler is a single-process due-time scheduler.
@@ -178,6 +192,7 @@ type Scheduler struct {
 	random          Random
 	logger          *slog.Logger
 	shutdownGrace   time.Duration
+	recorder        *observability.Recorder
 }
 
 // New validates dependencies and applies defaults.
@@ -242,6 +257,7 @@ func New(cfg Config) (*Scheduler, error) {
 		random:          cfg.Random,
 		logger:          cfg.Logger,
 		shutdownGrace:   cfg.ShutdownGrace,
+		recorder:        cfg.Recorder,
 	}, nil
 }
 
@@ -251,10 +267,15 @@ func New(cfg Config) (*Scheduler, error) {
 // safely idle, so callers can start the scheduler without a runner without
 // dispatching no-op jobs or busy-looping. Production composes the SCH-010
 // outcome runner.
-func (s *Scheduler) Run(ctx context.Context) error {
+func (s *Scheduler) Run(ctx context.Context) (runErr error) {
 	if ctx == nil {
 		return errors.New("scheduler: nil context")
 	}
+	defer func() {
+		if s.recorder != nil {
+			s.recorder.MarkStopped(s.clock.Now().UTC())
+		}
+	}()
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -434,7 +455,9 @@ func (s *Scheduler) runLoop(ctx context.Context, paused bool, interval time.Dura
 		}()
 	}
 
-	loopErr := s.loop(ctx, jobs, done, paused, interval)
+	heartbeat := time.NewTicker(observability.DefaultQueueSampleInterval)
+	defer heartbeat.Stop()
+	loopErr := s.loop(ctx, jobs, done, paused, interval, heartbeat.C)
 	close(jobs)
 
 	finished := make(chan struct{})
@@ -470,11 +493,12 @@ func (s *Scheduler) execute(ctx context.Context, target Target) (result Result, 
 	return s.runner.Run(ctx, target)
 }
 
-func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion, paused bool, interval time.Duration) error {
+func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion, paused bool, interval time.Duration, heartbeat <-chan time.Time) error {
 	running := 0
 	inflight := make(map[string]bool)
 	settled := make(map[int64]generation)
 	hold := make(map[int64]time.Time)
+	runningTargets := make(map[int64]bool)
 	providers := make(map[provider.ID]*providerRuntime)
 	configuredInterval := interval
 	lastIntervalError := time.Time{}
@@ -486,7 +510,7 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 		for {
 			select {
 			case completed := <-done:
-				s.complete(completed, &running, inflight, settled, hold, providers)
+				s.complete(completed, &running, inflight, settled, hold, runningTargets, providers)
 			default:
 				break drain
 			}
@@ -520,16 +544,27 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				s.logger.Info("scheduler paused: global monitoring is off")
 				paused = true
 			}
+			if s.recorder != nil {
+				s.recorder.ObservePass(observability.PassObservation{
+					Now:                now,
+					MonitoringEnabled:  false,
+					Paused:             true,
+					ConfiguredInterval: configuredInterval,
+					ProviderSpacing:    s.providerSpacing,
+					Workers:            s.workers,
+					RunningWorkers:     running,
+				})
+			}
 			waitAt := now.Add(monitoringOffRetry)
 			if hasExpiry && expiryAt.Before(waitAt) {
 				waitAt = expiryAt
 			}
-			completed, got, ok := s.waitUntil(ctx, waitAt, true, done)
+			completed, got, ok := s.waitUntil(ctx, waitAt, true, done, heartbeat)
 			if !ok {
 				return nil
 			}
 			if got {
-				s.complete(completed, &running, inflight, settled, hold, providers)
+				s.complete(completed, &running, inflight, settled, hold, runningTargets, providers)
 			}
 			continue
 		}
@@ -572,12 +607,12 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			if hasExpiry && expiryAt.Before(retryAt) {
 				retryAt = expiryAt
 			}
-			completed, got, ok := s.waitUntil(ctx, retryAt, true, done)
+			completed, got, ok := s.waitUntil(ctx, retryAt, true, done, heartbeat)
 			if !ok {
 				return nil
 			}
 			if got {
-				s.complete(completed, &running, inflight, settled, hold, providers)
+				s.complete(completed, &running, inflight, settled, hold, runningTargets, providers)
 			}
 			continue
 		}
@@ -593,12 +628,12 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			if hasExpiry && expiryAt.Before(retryAt) {
 				retryAt = expiryAt
 			}
-			completed, got, ok := s.waitUntil(ctx, retryAt, true, done)
+			completed, got, ok := s.waitUntil(ctx, retryAt, true, done, heartbeat)
 			if !ok {
 				return nil
 			}
 			if got {
-				s.complete(completed, &running, inflight, settled, hold, providers)
+				s.complete(completed, &running, inflight, settled, hold, runningTargets, providers)
 			}
 			continue
 		}
@@ -619,6 +654,29 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			}
 		}
 		dueCounts := make(map[provider.ID]int)
+		passProviders := make(map[provider.ID]*observability.ProviderPassObservation)
+		ensurePassProvider := func(id provider.ID) *observability.ProviderPassObservation {
+			observation := passProviders[id]
+			if observation == nil {
+				observation = &observability.ProviderPassObservation{ProviderID: id}
+				passProviders[id] = observation
+			}
+			return observation
+		}
+		// Include every provider with an active target, even when its queue is
+		// empty, so idle providers are sampled as zero rather than disappearing.
+		targetObservations := make([]observability.TargetObservation, 0, len(targets))
+		for _, target := range targets {
+			if _, ok := s.providers.Lookup(target.ProviderID); !ok {
+				continue
+			}
+			ensurePassProvider(target.ProviderID)
+			targetObservations = append(targetObservations, observability.TargetObservation{
+				TargetID:   target.ID,
+				ProviderID: target.ProviderID,
+				NextDueAt:  target.NextDueAt,
+			})
+		}
 		for _, target := range targets {
 			if target.NextDueAt == nil || target.NextDueAt.After(now) {
 				continue
@@ -627,6 +685,21 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				continue
 			}
 			dueCounts[target.ProviderID]++
+			observation := ensurePassProvider(target.ProviderID)
+			observation.Due++
+			age := now.Sub(target.NextDueAt.UTC())
+			if age < 0 {
+				age = 0
+			}
+			if age > configuredInterval {
+				observation.Overdue++
+			}
+		}
+		for id, state := range providers {
+			observation := ensurePassProvider(id)
+			if state.inFlight {
+				observation.InFlight = 1
+			}
 		}
 
 		var next time.Time
@@ -657,7 +730,28 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				}
 				delete(hold, candidate.ID)
 			}
+			if runningTargets[candidate.ID] {
+				continue
+			}
+			observation := ensurePassProvider(candidate.ProviderID)
+			recordDeferral := func(reason observability.DeferralReason) {
+				observation.Deferrals = append(observation.Deferrals, observability.DeferralObservation{
+					TargetID:   candidate.ID,
+					ProviderID: candidate.ProviderID,
+					Due:        due,
+					Reason:     reason,
+				})
+				switch reason {
+				case observability.ReasonCooldown:
+					observation.DeferredByCooldown++
+				case observability.ReasonSpacing:
+					observation.DeferredBySpacing++
+				case observability.ReasonConcurrency:
+					observation.DeferredByConcurrency++
+				}
+			}
 			if running >= s.workers || inflight[candidate.MonitorID] {
+				recordDeferral(observability.ReasonConcurrency)
 				continue
 			}
 			if generation, ok := settled[candidate.ID]; ok &&
@@ -667,11 +761,17 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			}
 			state := providerState(providers, candidate.ProviderID)
 			if state.inFlight {
+				recordDeferral(observability.ReasonConcurrency)
 				continue
 			}
 			effectiveInterval := EffectivePollingInterval(configuredInterval, state.limit)
 			spacing := RequestSpacing(dueCounts[candidate.ProviderID], effectiveInterval, s.providerSpacing)
 			if slot, ok := state.nextSlot(spacing); ok && slot.After(now) {
+				reason := observability.ReasonSpacing
+				if state.limit.CooldownUntil != nil && state.limit.CooldownUntil.After(now) {
+					reason = observability.ReasonCooldown
+				}
+				recordDeferral(reason)
 				if !hasNext || slot.Before(next) {
 					next = slot
 					hasNext = true
@@ -679,15 +779,24 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				continue
 			}
 			target := Target{
-				ID:            candidate.ID,
-				MonitorID:     candidate.MonitorID,
-				ProviderID:    candidate.ProviderID,
-				ConfigVersion: candidate.ConfigVersion,
-				NextDueAt:     due,
+				ID:                 candidate.ID,
+				MonitorID:          candidate.MonitorID,
+				ProviderID:         candidate.ProviderID,
+				ConfigVersion:      candidate.ConfigVersion,
+				NextDueAt:          due,
+				ExpectedSpacing:    spacing,
+				ConfiguredInterval: configuredInterval,
+				AdaptiveInterval:   state.limit.AdaptiveInterval,
 			}
 			// Sample the dispatch time here, after due selection, so slow
 			// repository reads cannot shorten the start-to-start spacing.
 			dispatchAt := s.clock.Now().UTC()
+			queueWait := dispatchAt.Sub(due)
+			if queueWait < 0 {
+				queueWait = 0
+			}
+			target.DispatchedAt = dispatchAt
+			target.QueueWait = queueWait
 			startSpacing := time.Duration(0)
 			if !state.lastDispatch.IsZero() {
 				startSpacing = dispatchAt.Sub(state.lastDispatch)
@@ -696,7 +805,9 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			case jobs <- target:
 				delete(settled, candidate.ID)
 				inflight[candidate.MonitorID] = true
+				runningTargets[candidate.ID] = true
 				state.dispatch(dispatchAt)
+				observation.Dispatched++
 				running++
 				dispatched++
 				s.logger.Debug("scheduler dispatched check",
@@ -713,6 +824,52 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				return nil
 			}
 		}
+		var lastDispatchAt *time.Time
+		for id, observation := range passProviders {
+			state := providerState(providers, id)
+			if !state.lastDispatch.IsZero() && (lastDispatchAt == nil || state.lastDispatch.After(*lastDispatchAt)) {
+				value := state.lastDispatch.UTC()
+				lastDispatchAt = &value
+			}
+			observation.Queued = observation.Due - observation.InFlight
+			if observation.Queued < 0 {
+				observation.Queued = 0
+			}
+			observation.Deferred = len(observation.Deferrals)
+			for _, deferral := range observation.Deferrals {
+				age := now.Sub(deferral.Due.UTC())
+				if age > observation.OldestPendingAge {
+					observation.OldestPendingAge = age
+				}
+			}
+			effective := EffectivePollingInterval(configuredInterval, state.limit)
+			spacing := RequestSpacing(dueCounts[id], effective, s.providerSpacing)
+			observation.BlockedByConcurrency = state.inFlight
+			if slot, ok := state.nextSlot(spacing); ok {
+				value := slot.UTC()
+				observation.NextEligibleAt = &value
+			}
+		}
+		if s.recorder != nil {
+			pass := observability.PassObservation{
+				Now:                now,
+				MonitoringEnabled:  true,
+				Paused:             false,
+				ConfiguredInterval: configuredInterval,
+				ProviderSpacing:    s.providerSpacing,
+				Workers:            s.workers,
+				RunningWorkers:     running,
+				LastDispatchAt:     lastDispatchAt,
+				Providers:          make([]observability.ProviderPassObservation, 0, len(passProviders)),
+				Targets:            targetObservations,
+				TargetsComplete:    true,
+			}
+			for _, observation := range passProviders {
+				pass.Providers = append(pass.Providers, *observation)
+			}
+			s.recorder.ObservePass(pass)
+		}
+
 		dueTotal := 0
 		for _, count := range dueCounts {
 			dueTotal += count
@@ -750,33 +907,34 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			// Capacity blocks dispatch, but expiry reconciliation must still
 			// run while every worker is busy.
 			if hasExpiry {
-				completed, got, ok = s.waitUntil(ctx, expiryAt, true, done)
+				completed, got, ok = s.waitUntil(ctx, expiryAt, true, done, heartbeat)
 			} else {
-				completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done)
+				completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done, heartbeat)
 			}
 		case hasNext || hasExpiry:
 			waitAt := next
 			if !hasNext || (hasExpiry && expiryAt.Before(waitAt)) {
 				waitAt = expiryAt
 			}
-			completed, got, ok = s.waitUntil(ctx, waitAt, true, done)
+			completed, got, ok = s.waitUntil(ctx, waitAt, true, done, heartbeat)
 		default:
-			completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done)
+			completed, got, ok = s.waitUntil(ctx, time.Time{}, false, done, heartbeat)
 		}
 		if !ok {
 			return nil
 		}
 		if got {
-			s.complete(completed, &running, inflight, settled, hold, providers)
+			s.complete(completed, &running, inflight, settled, hold, runningTargets, providers)
 		}
 	}
 }
 
-func (s *Scheduler) complete(completed completion, running *int, inflight map[string]bool, settled map[int64]generation, hold map[int64]time.Time, providers map[provider.ID]*providerRuntime) {
+func (s *Scheduler) complete(completed completion, running *int, inflight map[string]bool, settled map[int64]generation, hold map[int64]time.Time, runningTargets map[int64]bool, providers map[provider.ID]*providerRuntime) {
 	if *running > 0 {
 		*running--
 	}
 	delete(inflight, completed.target.MonitorID)
+	delete(runningTargets, completed.target.ID)
 	providerState(providers, completed.target.ProviderID).complete()
 	if completed.result.Settled {
 		delete(hold, completed.target.ID)
@@ -822,7 +980,7 @@ func (s *Scheduler) reconcileExpirations(ctx context.Context, now time.Time) (ti
 
 // waitUntil blocks until the next timer, a wake, a completion, or cancellation.
 // It returns (completion, receivedCompletion, stillRunning).
-func (s *Scheduler) waitUntil(ctx context.Context, until time.Time, hasUntil bool, done <-chan completion) (completion, bool, bool) {
+func (s *Scheduler) waitUntil(ctx context.Context, until time.Time, hasUntil bool, done <-chan completion, heartbeat <-chan time.Time) (completion, bool, bool) {
 	var timer Timer
 	var timerC <-chan time.Time
 	if hasUntil {
@@ -835,15 +993,22 @@ func (s *Scheduler) waitUntil(ctx context.Context, until time.Time, hasUntil boo
 		defer timer.Stop()
 	}
 
-	select {
-	case <-ctx.Done():
-		return completion{}, false, false
-	case <-s.wake:
-		return completion{}, false, true
-	case completed := <-done:
-		return completed, true, true
-	case <-timerC:
-		return completion{}, false, true
+	for {
+		select {
+		case <-ctx.Done():
+			return completion{}, false, false
+		case <-s.wake:
+			return completion{}, false, true
+		case completed := <-done:
+			return completed, true, true
+		case <-heartbeat:
+			if s.recorder != nil {
+				s.recorder.Heartbeat(s.clock.Now().UTC())
+			}
+			continue
+		case <-timerC:
+			return completion{}, false, true
+		}
 	}
 }
 

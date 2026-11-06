@@ -72,6 +72,20 @@ type CheckAttempt struct {
 	SelectionRequired bool
 	Err               error
 	Classification    provider.Classification
+
+	// Provider request diagnostics. ProviderRequest is true only when the
+	// adapter Check call was actually invoked. ProviderDuration excludes the
+	// attempt-start transaction, monitor load, configuration validation, and
+	// outcome transaction.
+	ProviderRequest    bool
+	ProviderStartedAt  time.Time
+	ProviderDuration   time.Duration
+	ProviderErrorKind  provider.ErrorKind
+	QueueWait          time.Duration
+	ExpectedSpacing    time.Duration
+	ConfiguredInterval time.Duration
+	AdaptiveInterval   time.Duration
+
 	// MonitoringDisabled means the global switch was off (or unreadable) before
 	// provider I/O. No running check row was created.
 	MonitoringDisabled bool
@@ -173,16 +187,20 @@ func (s *CheckStage) RunCheck(ctx context.Context, target Target) (CheckAttempt,
 
 	metadata := adapter.Metadata()
 	attempt := CheckAttempt{
-		CheckRunID:        checkRunID,
-		TargetID:          persisted.ID,
-		MonitorID:         persisted.MonitorID,
-		ProviderID:        persisted.ProviderID,
-		ConfigVersion:     persisted.ConfigVersion,
-		BookingSlug:       persisted.BookingSlug,
-		StartedAt:         startedAt,
-		Request:           request,
-		Selections:        append([]domain.MonitorProviderSelection(nil), persisted.Selections...),
-		SelectionRequired: metadata.Capabilities.RequiresOptionSelection,
+		CheckRunID:         checkRunID,
+		TargetID:           persisted.ID,
+		MonitorID:          persisted.MonitorID,
+		ProviderID:         persisted.ProviderID,
+		ConfigVersion:      persisted.ConfigVersion,
+		BookingSlug:        persisted.BookingSlug,
+		StartedAt:          startedAt,
+		Request:            request,
+		Selections:         append([]domain.MonitorProviderSelection(nil), persisted.Selections...),
+		SelectionRequired:  metadata.Capabilities.RequiresOptionSelection,
+		QueueWait:          target.QueueWait,
+		ExpectedSpacing:    target.ExpectedSpacing,
+		ConfiguredInterval: target.ConfiguredInterval,
+		AdaptiveInterval:   target.AdaptiveInterval,
 	}
 
 	if attempt.SelectionRequired && len(attempt.Selections) == 0 {
@@ -221,8 +239,19 @@ func (s *CheckStage) RunCheck(ctx context.Context, target Target) (CheckAttempt,
 	// and caller cancellation maps to abandoned.
 	checkCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
+	providerStartedAt := s.now().UTC()
+	attempt.ProviderRequest = true
+	attempt.ProviderStartedAt = providerStartedAt
 	attempt.Result, attempt.Err = adapter.Check(checkCtx, request)
+	providerFinishedAt := s.now().UTC()
+	attempt.ProviderDuration = providerFinishedAt.Sub(providerStartedAt)
+	if attempt.ProviderDuration < 0 {
+		attempt.ProviderDuration = 0
+	}
 	attempt.Classification = provider.Classify(checkCtx, attempt.Err)
+	if attempt.Classification.Kind.Valid() {
+		attempt.ProviderErrorKind = attempt.Classification.Kind
+	}
 	attempt.FinishedAt, attempt.Duration = s.finish(startedAt)
 	return attempt, nil
 }

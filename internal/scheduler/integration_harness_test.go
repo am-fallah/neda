@@ -338,6 +338,15 @@ type integrationCheck struct {
 	NotReservable int
 	Unknown       int
 	Warnings      int
+
+	ProviderRequest    int
+	ProviderStartedAt  sql.NullString
+	ProviderDurationMS sql.NullInt64
+	ProviderErrorKind  sql.NullString
+	QueueWaitMS        sql.NullInt64
+	ExpectedSpacingMS  sql.NullInt64
+	ConfiguredMS       sql.NullInt64
+	AdaptiveMS         sql.NullInt64
 }
 
 func (h *integrationHarness) latestCheck(targetID int64) integrationCheck {
@@ -345,11 +354,16 @@ func (h *integrationHarness) latestCheck(targetID int64) integrationCheck {
 	var check integrationCheck
 	if err := h.sqlDB.QueryRow(`SELECT id, outcome, error_kind, config_version, finished_at,
 		duration_ms, http_status, journey_count, offering_count, reservable_count,
-		not_reservable_count, unknown_count, warning_count
+		not_reservable_count, unknown_count, warning_count,
+		provider_request, provider_started_at, provider_duration_ms, provider_error_kind,
+		queue_wait_ms, expected_spacing_ms, configured_interval_ms, adaptive_interval_ms
 		FROM check_runs WHERE monitor_provider_id = ? ORDER BY id DESC LIMIT 1`, targetID).Scan(
 		&check.ID, &check.Outcome, &check.ErrorKind, &check.ConfigVersion, &check.FinishedAt,
 		&check.DurationMS, &check.HTTPStatus, &check.Journeys, &check.Offerings,
 		&check.Reservable, &check.NotReservable, &check.Unknown, &check.Warnings,
+		&check.ProviderRequest, &check.ProviderStartedAt, &check.ProviderDurationMS,
+		&check.ProviderErrorKind, &check.QueueWaitMS, &check.ExpectedSpacingMS,
+		&check.ConfiguredMS, &check.AdaptiveMS,
 	); err != nil {
 		h.t.Fatalf("query latest check for target %d: %v", targetID, err)
 	}

@@ -15,6 +15,8 @@ import (
 
 const (
 	defaultCheckRuns             = 14 * 24 * time.Hour
+	defaultProviderMinuteMetrics = 7 * 24 * time.Hour
+	defaultRateLimitEvents       = 90 * 24 * time.Hour
 	defaultNotificationAttempts  = 30 * 24 * time.Hour
 	defaultEvents                = 180 * 24 * time.Hour
 	defaultHealthEpisodes        = 180 * 24 * time.Hour
@@ -28,6 +30,8 @@ const (
 // Config controls retention windows. Zero values receive documented defaults.
 type Config struct {
 	CheckRuns             time.Duration
+	ProviderMinuteMetrics time.Duration
+	RateLimitEvents       time.Duration
 	NotificationAttempts  time.Duration
 	Events                time.Duration
 	HealthEpisodes        time.Duration
@@ -42,14 +46,18 @@ type Config struct {
 
 // Summary reports rows removed by one run.
 type Summary struct {
-	Attempts             int64
-	CheckRuns            int64
-	Events               int64
-	HealthEpisodes       int64
-	AvailabilityEpisodes int64
-	InventoryStates      int64
-	Sessions             int64
-	PushSubscriptions    int64
+	Attempts              int64
+	CheckRuns             int64
+	ProviderMinuteMetrics int64
+	ProviderQueueSamples  int64
+	DeferralEpisodes      int64
+	RateLimitEvents       int64
+	Events                int64
+	HealthEpisodes        int64
+	AvailabilityEpisodes  int64
+	InventoryStates       int64
+	Sessions              int64
+	PushSubscriptions     int64
 }
 
 // Worker executes retention on a daily cadence.
@@ -72,6 +80,12 @@ func New(db *sql.DB, cfg Config) (*Worker, error) {
 	}
 	if cfg.CheckRuns == 0 {
 		cfg.CheckRuns = defaultCheckRuns
+	}
+	if cfg.ProviderMinuteMetrics == 0 {
+		cfg.ProviderMinuteMetrics = defaultProviderMinuteMetrics
+	}
+	if cfg.RateLimitEvents == 0 {
+		cfg.RateLimitEvents = defaultRateLimitEvents
 	}
 	if cfg.NotificationAttempts == 0 {
 		cfg.NotificationAttempts = defaultNotificationAttempts
@@ -104,7 +118,8 @@ func New(db *sql.DB, cfg Config) (*Worker, error) {
 		return nil, errors.New("retention: initial delay must be between 0 and the interval")
 	}
 	for name, value := range map[string]time.Duration{
-		"check runs": cfg.CheckRuns, "notification attempts": cfg.NotificationAttempts,
+		"check runs": cfg.CheckRuns, "provider minute metrics": cfg.ProviderMinuteMetrics,
+		"rate-limit events": cfg.RateLimitEvents, "notification attempts": cfg.NotificationAttempts,
 		"events": cfg.Events, "health episodes": cfg.HealthEpisodes,
 		"inventory states": cfg.InventoryStates, "revoked sessions": cfg.RevokedSessions,
 		"disabled subscriptions": cfg.DisabledSubscriptions,
@@ -112,6 +127,12 @@ func New(db *sql.DB, cfg Config) (*Worker, error) {
 		if value <= 0 {
 			return nil, fmt.Errorf("retention: %s window must be positive", name)
 		}
+	}
+	// Provider-minute rollups are deterministically rebuilt from check_runs for
+	// their full retention window. Keeping check detail at least as long prevents
+	// source deletion before the last recomputation.
+	if cfg.CheckRuns < cfg.ProviderMinuteMetrics {
+		return nil, errors.New("retention: check-runs window must be at least the provider-minute-metrics window")
 	}
 	return &Worker{db: db, cfg: cfg, logger: cfg.Logger}, nil
 }
@@ -149,6 +170,10 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.logger.Info("retention completed",
 				"attempts", summary.Attempts,
 				"check_runs", summary.CheckRuns,
+				"provider_minute_metrics", summary.ProviderMinuteMetrics,
+				"provider_queue_samples", summary.ProviderQueueSamples,
+				"provider_deferral_episodes", summary.DeferralEpisodes,
+				"provider_rate_limit_events", summary.RateLimitEvents,
 				"events", summary.Events,
 				"health_episodes", summary.HealthEpisodes,
 				"availability_episodes", summary.AvailabilityEpisodes,
@@ -182,6 +207,8 @@ func (w *Worker) RunOnce(ctx context.Context) (Summary, error) {
 		return Summary{}, errors.New("retention: current timestamp is required")
 	}
 	checkCutoff := now.Add(-w.cfg.CheckRuns)
+	providerMinuteCutoff := now.Add(-w.cfg.ProviderMinuteMetrics)
+	rateLimitEventCutoff := now.Add(-w.cfg.RateLimitEvents)
 	attemptCutoff := now.Add(-w.cfg.NotificationAttempts)
 	eventCutoff := now.Add(-w.cfg.Events)
 	healthCutoff := now.Add(-w.cfg.HealthEpisodes)
@@ -206,6 +233,46 @@ func (w *Worker) RunOnce(ctx context.Context) (Summary, error) {
 		dest *int64
 		run  func() (sql.Result, error)
 	}{
+		{
+			name: "reconcile orphaned deferral episodes",
+			dest: nil,
+			run: func() (sql.Result, error) {
+				return tx.ExecContext(ctx, `
+UPDATE provider_deferral_episodes
+SET resolved_at = ?
+WHERE resolved_at IS NULL AND target_id IS NULL`, format(now))
+			},
+		},
+		{
+			name: "provider queue samples",
+			dest: &summary.ProviderQueueSamples,
+			run: func() (sql.Result, error) {
+				return tx.ExecContext(ctx, `DELETE FROM provider_queue_samples WHERE minute_start < ?`, format(providerMinuteCutoff))
+			},
+		},
+		{
+			name: "resolved deferral episodes",
+			dest: &summary.DeferralEpisodes,
+			run: func() (sql.Result, error) {
+				return tx.ExecContext(ctx, `
+DELETE FROM provider_deferral_episodes
+WHERE resolved_at IS NOT NULL AND started_at < ?`, format(providerMinuteCutoff))
+			},
+		},
+		{
+			name: "provider minute metrics",
+			dest: &summary.ProviderMinuteMetrics,
+			run: func() (sql.Result, error) {
+				return tx.ExecContext(ctx, `DELETE FROM provider_minute_metrics WHERE minute_start < ?`, format(providerMinuteCutoff))
+			},
+		},
+		{
+			name: "provider rate-limit events",
+			dest: &summary.RateLimitEvents,
+			run: func() (sql.Result, error) {
+				return tx.ExecContext(ctx, `DELETE FROM provider_rate_limit_events WHERE occurred_at < ?`, format(rateLimitEventCutoff))
+			},
+		},
 		{
 			name: "notification attempts",
 			dest: &summary.Attempts,

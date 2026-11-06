@@ -5,8 +5,11 @@ import "time"
 // StaleFloor is the minimum provider-staleness threshold.
 const StaleFloor = 15 * time.Minute
 
-// StaleThreshold returns the derived stale threshold: max(3×poll interval,
-// 15 minutes). The threshold is for API presentation; it is not persisted.
+// StaleThreshold returns the legacy provider-health threshold:
+// max(3×poll interval, 15 minutes). The observability API uses a richer
+// formula that also accounts for the adaptive interval, earliest next due
+// time, and active cooldown; see observability.StaleThreshold. Neither value is
+// persisted.
 func StaleThreshold(pollInterval time.Duration) time.Duration {
 	if pollInterval <= 0 {
 		return StaleFloor
