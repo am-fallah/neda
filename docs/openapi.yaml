@@ -1723,7 +1723,7 @@ components:
           type: string
     SettingsResponse:
       type: object
-      required: [pollIntervalSeconds, pushEnabled, monitoringEnabled, unavailableNotifyAfterMinutes, telegram]
+      required: [pollIntervalSeconds, pushEnabled, monitoringEnabled, unavailableNotifyAfterMinutes, dailyReport, telegram]
       properties:
         pollIntervalSeconds:
           type: integer
@@ -1737,8 +1737,30 @@ components:
           minimum: 60
           maximum: 1440
           description: Confirmed-unavailable grace period before one silent informational notice.
+        dailyReport:
+          $ref: "#/components/schemas/DailyReportSettings"
         telegram:
           $ref: "#/components/schemas/TelegramSettings"
+    DailyReportSettings:
+      type: object
+      required: [time]
+      properties:
+        time:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Tehran-local 24-hour report time; default 00:05.
+        lastReportDate:
+          type: string
+          description: Most recent report date (YYYY-MM-DD, Tehran).
+        lastStatus:
+          type: string
+          enum: [pending, sending, sent, failed, skipped, uncertain]
+        lastSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastErrorKind:
+          type: string
     SettingsUpdateRequest:
       type: object
       minProperties: 1
@@ -1757,6 +1779,10 @@ components:
           minimum: 60
           maximum: 1440
           description: Confirmed-unavailable grace period in minutes; changing it does not rewrite existing streaks.
+        dailyReportTime:
+          type: string
+          pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'
+          description: Tehran-local report time; changing it affects the next scheduler evaluation without rewriting prior report rows.
     TelegramConfigRequest:
       type: object
       properties:

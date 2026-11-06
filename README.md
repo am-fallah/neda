@@ -21,6 +21,7 @@ Neda is built for one technical owner who self-hosts the service. It is not SaaS
 - **Background scheduling** with a global monitoring switch, a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, jitter, exponential target backoff, restart recovery, and near-term checks after edits or resume.
 - **Conservative availability tracking** using `Reservable`, `NotReservable`, and `Unknown`, durable availability episodes, and deduplicated availability events.
 - **Low-noise unavailability notices:** no immediate sold-out notification; one silent informational notice after a configurable confirmed-unavailable grace period (default three hours). Availability returning still sends an immediate sound-enabled notification.
+- **Daily Telegram summary:** one silent report at 00:05 Asia/Tehran (configurable) for the previous complete local day, including checks, availability changes, notifications, provider errors, monitor status, and a quiet-day message. Duplicate reports for the same date are prevented.
 - **Two independent notification channels**: Telegram Bot API and browser Web Push. Both use a transactional outbox, a retrying delivery worker, and per-channel delivery history.
 - **Provider health tracking**, separate from ticket availability: last attempt/success/error, consecutive infrastructure failures, one deduplicated degraded episode after three failures, a recovery event, and stale detection.
 - **Operational visibility**: overview counts, monitor observations, recent checks, provider health and degraded/recovered events, event history, delivery status, and booking links when available.
@@ -197,7 +198,7 @@ The frontend is a single-page application served by the Go binary. It is English
 | `/monitors/:id` | Status, route/date/passengers, selected offerings, last observations, recent checks, provider diagnostics, pause/resume, edit, and delete. |
 | `/monitors/:id/edit` | Label edits; material route/date/passenger changes require a fresh selection set. |
 | `/events`, `/events/:id` | Availability and provider-health event history, delivery status, filters, cursor pagination, and booking links. |
-| `/settings` | Global monitoring switch, global polling interval, unavailability grace period, Telegram configuration/test, browser Push devices, password change, and appearance. |
+| `/settings` | Global monitoring switch, global polling interval, unavailability grace period, daily report time/status, Telegram configuration/test, browser Push devices, password change, and appearance. |
 
 The private REST API lives under `/api/v1` and covers auth, monitors, providers and search, events, deliveries, overview, settings, and Push. `/healthz` and `/readyz` are public; `/api/v1/auth/login` and `/api/v1/auth/session` are intentionally accessible to the login page. The hand-written OpenAPI 3.0.3 document is [`docs/openapi.yaml`](docs/openapi.yaml).
 

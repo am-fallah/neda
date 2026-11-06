@@ -225,6 +225,37 @@ describe("SettingsPage", () => {
     );
   });
 
+  it("saves the daily report time and shows last report status", async () => {
+    getMock.mockResolvedValue(
+      makeSettings({
+        dailyReport: {
+          time: "00:05",
+          lastReportDate: "2026-11-05",
+          lastStatus: "sent",
+          lastSentAt: "2026-11-05T20:35:00Z",
+        },
+      }),
+    );
+    updateMock.mockResolvedValue(
+      makeSettings({
+        dailyReport: { time: "06:30" },
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByText("sent")).toBeInTheDocument();
+    expect(screen.getByText(/2026-11-05/)).toBeInTheDocument();
+
+    const input = screen.getByLabelText("Report time (Asia/Tehran)");
+    expect(input).toHaveValue("00:05");
+    await user.clear(input);
+    await user.type(input, "06:30");
+    await user.click(screen.getByRole("button", { name: "Save report time" }));
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({ dailyReportTime: "06:30" }),
+    );
+  });
+
   it("validates and saves the polling interval", async () => {
     updateMock.mockResolvedValue(
       makeSettings({ pollIntervalSeconds: 600 }),

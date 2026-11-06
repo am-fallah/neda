@@ -408,11 +408,20 @@ export interface TelegramSettings {
   lastErrorKind?: string;
 }
 
+export interface DailyReportSettings {
+  time: string;
+  lastReportDate?: string;
+  lastStatus?: string;
+  lastSentAt?: string | null;
+  lastErrorKind?: string;
+}
+
 export interface Settings {
   pollIntervalSeconds: number;
   pushEnabled: boolean;
   monitoringEnabled: boolean;
   unavailableNotifyAfterMinutes: number;
+  dailyReport: DailyReportSettings;
   telegram: TelegramSettings;
 }
 
@@ -421,6 +430,7 @@ export interface SettingsUpdateRequest {
   pushEnabled?: boolean;
   monitoringEnabled?: boolean;
   unavailableNotifyAfterMinutes?: number;
+  dailyReportTime?: string;
 }
 
 export interface TelegramConfigRequest {

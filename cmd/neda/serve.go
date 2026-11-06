@@ -30,6 +30,7 @@ import (
 	"github.com/am-fallah/neda/internal/provider/fake"
 	"github.com/am-fallah/neda/internal/provider/mrbilit"
 	pushservice "github.com/am-fallah/neda/internal/push"
+	"github.com/am-fallah/neda/internal/report"
 	"github.com/am-fallah/neda/internal/retention"
 	"github.com/am-fallah/neda/internal/scheduler"
 	appsettings "github.com/am-fallah/neda/internal/settings"
@@ -130,6 +131,10 @@ func runServe(stdout, stderr io.Writer) int {
 	}
 	if err := appStore.EnsureUnavailableNotifyAfter(ctx, time.Now().UTC()); err != nil {
 		logger.Error("unavailability grace initialization failed", "error", err)
+		return 1
+	}
+	if err := appStore.EnsureDailyReportTime(ctx, time.Now().UTC()); err != nil {
+		logger.Error("daily report schedule initialization failed", "error", err)
 		return 1
 	}
 	pollInterval, err := appStore.PollInterval(ctx)
@@ -292,6 +297,33 @@ func runServe(stdout, stderr io.Writer) int {
 		}
 	}
 
+	var dailyReportWorker *report.Worker
+	if telegramSettings != nil && telegramClient != nil {
+		tehran, locateErr := time.LoadLocation("Asia/Tehran")
+		if locateErr != nil {
+			logger.Error("daily report timezone load failed", "error", locateErr)
+			return 1
+		}
+		reportSender, senderErr := report.NewTelegramSender(telegramSettings, telegramClient)
+		if senderErr != nil {
+			logger.Error("daily report sender initialization failed", "error", senderErr)
+			return 1
+		}
+		dailyReportWorker, err = report.New(report.Config{
+			DB:       database.DB,
+			Store:    appStore,
+			Sender:   reportSender,
+			Location: tehran,
+			Logger:   logger,
+		})
+		if err != nil {
+			logger.Error("daily report worker initialization failed", "error", err)
+			return 1
+		}
+	} else {
+		logger.Warn("daily report worker disabled: Telegram encryption settings are unavailable")
+	}
+
 	monitoringEnabled, err := appStore.MonitoringEnabled(ctx)
 	if err != nil {
 		logger.Error("monitoring setting read failed", "error", err)
@@ -303,6 +335,7 @@ func runServe(stdout, stderr io.Writer) int {
 		"poll_interval", pollInterval.String(),
 		"provider_spacing", scheduler.DefaultProviderSpacing.String(),
 		"delivery_worker", deliveryWorker != nil,
+		"daily_report_worker", dailyReportWorker != nil,
 		"fake_provider", providerFlags.FakeEnabled,
 		"mrbilit_provider", providerFlags.MrBilitEnabled,
 		"mode", "runner-composed",
@@ -348,6 +381,13 @@ func runServe(stdout, stderr io.Writer) int {
 		go func() { ch <- deliveryWorker.Run(runCtx) }()
 	}
 
+	var dailyReportErr <-chan error
+	if dailyReportWorker != nil {
+		ch := make(chan error, 1)
+		dailyReportErr = ch
+		go func() { ch <- dailyReportWorker.Run(runCtx) }()
+	}
+
 	serverErr := make(chan error, 1)
 	go func() {
 		err := server.Run(runCtx)
@@ -364,6 +404,10 @@ func runServe(stdout, stderr io.Writer) int {
 	if deliveryErr != nil {
 		deliveryRunErr = <-deliveryErr
 	}
+	var dailyReportRunErr error
+	if dailyReportErr != nil {
+		dailyReportRunErr = <-dailyReportErr
+	}
 
 	if schedErr != nil {
 		logger.Error("scheduler stopped with error", "error", schedErr)
@@ -377,7 +421,10 @@ func runServe(stdout, stderr io.Writer) int {
 	if deliveryRunErr != nil {
 		logger.Error("delivery worker stopped with error", "error", deliveryRunErr)
 	}
-	if schedErr != nil || unexpectedStop || serverRunErr != nil || deliveryRunErr != nil {
+	if dailyReportRunErr != nil {
+		logger.Error("daily report worker stopped with error", "error", dailyReportRunErr)
+	}
+	if schedErr != nil || unexpectedStop || serverRunErr != nil || deliveryRunErr != nil || dailyReportRunErr != nil {
 		return 1
 	}
 	logger.Info("service stopped")

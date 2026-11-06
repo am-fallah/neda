@@ -12,11 +12,20 @@ import (
 )
 
 type settingsResponse struct {
-	PollIntervalSeconds        int                      `json:"pollIntervalSeconds"`
-	PushEnabled                bool                     `json:"pushEnabled"`
-	MonitoringEnabled          bool                     `json:"monitoringEnabled"`
-	UnavailableNotifyAfterMins int                      `json:"unavailableNotifyAfterMinutes"`
-	Telegram                   telegramSettingsResponse `json:"telegram"`
+	PollIntervalSeconds        int                         `json:"pollIntervalSeconds"`
+	PushEnabled                bool                        `json:"pushEnabled"`
+	MonitoringEnabled          bool                        `json:"monitoringEnabled"`
+	UnavailableNotifyAfterMins int                         `json:"unavailableNotifyAfterMinutes"`
+	DailyReport                dailyReportSettingsResponse `json:"dailyReport"`
+	Telegram                   telegramSettingsResponse    `json:"telegram"`
+}
+
+type dailyReportSettingsResponse struct {
+	Time           string     `json:"time"`
+	LastReportDate string     `json:"lastReportDate,omitempty"`
+	LastStatus     string     `json:"lastStatus,omitempty"`
+	LastSentAt     *time.Time `json:"lastSentAt"`
+	LastErrorKind  string     `json:"lastErrorKind,omitempty"`
 }
 
 type telegramSettingsResponse struct {
@@ -31,10 +40,11 @@ type telegramSettingsResponse struct {
 }
 
 type settingsUpdateRequest struct {
-	PollIntervalSeconds        *int  `json:"pollIntervalSeconds"`
-	PushEnabled                *bool `json:"pushEnabled"`
-	MonitoringEnabled          *bool `json:"monitoringEnabled"`
-	UnavailableNotifyAfterMins *int  `json:"unavailableNotifyAfterMinutes"`
+	PollIntervalSeconds        *int    `json:"pollIntervalSeconds"`
+	PushEnabled                *bool   `json:"pushEnabled"`
+	MonitoringEnabled          *bool   `json:"monitoringEnabled"`
+	UnavailableNotifyAfterMins *int    `json:"unavailableNotifyAfterMinutes"`
+	DailyReportTime            *string `json:"dailyReportTime"`
 }
 
 type telegramConfigRequest struct {
@@ -94,6 +104,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		PushEnabled:                body.PushEnabled,
 		MonitoringEnabled:          body.MonitoringEnabled,
 		UnavailableNotifyAfterMins: body.UnavailableNotifyAfterMins,
+		DailyReportTime:            body.DailyReportTime,
 	})
 	if err != nil {
 		s.writeSettingsError(w, r, err)
@@ -144,6 +155,13 @@ func settingsDTO(view appsettings.View) settingsResponse {
 		PushEnabled:                view.PushEnabled,
 		MonitoringEnabled:          view.MonitoringEnabled,
 		UnavailableNotifyAfterMins: view.UnavailableNotifyAfterMins,
+		DailyReport: dailyReportSettingsResponse{
+			Time:           view.DailyReport.Time,
+			LastReportDate: view.DailyReport.LastReportDate,
+			LastStatus:     view.DailyReport.LastStatus,
+			LastSentAt:     utcOptional(view.DailyReport.LastSentAt),
+			LastErrorKind:  view.DailyReport.LastErrorKind,
+		},
 		Telegram: telegramSettingsResponse{
 			Available:         view.Telegram.Available,
 			Configured:        view.Telegram.Configured,

@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   BellOff,
   BellRing,
+  CalendarClock,
   CheckCircle2,
   KeyRound,
   Loader2,
@@ -395,6 +396,120 @@ function UnavailableGraceForm({
         timer, and a long gap resets the streak.
       </p>
     </form>
+  );
+}
+
+function DailyReportForm({
+  settings,
+  onUpdated,
+}: {
+  settings: Settings;
+  onUpdated: (settings: Settings) => void;
+}) {
+  const [time, setTime] = useState(settings.dailyReport.time);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setTime(settings.dailyReport.time);
+  }, [settings.dailyReport.time]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      setError("Enter a 24-hour time such as 00:05.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await settingsApi.update({ dailyReportTime: time });
+      onUpdated(updated);
+      toast.success("Daily report time saved", {
+        description: `The silent previous-day report runs at ${time} Asia/Tehran.`,
+      });
+    } catch (caught) {
+      if (isApiError(caught)) {
+        setError(caught.fields.dailyReportTime ?? caught.message);
+      } else {
+        setError("The daily report time could not be saved.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const last = settings.dailyReport;
+  const statusVariant =
+    last.lastStatus === "sent"
+      ? "success"
+      : last.lastStatus === "uncertain"
+        ? "warning"
+        : last.lastStatus === "failed"
+          ? "destructive"
+          : "muted";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <span className="text-muted-foreground">Last report:</span>
+        {last.lastStatus ? (
+          <>
+            <Badge variant={statusVariant}>{last.lastStatus}</Badge>
+            <span>
+              {last.lastReportDate ?? "—"}
+              {last.lastSentAt
+                ? ` · sent ${formatTehranTimestamp(last.lastSentAt)}`
+                : ""}
+            </span>
+            {last.lastErrorKind ? (
+              <span className="font-mono text-xs text-muted-foreground">
+                {last.lastErrorKind}
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <span className="text-muted-foreground">Not generated yet</span>
+        )}
+      </div>
+      <form onSubmit={handleSubmit} noValidate className="space-y-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <FormField
+            id="dailyReportTime"
+            label="Report time (Asia/Tehran)"
+            error={error}
+            description="24-hour time. Default 00:05; the report covers the previous complete local day."
+            className="w-full max-w-xs"
+          >
+            <Input
+              {...fieldProps("dailyReportTime", error)}
+              type="time"
+              step={60}
+              value={time}
+              onChange={(event) => {
+                setTime(event.target.value);
+                setError("");
+              }}
+            />
+          </FormField>
+          <Button type="submit" disabled={saving}>
+            {saving ? (
+              <Loader2 className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Save aria-hidden="true" />
+            )}
+            {saving ? "Saving…" : "Save report time"}
+          </Button>
+        </div>
+        <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+          One silent Telegram report is sent per reporting date, even on quiet
+          days. It uses the configured Telegram destination and durable activity
+          data. If Telegram is not configured the attempt is recorded as skipped.
+          A crash during sending leaves the date marked uncertain rather than
+          risking a duplicate; the next complete day is reported normally.
+        </p>
+      </form>
+    </div>
   );
 }
 
@@ -851,6 +966,23 @@ export function SettingsPage() {
             settings={settings}
             onUpdated={setSettings}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CalendarClock className="size-4" aria-hidden="true" />
+            Daily Telegram report
+          </CardTitle>
+          <CardDescription>
+            One silent summary of the previous complete Tehran day. The default
+            is 00:05 local time; duplicate reports for the same date are
+            prevented by a durable report row.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <DailyReportForm settings={settings} onUpdated={setSettings} />
         </CardContent>
       </Card>
 
