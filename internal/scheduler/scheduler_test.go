@@ -360,6 +360,23 @@ func startSchedulerWithMonitoring(
 	spacing time.Duration,
 	monitoring scheduler.MonitoringSwitch,
 ) *runningScheduler {
+	return startSchedulerWithInterval(t, repo, registry, clock, runner, workers, random, wake, grace, spacing, 300*time.Second, monitoring)
+}
+
+func startSchedulerWithInterval(
+	t *testing.T,
+	repo scheduler.Repository,
+	registry *provider.Registry,
+	clock *fakeClock,
+	runner scheduler.Runner,
+	workers int,
+	random scheduler.Random,
+	wake *scheduler.Waker,
+	grace time.Duration,
+	spacing time.Duration,
+	interval time.Duration,
+	monitoring scheduler.MonitoringSwitch,
+) *runningScheduler {
 	t.Helper()
 	if random == nil {
 		random = zeroRandom()
@@ -367,7 +384,7 @@ func startSchedulerWithMonitoring(
 	sched, err := scheduler.New(scheduler.Config{
 		Repository:      repo,
 		Providers:       registry,
-		Interval:        fixedInterval(300 * time.Second),
+		Interval:        fixedInterval(interval),
 		Monitoring:      monitoring,
 		Runner:          runner,
 		Workers:         workers,

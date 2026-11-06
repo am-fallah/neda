@@ -46,11 +46,46 @@ func DecideTargetSchedule(
 	classification provider.Classification,
 	random Random,
 ) (ScheduleDecision, error) {
+	return decideTargetSchedule(now, interval, 0, time.Time{}, currentFailures, classification, random)
+}
+
+// DecideTargetScheduleWithProvider applies the provider-level adaptive polling
+// interval and cooldown as strict lower bounds on top of the target policy.
+// effectiveInterval is max(configured, adaptive); cooldownUntil is the absolute
+// Retry-After/adaptive hold. Using both here keeps the persisted target schedule
+// and the scheduler guard aligned around one next-eligible calculation.
+func DecideTargetScheduleWithProvider(
+	now time.Time,
+	configuredInterval time.Duration,
+	effectiveInterval time.Duration,
+	cooldownUntil time.Time,
+	currentFailures int,
+	classification provider.Classification,
+	random Random,
+) (ScheduleDecision, error) {
+	return decideTargetSchedule(now, configuredInterval, effectiveInterval, cooldownUntil, currentFailures, classification, random)
+}
+
+func decideTargetSchedule(
+	now time.Time,
+	interval time.Duration,
+	effectiveInterval time.Duration,
+	cooldownUntil time.Time,
+	currentFailures int,
+	classification provider.Classification,
+	random Random,
+) (ScheduleDecision, error) {
 	if now.IsZero() {
 		return ScheduleDecision{}, errors.New("scheduler: schedule time must not be zero")
 	}
 	if err := domain.ValidatePollInterval(interval); err != nil {
 		return ScheduleDecision{}, fmt.Errorf("scheduler: %w", err)
+	}
+	if effectiveInterval < 0 {
+		return ScheduleDecision{}, errors.New("scheduler: effective polling interval must not be negative")
+	}
+	if effectiveInterval < interval {
+		effectiveInterval = interval
 	}
 	if currentFailures < 0 {
 		return ScheduleDecision{}, errors.New("scheduler: consecutive failures must not be negative")
@@ -63,18 +98,41 @@ func DecideTargetSchedule(
 	if classification.IsAbandoned() {
 		return ScheduleDecision{Apply: false}, nil
 	}
+	retryAfter := NormalizeRetryAfter(classification.RetryAfter)
+
+	nextFor := func(base time.Duration) time.Time {
+		next := now.Add(base)
+		if effectiveInterval > 0 {
+			if effective := now.Add(effectiveInterval); effective.After(next) {
+				next = effective
+			}
+		}
+		if retryAfter > 0 {
+			if retry := now.Add(retryAfter); retry.After(next) {
+				next = retry
+			}
+		}
+		if !cooldownUntil.IsZero() {
+			cooldown := cooldownUntil.UTC()
+			if cooldown.After(next) {
+				next = cooldown
+			}
+		}
+		return next
+	}
+
 	if classification.IsSuccess() {
 		return ScheduleDecision{
 			Apply:               true,
 			ConsecutiveFailures: 0,
-			NextDueAt:           now.Add(NextInterval(interval, random)),
+			NextDueAt:           nextFor(NextInterval(interval, random)),
 		}, nil
 	}
 	if !classification.TargetBackoff {
 		return ScheduleDecision{
 			Apply:               true,
 			ConsecutiveFailures: currentFailures,
-			NextDueAt:           now.Add(NextInterval(interval, random)),
+			NextDueAt:           nextFor(NextInterval(interval, random)),
 		}, nil
 	}
 
@@ -84,13 +142,13 @@ func DecideTargetSchedule(
 	failures := currentFailures + 1
 	delay := backoffDelay(interval, failures)
 	delay += JitterOffset(delay, random)
-	if classification.RetryAfter > delay {
-		delay = classification.RetryAfter
+	if retryAfter > delay {
+		delay = retryAfter
 	}
 	return ScheduleDecision{
 		Apply:               true,
 		ConsecutiveFailures: failures,
-		NextDueAt:           now.Add(delay),
+		NextDueAt:           nextFor(delay),
 	}, nil
 }
 

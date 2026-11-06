@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -146,13 +147,13 @@ PRAGMA legacy_alter_table = OFF;
 
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 7 {
-		t.Fatalf("migration count = %d, want 7", count)
+	if count := migrateReal(t, database); count != 8 {
+		t.Fatalf("migration count = %d, want 8", count)
 	}
-	if err := database.Ready(context.Background(), 7); err != nil {
+	if err := database.Ready(context.Background(), 8); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if err := database.Ready(context.Background(), 6); err == nil {
+	if err := database.Ready(context.Background(), 7); err == nil {
 		t.Fatal("Ready accepted an unexpected migration count")
 	}
 
@@ -160,18 +161,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 7 {
-		t.Fatalf("schema_migrations count = %d, want 7", migrationsApplied)
+	if migrationsApplied != 8 {
+		t.Fatalf("schema_migrations count = %d, want 8", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 7 {
-		t.Fatalf("second migration count = %d, want 7", count)
+	if count := migrateReal(t, database); count != 8 {
+		t.Fatalf("second migration count = %d, want 8", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 7 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 7", migrationsApplied)
+	if migrationsApplied != 8 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 8", migrationsApplied)
 	}
 
 	var integrity string
@@ -180,6 +181,41 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	}
 	if integrity != "ok" {
 		t.Fatalf("integrity_check = %q, want ok", integrity)
+	}
+}
+
+func TestProviderRateLimitMigrationPreservesExistingData(t *testing.T) {
+	database := openTestDB(t)
+	providerRateLimitSQL, err := fs.ReadFile(migrations.FS, "0008_provider_rate_limits.sql")
+	if err != nil {
+		t.Fatalf("read 0008 migration: %v", err)
+	}
+	fsys := fstest.MapFS{
+		"0001_existing.sql": &fstest.MapFile{Data: []byte(`
+CREATE TABLE settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	is_secret INTEGER NOT NULL DEFAULT 0,
+	updated_at TEXT NOT NULL
+);
+INSERT INTO settings VALUES ('poll_interval_seconds', '300', 0, '2026-01-01T00:00:00Z');
+`)},
+		"0008_provider_rate_limits.sql": &fstest.MapFile{Data: providerRateLimitSQL},
+	}
+	if count, err := Migrate(context.Background(), database.DB, fsys); err != nil || count != 2 {
+		t.Fatalf("Migrate = %d, %v; want 2, nil", count, err)
+	}
+	var interval string
+	if err := database.QueryRow(`SELECT value FROM settings WHERE key = 'poll_interval_seconds'`).Scan(&interval); err != nil {
+		t.Fatalf("existing setting after migration: %v", err)
+	}
+	if interval != "300" {
+		t.Fatalf("existing setting = %q, want 300", interval)
+	}
+	if _, err := database.Exec(`INSERT INTO provider_rate_limits
+		(provider_id, scope, adaptive_interval_ms, updated_at)
+		VALUES ('p', 'provider', 600000, '2026-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert migrated rate limit: %v", err)
 	}
 }
 
@@ -458,7 +494,7 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 7); err != nil {
+	if err := database.Ready(context.Background(), 8); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
 	}
 }
