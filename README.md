@@ -18,7 +18,7 @@ Neda is built for one technical owner who self-hosts the service. It is not SaaS
 
 - **Independent monitors** for a route, departure date, adult/child/infant counts, and one or more provider targets. Monitors can be paused, resumed, edited, and deleted; they expire automatically after the departure day ends in Tehran.
 - **URL-first MrBilit creation**: paste a public MrBilit train-search URL, review the train → wagon → fare hierarchy, and select the exact wagons or offerings to watch. Future offerings are not added automatically.
-- **Background scheduling** with a global monitoring switch, a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, jitter, exponential target backoff, restart recovery, and near-term checks after edits or resume.
+- **Background scheduling** with a global monitoring switch, a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, queue-aware request distribution, jitter, exponential target backoff, adaptive 429 throttling with `Retry-After` cooldowns, gradual recovery, restart recovery, and near-term checks after edits or resume.
 - **Conservative availability tracking** using `Reservable`, `NotReservable`, and `Unknown`, durable availability episodes, and deduplicated availability events.
 - **Low-noise unavailability notices:** no immediate sold-out notification; one silent informational notice after a configurable confirmed-unavailable grace period (default three hours). Availability returning still sends an immediate sound-enabled notification.
 - **Daily Telegram summary:** one silent report at 00:05 Asia/Tehran (configurable) for the previous complete local day, including checks, availability changes, notifications, provider errors, monitor status, and a quiet-day message. Duplicate reports for the same date are prevented.
@@ -71,7 +71,11 @@ The price filter and sorting in this screen are view-only. They never change the
 
 The scheduler runs inside the Go process. It selects active, non-expired targets, runs at most one check per monitor at a time, and keeps a configurable number of workers busy (default 2, maximum 16). Provider checks are spaced at least 5 seconds apart per provider.
 
-The global polling interval is a SQLite setting, defaulting to 300 seconds and bounded to 60–3600 seconds. After a check finishes, the next due time is calculated from the completion time with ±10% jitter. The effective start time can be later because of worker capacity, provider spacing, and backoff.
+Large due queues are spread across the provider's effective polling window instead of being dispatched in a burst. When servicing the queue at the 5-second minimum would consume at least a quarter of that window, spacing becomes `max(5s, effective window / due count)`; for example, 60 targets with a 10-minute window are paced about 10 seconds apart. Smaller queues keep the 5-second minimum. Startup, restart, and monitoring resume distribute overdue targets evenly across the effective window (or the normal 0–30-second near-term jitter for small queues), respect any persisted cooldown, and never move targets whose `next_due_at` is still in the future. Creating a monitor or changing the global interval does not reschedule existing monitors.
+
+The global polling interval is a SQLite setting, defaulting to 300 seconds and bounded to 60–3600 seconds. After a check finishes, the next due time is calculated from the completion time with ±10% jitter. The effective start time can be later because of worker capacity, provider spacing, adaptive 429 throttling, cooldowns, and backoff.
+
+A provider that returns HTTP 429 receives a durable adaptive polling penalty. The configured interval is never overwritten; the effective interval is `max(configured, adaptive)`. The first 429 doubles the adaptive interval, repeated 429s escalate exponentially up to `max(4× configured, 30 minutes)` with jitter, and a valid `Retry-After` (delta seconds or HTTP date) is always a mandatory lower bound. The scheduler never dispatches to that provider before the cooldown. One successful check does not erase the penalty: after three consecutive successful checks, one escalation step is released and the adaptive interval halves, returning to the configured interval after sustained success. The penalty and cooldown survive restarts and global monitoring OFF/ON. The current scope is the whole provider because adapters do not expose a narrower endpoint/account/IP identity; unrelated providers are unaffected.
 
 The global monitoring switch is also a SQLite setting, defaulting to **on**. When turned **off**, the scheduler stops dispatching provider checks and suppresses availability notifications. In-flight checks are finalized as discarded without changing availability, and individual monitor settings are untouched. Expiry reconciliation and reporting continue. Turning monitoring back on staggers overdue monitors so they resume within the normal worker/provider limits rather than bursting.
 
@@ -173,6 +177,7 @@ The scheduler, delivery worker, and retention worker are goroutines in the same 
 | `inventory_states`, `availability_episodes` | Latest state per target/config version/journey/offering and the open or closed reservable periods. |
 | `events`, `notification_deliveries`, `notification_attempts` | Durable availability and provider-health events, per-channel deliveries, and attempt history. |
 | `provider_health`, `provider_health_episodes` | Global per-provider diagnostics and degraded/recovery episodes. |
+| `provider_rate_limits` | Durable per-provider/scope adaptive 429 penalty, `Retry-After` cooldown deadline, and gradual-recovery counters. The configured polling interval remains in `settings`. |
 | `push_subscriptions`, `settings`, `users`, `sessions` | Encrypted Push subscriptions, plain/encrypted settings, the single owner, and hashed session state. |
 
 Configuration changes use a per-target `config_version`. Material changes to route, date, passengers, provider route IDs, or selections close old episodes with `config_changed` and start fresh state; label-only and booking-slug-only edits do not reset availability.
@@ -230,7 +235,8 @@ The private REST API lives under `/api/v1` and covers auth, monitors, providers 
 - Direct public-IP HTTP mode is unencrypted, omits Secure cookies/HSTS, and cannot use browser Web Push. Use it only on a trusted network or behind a VPN/TLS tunnel.
 - Provider capacity, child/infant inventory semantics, and price currency/per-passenger basis are not fully verified. Capacity shortfall remains `Unknown`.
 - The MrBilit URL resolver depends on route data embedded in the public page, which is not a documented API contract; it fails closed if the page shape changes.
-- Login rate limiting and provider spacing are in-memory and reset on restart.
+- Login rate limiting and provider start-to-start spacing are in-memory and reset on restart. Adaptive 429 penalties and `Retry-After` cooldowns are durable; full-window startup distribution mitigates the spacing reset.
+- Rate-limit scope is provider-level because the current adapter boundary does not report endpoint, credential, account, or IP scope. Adaptive throttling reduces burst risk but does not guarantee a provider quota or eliminate IP-block risk.
 - The retention windows are design defaults; long-term growth has not been measured on the target host.
 - The repository does not authorize live provider traffic, real Telegram/Push credentials, or deployment by itself. Follow the project safety rules and obtain owner approval.
 

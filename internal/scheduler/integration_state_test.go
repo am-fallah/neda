@@ -717,8 +717,11 @@ func TestSchedulerIntegrationHealthTransitionTable(t *testing.T) {
 		t.Fatalf("empty-success health = %+v", health)
 	}
 	targetAfter = h.targetByID(target.ID)
+	// The provider is still under its first 429 penalty; one successful check
+	// does not erase it, so the effective interval remains 10 minutes even
+	// though the configured interval is unchanged at 5 minutes.
 	if targetAfter.ConsecutiveFailures != 0 || targetAfter.LastOutcome != "empty" ||
-		targetAfter.NextDueAt == nil || !targetAfter.NextDueAt.Equal(h.clock.Now().Add(5*time.Minute)) {
+		targetAfter.NextDueAt == nil || !targetAfter.NextDueAt.Equal(h.clock.Now().Add(10*time.Minute)) {
 		t.Fatalf("empty-success target = %+v", targetAfter)
 	}
 	if states, open, _, events, deliveries := h.availabilityCounts(target.ID, "table-p"); states != 1 || open != 1 || events != 1 || deliveries != 2 {

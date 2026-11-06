@@ -36,6 +36,7 @@ type OutcomeRunnerConfig struct {
 	Wake       func()
 	Now        func() time.Time
 	Random     Random
+	Adaptive   AdaptivePolicy
 	Logger     *slog.Logger
 }
 
@@ -51,6 +52,7 @@ type OutcomeRunner struct {
 	wake       func()
 	now        func() time.Time
 	random     Random
+	adaptive   AdaptivePolicy
 	logger     *slog.Logger
 }
 
@@ -95,6 +97,15 @@ func NewOutcomeRunner(cfg OutcomeRunnerConfig) (*OutcomeRunner, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.Adaptive.MaxInterval < 0 {
+		return nil, errors.New("scheduler: adaptive max interval must not be negative")
+	}
+	if cfg.Adaptive.RecoverySuccesses < 0 {
+		return nil, errors.New("scheduler: adaptive recovery successes must not be negative")
+	}
+	if cfg.Adaptive.MaxEscalations < 0 {
+		return nil, errors.New("scheduler: adaptive max escalations must not be negative")
+	}
 	return &OutcomeRunner{
 		stage:      cfg.Stage,
 		store:      cfg.Store,
@@ -103,6 +114,7 @@ func NewOutcomeRunner(cfg OutcomeRunnerConfig) (*OutcomeRunner, error) {
 		wake:       cfg.Wake,
 		now:        cfg.Now,
 		random:     cfg.Random,
+		adaptive:   cfg.Adaptive,
 		logger:     cfg.Logger,
 	}, nil
 }
@@ -228,6 +240,8 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	var discardReason string
 	var events []string
 	var hasOutbox bool
+	var limitChange *RateLimitChange
+	var limitSnapshot domain.ProviderRateLimit
 	err := r.store.WithSQLTx(ctx, func(tx *sql.Tx, txStore *store.Store) error {
 		txNow := r.now().UTC()
 		gate, err := loadOutcomeGate(ctx, attempt, txStore, txNow)
@@ -287,7 +301,28 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 		}
 		events = append(events, healthResult.EventsCreated...)
 
-		decision, err := DecideTargetSchedule(txNow, interval, gate.target.ConsecutiveFailures, attempt.Classification, r.random)
+		limit, found, err := txStore.GetProviderRateLimit(ctx, attempt.ProviderID, domain.ProviderRateLimitScopeProvider)
+		if err != nil {
+			return fmt.Errorf("scheduler: load provider rate limit: %w", err)
+		}
+		if found && (limit.Consecutive429s > 0 || limit.AdaptiveInterval > 0) {
+			var change RateLimitChange
+			limit, change = ApplyProviderRateLimitSuccess(txNow, interval, limit, r.adaptive)
+			if err := txStore.UpsertProviderRateLimit(ctx, limit, txNow); err != nil {
+				return fmt.Errorf("scheduler: persist provider rate-limit recovery: %w", err)
+			}
+			limitChange = &change
+			limitSnapshot = limit
+		}
+		effectiveInterval := EffectivePollingInterval(interval, limit)
+		var cooldownUntil time.Time
+		if limit.CooldownUntil != nil {
+			cooldownUntil = *limit.CooldownUntil
+		}
+		decision, err := DecideTargetScheduleWithProvider(
+			txNow, interval, effectiveInterval, cooldownUntil,
+			gate.target.ConsecutiveFailures, attempt.Classification, r.random,
+		)
 		if err != nil {
 			return err
 		}
@@ -303,6 +338,9 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 	if discarded {
 		r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 		return Result{Settled: false}, nil
+	}
+	if limitChange != nil {
+		r.logRateLimitChange(attempt, "recovered", *limitChange, limitSnapshot)
 	}
 	if len(events) > 0 && hasOutbox {
 		r.wake()
@@ -327,6 +365,8 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	var discardReason string
 	var events []string
 	var hasOutbox bool
+	var limitChange *RateLimitChange
+	var limitSnapshot domain.ProviderRateLimit
 	err := r.store.WithSQLTx(txCtx, func(tx *sql.Tx, txStore *store.Store) error {
 		txNow := r.now().UTC()
 		gate, err := loadOutcomeGate(txCtx, attempt, txStore, txNow)
@@ -369,7 +409,33 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 		if err != nil {
 			return err
 		}
-		decision, err := DecideTargetSchedule(txNow, interval, gate.target.ConsecutiveFailures, attempt.Classification, r.random)
+		limit, found, err := txStore.GetProviderRateLimit(txCtx, attempt.ProviderID, domain.ProviderRateLimitScopeProvider)
+		if err != nil {
+			return fmt.Errorf("scheduler: load provider rate limit: %w", err)
+		}
+		if attempt.Classification.Kind == provider.ErrRateLimited {
+			var change RateLimitChange
+			limit, change = ApplyProviderRateLimit429(
+				txNow, interval, attempt.Classification.RetryAfter, limit, r.random, r.adaptive,
+			)
+			if err := txStore.UpsertProviderRateLimit(txCtx, limit, txNow); err != nil {
+				return fmt.Errorf("scheduler: persist provider rate-limit escalation: %w", err)
+			}
+			limitChange = &change
+			limitSnapshot = limit
+		} else if !found {
+			limit.ProviderID = attempt.ProviderID
+			limit.Scope = domain.ProviderRateLimitScopeProvider
+		}
+		effectiveInterval := EffectivePollingInterval(interval, limit)
+		var cooldownUntil time.Time
+		if limit.CooldownUntil != nil {
+			cooldownUntil = *limit.CooldownUntil
+		}
+		decision, err := DecideTargetScheduleWithProvider(
+			txNow, interval, effectiveInterval, cooldownUntil,
+			gate.target.ConsecutiveFailures, attempt.Classification, r.random,
+		)
 		if err != nil {
 			return err
 		}
@@ -385,6 +451,9 @@ func (r *OutcomeRunner) finalizeError(ctx context.Context, attempt CheckAttempt)
 	if discarded {
 		r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 		return Result{Settled: false}, nil
+	}
+	if limitChange != nil {
+		r.logRateLimitChange(attempt, "escalated", *limitChange, limitSnapshot)
 	}
 	if len(events) > 0 && hasOutbox {
 		r.wake()
@@ -435,14 +504,39 @@ func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAtte
 	finalizeCtx, cancel := outcomeContext(ctx)
 	defer cancel()
 
+	var limitChange *RateLimitChange
+	var limitSnapshot domain.ProviderRateLimit
 	err := r.store.WithSQLTx(finalizeCtx, func(tx *sql.Tx, txStore *store.Store) error {
 		txNow := r.now().UTC()
 		// Re-evaluate the gate at the start of the outcome transaction even
 		// though a pre-gate invalidity decision is final: the check row is the
-		// only write, and a changed/expired target must not become applicable
-		// between the read and the conditional finalization.
+		// only target/health/availability write, and a changed/expired target
+		// must not become applicable between the read and the conditional
+		// finalization.
 		if _, err := loadOutcomeGate(finalizeCtx, attempt, txStore, txNow); err != nil {
 			return err
+		}
+		// A real 429 is a provider-level signal even when this attempt is
+		// discarded. Preserve the rate-limit penalty without touching target
+		// scheduling, health, availability, or outbox state.
+		if attempt.Classification.Kind == provider.ErrRateLimited {
+			interval, err := txStore.PollInterval(finalizeCtx)
+			if err != nil {
+				return err
+			}
+			limit, _, err := txStore.GetProviderRateLimit(finalizeCtx, attempt.ProviderID, domain.ProviderRateLimitScopeProvider)
+			if err != nil {
+				return err
+			}
+			var change RateLimitChange
+			limit, change = ApplyProviderRateLimit429(
+				txNow, interval, attempt.Classification.RetryAfter, limit, r.random, r.adaptive,
+			)
+			if err := txStore.UpsertProviderRateLimit(finalizeCtx, limit, txNow); err != nil {
+				return err
+			}
+			limitChange = &change
+			limitSnapshot = limit
 		}
 		return r.finalizeCheckTx(finalizeCtx, tx, attempt, store.CheckOutcomeDiscarded, reason, txNow, outcomeCounts{}, nil)
 	})
@@ -453,6 +547,9 @@ func (r *OutcomeRunner) finalizeDiscarded(ctx context.Context, attempt CheckAtte
 		}
 		r.logOutcomeError("check finalization failed", attempt, "finalization_failed")
 		return Result{Settled: true}, newOutcomeFailure("finalization_failed", err)
+	}
+	if limitChange != nil {
+		r.logRateLimitChange(attempt, "escalated", *limitChange, limitSnapshot)
 	}
 	r.logOutcomeCommitted(attempt, string(store.CheckOutcomeDiscarded), 0)
 	return Result{Settled: false}, nil
@@ -506,6 +603,24 @@ func (r *OutcomeRunner) logOutcomeCommitted(attempt CheckAttempt, outcome string
 		"provider_id", string(attempt.ProviderID),
 		"outcome", outcome,
 		"events", events,
+		"duration_ms", attempt.Duration.Milliseconds(),
+	)
+}
+
+func (r *OutcomeRunner) logRateLimitChange(attempt CheckAttempt, action string, change RateLimitChange, state domain.ProviderRateLimit) {
+	cooldown := ""
+	if state.CooldownUntil != nil {
+		cooldown = state.CooldownUntil.UTC().Format(time.RFC3339)
+	}
+	message := "provider rate limit " + action
+	r.logger.Info(message,
+		"provider_id", string(attempt.ProviderID),
+		"scope", state.Scope,
+		"escalation_level", change.Level,
+		"previous_adaptive_interval", change.PreviousInterval.String(),
+		"adaptive_interval", state.AdaptiveInterval.String(),
+		"retry_after", change.RetryAfter.String(),
+		"cooldown_until", cooldown,
 	)
 }
 

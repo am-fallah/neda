@@ -114,6 +114,14 @@ type Repository interface {
 	ReconcileExpirations(ctx context.Context, now time.Time) (int64, *time.Time, error)
 }
 
+// RateLimitRepository is the optional durable adaptive-throttling capability.
+// The production store implements it. A repository that does not implement it
+// remains usable with the zero/no-penalty state, preserving existing scheduler
+// test doubles and embedders.
+type RateLimitRepository interface {
+	ListProviderRateLimits(ctx context.Context) ([]domain.ProviderRateLimit, error)
+}
+
 // Clock abstracts time and timers for deterministic tests.
 type Clock interface {
 	Now() time.Time
@@ -145,11 +153,14 @@ type Config struct {
 	// DefaultProviderSpacing; a non-nil zero explicitly disables spacing for
 	// deterministic tests. Production uses the nil default.
 	ProviderSpacing *time.Duration
-	Wake            <-chan struct{}
-	Clock           Clock
-	Random          Random
-	Logger          *slog.Logger
-	ShutdownGrace   time.Duration
+	// Adaptive controls provider-level 429 escalation and recovery. The zero
+	// value uses the documented defaults.
+	Adaptive      AdaptivePolicy
+	Wake          <-chan struct{}
+	Clock         Clock
+	Random        Random
+	Logger        *slog.Logger
+	ShutdownGrace time.Duration
 }
 
 // Scheduler is a single-process due-time scheduler.
@@ -161,6 +172,7 @@ type Scheduler struct {
 	runner          Runner
 	workers         int
 	providerSpacing time.Duration
+	adaptivePolicy  AdaptivePolicy
 	wake            <-chan struct{}
 	clock           Clock
 	random          Random
@@ -192,6 +204,15 @@ func New(cfg Config) (*Scheduler, error) {
 	if *cfg.ProviderSpacing < 0 {
 		return nil, errors.New("scheduler: provider spacing must not be negative")
 	}
+	if cfg.Adaptive.MaxInterval < 0 {
+		return nil, errors.New("scheduler: adaptive max interval must not be negative")
+	}
+	if cfg.Adaptive.RecoverySuccesses < 0 {
+		return nil, errors.New("scheduler: adaptive recovery successes must not be negative")
+	}
+	if cfg.Adaptive.MaxEscalations < 0 {
+		return nil, errors.New("scheduler: adaptive max escalations must not be negative")
+	}
 	if cfg.Clock == nil {
 		cfg.Clock = realClock{}
 	}
@@ -215,6 +236,7 @@ func New(cfg Config) (*Scheduler, error) {
 		runner:          cfg.Runner,
 		workers:         cfg.Workers,
 		providerSpacing: *cfg.ProviderSpacing,
+		adaptivePolicy:  cfg.Adaptive,
 		wake:            cfg.Wake,
 		clock:           cfg.Clock,
 		random:          cfg.Random,
@@ -277,28 +299,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 	paused := !enabled
 	if paused {
 		s.logger.Info("scheduler paused: global monitoring is off")
-	} else if err := s.staggerDueTargets(ctx, now); err != nil {
-		if ctx.Err() != nil {
-			return nil
-		}
-		return err
 	}
-
-	return s.runLoop(ctx, paused)
-}
-
-// monitoringEnabled reads the optional switch. A nil switch is enabled.
-func (s *Scheduler) monitoringEnabled(ctx context.Context) (bool, error) {
-	if s.monitoring == nil {
-		return true, nil
-	}
-	return s.monitoring.MonitoringEnabled(ctx)
-}
-
-// staggerDueTargets spreads already-due targets over the near-term jitter
-// window. It is used at startup and when monitoring resumes after an off
-// period so a large backlog does not produce a provider-request burst.
-func (s *Scheduler) staggerDueTargets(ctx context.Context, now time.Time) error {
 	interval, err := s.interval.PollInterval(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -309,8 +310,86 @@ func (s *Scheduler) staggerDueTargets(ctx context.Context, now time.Time) error 
 	if interval <= 0 {
 		return errors.New("scheduler: poll interval must be positive")
 	}
-	staggered, err := s.repo.StaggerDueTargets(ctx, now, func(domain.ScheduleTarget) time.Time {
-		return now.Add(NearTermDelay(interval, s.random))
+	if !paused {
+		if err := s.staggerDueTargets(ctx, now, interval); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return err
+		}
+	}
+
+	return s.runLoop(ctx, paused, interval)
+}
+
+// monitoringEnabled reads the optional switch. A nil switch is enabled.
+func (s *Scheduler) monitoringEnabled(ctx context.Context) (bool, error) {
+	if s.monitoring == nil {
+		return true, nil
+	}
+	return s.monitoring.MonitoringEnabled(ctx)
+}
+
+// listProviderRateLimits reads durable adaptive state when the repository
+// supports it. Repositories without the capability behave as no penalty.
+func (s *Scheduler) listProviderRateLimits(ctx context.Context) ([]domain.ProviderRateLimit, error) {
+	repo, ok := s.repo.(RateLimitRepository)
+	if !ok {
+		return nil, nil
+	}
+	return repo.ListProviderRateLimits(ctx)
+}
+
+// staggerDueTargets spreads already-due targets over their provider's effective
+// polling window. It is used at startup and when monitoring resumes after an
+// off period so a large backlog does not produce a provider-request burst. A
+// provider under a persisted cooldown starts its distribution at the cooldown
+// deadline rather than before it.
+func (s *Scheduler) staggerDueTargets(ctx context.Context, now time.Time, interval time.Duration) error {
+	if interval <= 0 {
+		return errors.New("scheduler: poll interval must be positive")
+	}
+	limits, err := s.listProviderRateLimits(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("scheduler: read provider rate limits: %w", err)
+	}
+	limitsByProvider := make(map[provider.ID]domain.ProviderRateLimit, len(limits))
+	for _, limit := range limits {
+		limitsByProvider[limit.ProviderID] = limit
+	}
+	targets, err := s.repo.ListScheduleTargets(ctx, now)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("scheduler: list due targets for staggering: %w", err)
+	}
+	dueCounts := make(map[provider.ID]int)
+	for _, target := range targets {
+		if target.NextDueAt != nil && target.NextDueAt.After(now) {
+			continue
+		}
+		dueCounts[target.ProviderID]++
+	}
+	seen := make(map[provider.ID]int)
+	staggered, err := s.repo.StaggerDueTargets(ctx, now, func(target domain.ScheduleTarget) time.Time {
+		index := seen[target.ProviderID]
+		seen[target.ProviderID] = index + 1
+		total := dueCounts[target.ProviderID]
+		if total <= 0 {
+			total = 1
+		}
+		limit := limitsByProvider[target.ProviderID]
+		effective := EffectivePollingInterval(interval, limit)
+		base := now
+		if limit.CooldownUntil != nil && limit.CooldownUntil.After(base) {
+			base = limit.CooldownUntil.UTC()
+		}
+		delay := DueDistributionDelay(index, total, effective, s.providerSpacing, s.random)
+		return base.Add(delay)
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -319,7 +398,10 @@ func (s *Scheduler) staggerDueTargets(ctx context.Context, now time.Time) error 
 		return fmt.Errorf("scheduler: stagger due targets: %w", err)
 	}
 	if staggered > 0 {
-		s.logger.Info("scheduler staggered due targets", "count", staggered)
+		s.logger.Info("scheduler staggered due targets",
+			"count", staggered,
+			"configured_interval", interval.String(),
+		)
 	}
 	return nil
 }
@@ -329,7 +411,7 @@ type completion struct {
 	result Result
 }
 
-func (s *Scheduler) runLoop(ctx context.Context, paused bool) error {
+func (s *Scheduler) runLoop(ctx context.Context, paused bool, interval time.Duration) error {
 	jobs := make(chan Target, s.workers)
 	done := make(chan completion, s.workers)
 
@@ -352,7 +434,7 @@ func (s *Scheduler) runLoop(ctx context.Context, paused bool) error {
 		}()
 	}
 
-	loopErr := s.loop(ctx, jobs, done, paused)
+	loopErr := s.loop(ctx, jobs, done, paused, interval)
 	close(jobs)
 
 	finished := make(chan struct{})
@@ -388,12 +470,15 @@ func (s *Scheduler) execute(ctx context.Context, target Target) (result Result, 
 	return s.runner.Run(ctx, target)
 }
 
-func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion, paused bool) error {
+func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan completion, paused bool, interval time.Duration) error {
 	running := 0
 	inflight := make(map[string]bool)
 	settled := make(map[int64]generation)
 	hold := make(map[int64]time.Time)
 	providers := make(map[provider.ID]*providerRuntime)
+	configuredInterval := interval
+	lastIntervalError := time.Time{}
+	lastQueueLog := time.Time{}
 
 	for {
 		// Apply all completed checks before selecting new work.
@@ -448,10 +533,28 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			}
 			continue
 		}
+		currentInterval, intervalErr := s.interval.PollInterval(ctx)
+		if intervalErr == nil && currentInterval <= 0 {
+			intervalErr = errors.New("scheduler: poll interval must be positive")
+		}
+		if intervalErr != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			// Keep the last valid value. A concurrent settings read failure must
+			// not stop already-scheduled work or reset distribution state.
+			if lastIntervalError.IsZero() || now.Sub(lastIntervalError) >= time.Minute {
+				s.logger.Error("scheduler poll interval read failed; using last known value", "error", intervalErr)
+				lastIntervalError = now
+			}
+		} else {
+			configuredInterval = currentInterval
+			lastIntervalError = time.Time{}
+		}
 		if paused {
 			s.logger.Info("scheduler resumed: global monitoring is on")
 			paused = false
-			if err := s.staggerDueTargets(ctx, now); err != nil {
+			if err := s.staggerDueTargets(ctx, now, configuredInterval); err != nil {
 				if ctx.Err() != nil {
 					return nil
 				}
@@ -480,6 +583,27 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 		}
 		sortTargets(targets)
 
+		limits, err := s.listProviderRateLimits(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			s.logger.Error("scheduler provider rate-limit read failed; dispatch paused", "error", err)
+			retryAt := now.Add(storeErrorRetry)
+			if hasExpiry && expiryAt.Before(retryAt) {
+				retryAt = expiryAt
+			}
+			completed, got, ok := s.waitUntil(ctx, retryAt, true, done)
+			if !ok {
+				return nil
+			}
+			if got {
+				s.complete(completed, &running, inflight, settled, hold, providers)
+			}
+			continue
+		}
+		s.applyProviderRateLimits(providers, limits)
+
 		present := make(map[int64]bool, len(targets))
 		for _, target := range targets {
 			present[target.ID] = true
@@ -494,9 +618,20 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 				delete(hold, id)
 			}
 		}
+		dueCounts := make(map[provider.ID]int)
+		for _, target := range targets {
+			if target.NextDueAt == nil || target.NextDueAt.After(now) {
+				continue
+			}
+			if _, ok := s.providers.Lookup(target.ProviderID); !ok {
+				continue
+			}
+			dueCounts[target.ProviderID]++
+		}
 
 		var next time.Time
 		hasNext := false
+		dispatched := 0
 		for _, candidate := range targets {
 			if candidate.NextDueAt == nil {
 				continue
@@ -534,7 +669,9 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			if state.inFlight {
 				continue
 			}
-			if slot, ok := state.nextSlot(s.providerSpacing); ok && slot.After(now) {
+			effectiveInterval := EffectivePollingInterval(configuredInterval, state.limit)
+			spacing := RequestSpacing(dueCounts[candidate.ProviderID], effectiveInterval, s.providerSpacing)
+			if slot, ok := state.nextSlot(spacing); ok && slot.After(now) {
 				if !hasNext || slot.Before(next) {
 					next = slot
 					hasNext = true
@@ -551,20 +688,58 @@ func (s *Scheduler) loop(ctx context.Context, jobs chan<- Target, done <-chan co
 			// Sample the dispatch time here, after due selection, so slow
 			// repository reads cannot shorten the start-to-start spacing.
 			dispatchAt := s.clock.Now().UTC()
+			startSpacing := time.Duration(0)
+			if !state.lastDispatch.IsZero() {
+				startSpacing = dispatchAt.Sub(state.lastDispatch)
+			}
 			select {
 			case jobs <- target:
 				delete(settled, candidate.ID)
 				inflight[candidate.MonitorID] = true
 				state.dispatch(dispatchAt)
 				running++
+				dispatched++
 				s.logger.Debug("scheduler dispatched check",
 					"monitor_id", target.MonitorID,
 					"target_id", target.ID,
 					"provider_id", string(target.ProviderID),
+					"scheduled_at", due,
+					"dispatched_at", dispatchAt,
+					"queue_wait_ms", dispatchAt.Sub(due).Milliseconds(),
+					"start_spacing_ms", startSpacing.Milliseconds(),
+					"provider_effective_interval", effectiveInterval.String(),
 				)
 			case <-ctx.Done():
 				return nil
 			}
+		}
+		dueTotal := 0
+		for _, count := range dueCounts {
+			dueTotal += count
+		}
+		if dueTotal > 0 && (lastQueueLog.IsZero() || now.Sub(lastQueueLog) >= 30*time.Second) {
+			s.logger.Debug("scheduler queue snapshot",
+				"due", dueTotal,
+				"dispatched", dispatched,
+				"deferred", dueTotal-dispatched,
+				"running", running,
+				"configured_interval", configuredInterval.String(),
+			)
+			for providerID, count := range dueCounts {
+				state := providerState(providers, providerID)
+				cooldown := ""
+				if state.limit.CooldownUntil != nil && state.limit.CooldownUntil.After(now) {
+					cooldown = state.limit.CooldownUntil.UTC().Format(time.RFC3339)
+				}
+				s.logger.Debug("scheduler provider queue",
+					"provider_id", string(providerID),
+					"due", count,
+					"effective_interval", EffectivePollingInterval(configuredInterval, state.limit).String(),
+					"adaptive_level", state.limit.Consecutive429s,
+					"cooldown_until", cooldown,
+				)
+			}
+			lastQueueLog = now
 		}
 
 		var completed completion

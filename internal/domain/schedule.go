@@ -33,3 +33,25 @@ func ValidatePollInterval(interval time.Duration) error {
 	}
 	return nil
 }
+
+// ProviderRateLimit is the durable adaptive throttling state for one provider
+// rate-limit scope. The configured polling interval is never stored here; the
+// effective interval is always max(configured, AdaptiveInterval). A missing row
+// is equivalent to the zero value.
+type ProviderRateLimit struct {
+	ProviderID           provider.ID
+	Scope                string
+	Consecutive429s      int
+	AdaptiveInterval     time.Duration
+	CooldownUntil        *time.Time
+	ConsecutiveSuccesses int
+	Last429At            *time.Time
+	LastSuccessAt        *time.Time
+	LastRetryAfter       time.Duration
+	UpdatedAt            time.Time
+}
+
+// ProviderRateLimitScopeProvider is the only scope currently exposed by the
+// provider boundary. Adapters do not report endpoint, account, or IP scopes,
+// so Neda applies the safest identifiable scope: the whole provider.
+const ProviderRateLimitScopeProvider = "provider"
