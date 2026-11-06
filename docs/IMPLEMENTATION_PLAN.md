@@ -734,6 +734,8 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 ## 12. Approved 2026-11-06 enhancements
 
+This section records the 2026-11-06 owner-approved scope and supersedes older next-action/blocker summaries for these four enhancements. Existing deployment and live-credential gates are unchanged.
+
 | ID | Priority | Status | Dependencies | Task / acceptance | Evidence |
 |---|---|---|---|---|---|
 | `GSW-001` | P0 | DONE | — | Persist `monitoring_enabled` (default true, missing=true) and expose it through the settings service/API without touching monitor rows. AC: default/persistence/backward-compatibility tests. | `internal/store/monitoring.go`, `internal/settings/settings.go`, `internal/httpapi/settings.go`; store/settings/HTTP tests passed. |
