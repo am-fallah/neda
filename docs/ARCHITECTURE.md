@@ -276,7 +276,7 @@ Global polling interval is stored in SQLite settings (default 300s, bounds 60–
 
 ### 6.3 Settings stored in SQLite
 
-Plain: poll interval, Push enabled flag, global monitoring enabled flag, Telegram last-test metadata, VAPID public key, schema/app version metadata.
+Plain: poll interval, Push enabled flag, global monitoring enabled flag, confirmed-unavailable grace minutes, daily report time and sanitized last-report status, Telegram last-test metadata, VAPID public key, schema/app version metadata.
 Encrypted: Telegram bot token, Telegram chat ID, VAPID private key, Push subscription endpoint/keys.
 Never returned raw: tokens, private keys, subscription endpoints/keys.
 
@@ -616,16 +616,18 @@ Forward-only embedded SQL migrations:
 - `0003_inventory.sql` — check_runs, inventory_states, availability_episodes, events.
 - `0004_notifications.sql` — provider_health, provider_health_episodes, notification_deliveries, notification_attempts, push_subscriptions. Owned by `NTF-000`; applied before `SCH-005`/`SCH-006`.
 - `0005_monitor_selections.sql` — selected train/class keys, native IDs, display metadata, and match guardrails tied to `monitor_providers.id` and `config_version`. Owned by `PRV-011`; independent of event/outbox schema.
-- `0005_indexes.sql` — any indexes separated for clarity; may be folded into the above.
+- `0006_unavailability.sql` — confirmed-unavailable streak columns and a marked `events` rebuild for the `unavailable` kind plus `silent` flag. The runner disables foreign-key enforcement only for this marked rebuild and runs `PRAGMA foreign_key_check` before returning.
+- `0007_daily_reports.sql` — durable per-date daily report ledger with lifecycle/lease fields and status index.
 
 Runner behavior:
 
 1. Create `schema_migrations` if absent.
 2. Read embedded files sorted by numeric version.
 3. For each pending file: verify it has not already been applied under a different checksum; apply inside a transaction; insert version/name/checksum.
-4. On startup failure, stop the process; never continue with a partial/unverified schema.
-5. Run `PRAGMA foreign_key_check` after migrations; log failures and fail startup.
-6. `PRAGMA integrity_check` in tests and backup verification, not every boot (cost).
+4. A migration carrying the explicit `-- neda:foreign-keys-off` marker runs with SQLite foreign-key enforcement disabled for that migration pass; the runner restores enforcement and runs `PRAGMA foreign_key_check` before returning. This is used only by the `0006` `events` rebuild; a test proves existing child rows survive.
+5. On startup failure, stop the process; never continue with a partial/unverified schema.
+6. Run `PRAGMA foreign_key_check` after migrations; log failures and fail startup.
+7. `PRAGMA integrity_check` in tests and backup verification, not every boot (cost).
 
 Rollback strategy: forward-only. Before a production upgrade, take a consistent DB backup. If a migration fails, restore the backup and fix the migration. No automatic destructive downs. This is a deliberate simplicity/safety choice; document it in the README.
 
