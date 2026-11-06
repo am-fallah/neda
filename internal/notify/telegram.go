@@ -195,9 +195,25 @@ func (c *TelegramClient) GetMe(ctx context.Context, credentials TelegramCredenti
 	return TelegramBot{ID: payload.ID, Username: payload.Username, FirstName: payload.FirstName}, nil
 }
 
+// SendMessageOptions controls optional Bot API message behavior.
+type SendMessageOptions struct {
+	// DisableNotification sends the message silently (no notification sound).
+	DisableNotification bool
+}
+
 // SendMessage sends HTML text to the configured chat. Callers must escape all
 // dynamic text with EscapeTelegramHTML before composing the HTML body.
 func (c *TelegramClient) SendMessage(ctx context.Context, credentials TelegramCredentials, htmlText string) (TelegramMessage, error) {
+	return c.SendMessageWithOptions(ctx, credentials, htmlText, SendMessageOptions{})
+}
+
+// SendMessageWithOptions sends HTML text with explicit Bot API options.
+func (c *TelegramClient) SendMessageWithOptions(
+	ctx context.Context,
+	credentials TelegramCredentials,
+	htmlText string,
+	options SendMessageOptions,
+) (TelegramMessage, error) {
 	if c == nil {
 		return TelegramMessage{}, &TelegramError{Kind: TelegramErrorPermanent, Op: "sendMessage", Err: errors.New("nil client")}
 	}
@@ -216,6 +232,9 @@ func (c *TelegramClient) SendMessage(ctx context.Context, credentials TelegramCr
 	form.Set("text", htmlText)
 	form.Set("parse_mode", "HTML")
 	form.Set("disable_web_page_preview", "true")
+	if options.DisableNotification {
+		form.Set("disable_notification", "true")
+	}
 
 	body, _, err := c.call(ctx, "sendMessage", credentials.token, strings.NewReader(form.Encode()))
 	if err != nil {

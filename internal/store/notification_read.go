@@ -132,6 +132,7 @@ type EventRecord struct {
 
 	ErrorKind    string
 	FailureCount *int
+	Silent       bool
 
 	CreatedAt time.Time
 
@@ -197,7 +198,7 @@ const eventReadSelect = `SELECT e.id, e.kind, e.provider_id, e.monitor_id, m.lab
 	e.episode_id, e.occurred_at, e.train_number, e.operator, e.origin_name,
 	e.destination_name, e.departure_at, e.arrival_at, e.wagon_name, e.class_name,
 	e.price_amount, e.price_currency, e.booking_url, e.error_kind, e.failure_count,
-	e.created_at
+	e.silent, e.created_at
 FROM events e
 LEFT JOIN monitors m ON m.id = e.monitor_id`
 
@@ -461,6 +462,7 @@ func scanEventRecord(rows *sql.Rows) (EventRecord, error) {
 		priceAmount                                 sql.NullInt64
 		bookingURL, errorKind                       sql.NullString
 		failureCount                                sql.NullInt64
+		silent                                      int
 		createdAt                                   string
 	)
 	if err := rows.Scan(
@@ -468,7 +470,7 @@ func scanEventRecord(rows *sql.Rows) (EventRecord, error) {
 		&episodeID, &occurredAt, &trainNumber, &operator, &originName,
 		&destName, &departureAt, &arrivalAt, &wagonName, &className,
 		&priceAmount, &priceCurrency, &bookingURL, &errorKind, &failureCount,
-		&createdAt,
+		&silent, &createdAt,
 	); err != nil {
 		return EventRecord{}, wrap("scan notification event", err)
 	}
@@ -510,6 +512,10 @@ func scanEventRecord(rows *sql.Rows) (EventRecord, error) {
 		value := int(failureCount.Int64)
 		event.FailureCount = &value
 	}
+	if silent != 0 && silent != 1 {
+		return EventRecord{}, fmt.Errorf("store: event %q has invalid silent value", event.ID)
+	}
+	event.Silent = silent == 1
 	if event.CreatedAt, err = parseTime(createdAt); err != nil {
 		return EventRecord{}, err
 	}
@@ -714,7 +720,8 @@ func normalizeReadLimit(limit int) (int, error) {
 
 func validEventKind(kind notify.EventKind) bool {
 	switch kind {
-	case notify.KindAvailability, notify.KindProviderDegraded, notify.KindProviderRecovered:
+	case notify.KindAvailability, notify.KindUnavailable,
+		notify.KindProviderDegraded, notify.KindProviderRecovered:
 		return true
 	default:
 		return false

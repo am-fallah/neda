@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
+  BellOff,
   BellRing,
   CheckCircle2,
   KeyRound,
@@ -301,6 +302,97 @@ function PollingIntervalForm({
               Number(value) % 60 === 0 ? 0 : 1,
             )} minutes between checks.`
           : "Enter a value between 60 and 3600 seconds."}
+      </p>
+    </form>
+  );
+}
+
+function UnavailableGraceForm({
+  settings,
+  onUpdated,
+}: {
+  settings: Settings;
+  onUpdated: (settings: Settings) => void;
+}) {
+  const currentMinutes = settings.unavailableNotifyAfterMinutes;
+  const [hours, setHours] = useState(String(currentMinutes / 60));
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setHours(String(settings.unavailableNotifyAfterMinutes / 60));
+  }, [settings.unavailableNotifyAfterMinutes]);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    const value = Number(hours);
+    if (!Number.isInteger(value) || value < 1 || value > 24) {
+      setError("Enter a whole number between 1 and 24 hours.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await settingsApi.update({
+        unavailableNotifyAfterMinutes: value * 60,
+      });
+      onUpdated(updated);
+      toast.success("Unavailability grace period saved", {
+        description: `One silent notice after ${value} hour${value === 1 ? "" : "s"} of confirmed unavailability.`,
+      });
+    } catch (caught) {
+      if (isApiError(caught)) {
+        setError(
+          caught.fields.unavailableNotifyAfterMinutes ?? caught.message,
+        );
+      } else {
+        setError("The grace period could not be saved.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} noValidate className="space-y-3">
+      <div className="flex flex-wrap items-end gap-3">
+        <FormField
+          id="unavailableNotifyAfterHours"
+          label="Grace period (hours)"
+          error={error}
+          description="Allowed range: 1–24 hours. The default is three hours."
+          className="w-full max-w-xs"
+        >
+          <Input
+            {...fieldProps("unavailableNotifyAfterHours", error)}
+            type="number"
+            min={1}
+            max={24}
+            step={1}
+            inputMode="numeric"
+            value={hours}
+            onChange={(event) => {
+              setHours(event.target.value);
+              setError("");
+            }}
+          />
+        </FormField>
+        <Button type="submit" disabled={saving}>
+          {saving ? (
+            <Loader2 className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Save aria-hidden="true" />
+          )}
+          {saving ? "Saving…" : "Save grace period"}
+        </Button>
+      </div>
+      <p className="max-w-3xl text-xs leading-relaxed text-muted-foreground">
+        When a fare stays confirmed unavailable for this long, Neda sends one
+        informational notice. Telegram sends it silently; Push requests a silent
+        notification where the browser supports it. Availability returning still
+        sends an immediate normal-priority notification with sound. Provider
+        errors, timeouts, empty responses, and unknown results never advance the
+        timer, and a long gap resets the streak.
       </p>
     </form>
   );
@@ -739,6 +831,26 @@ export function SettingsPage() {
         <CardContent className="space-y-5">
           <MonitoringForm settings={settings} onUpdated={setSettings} />
           <PollingIntervalForm settings={settings} onUpdated={setSettings} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <BellOff className="size-4" aria-hidden="true" />
+            Unavailability notifications
+          </CardTitle>
+          <CardDescription>
+            Suppress immediate sold-out noise. A confirmed unavailable fare
+            produces one silent notice after the grace period; availability
+            returns remain immediate and sound-enabled.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <UnavailableGraceForm
+            settings={settings}
+            onUpdated={setSettings}
+          />
         </CardContent>
       </Card>
 

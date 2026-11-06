@@ -119,6 +119,27 @@ describe("service worker", () => {
     );
   });
 
+  it("requests a silent notification when the payload asks for it", async () => {
+    const worker = loadServiceWorker();
+    const event: ServiceWorkerEvent = {
+      data: {
+        json: () => ({
+          title: "Ticket unavailable",
+          body: "Yazd → Mashhad",
+          kind: "unavailable",
+          silent: true,
+        }),
+      },
+    };
+    const wait = waitUntil();
+    worker.listeners.push({ ...event, waitUntil: wait.waitUntil });
+    await wait.done;
+    expect(worker.showNotification).toHaveBeenCalledWith(
+      "Ticket unavailable",
+      expect.objectContaining({ silent: true }),
+    );
+  });
+
   it("falls back to /events for unsafe or unvalidated click URLs", async () => {
     const worker = loadServiceWorker();
     const event: ServiceWorkerEvent = {

@@ -61,6 +61,7 @@ self.addEventListener("push", (event) => {
     icon: "/favicon.svg",
     badge: "/favicon.svg",
     renotify: false,
+    silent: data.silent === true,
   };
   event.waitUntil(self.registration.showNotification(title, options));
 });

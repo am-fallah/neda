@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -36,6 +37,21 @@ func Migrate(ctx context.Context, database *sql.DB, fsys fs.FS) (int, error) {
 	applied, err := loadApplied(ctx, database)
 	if err != nil {
 		return 0, err
+	}
+
+	// A migration that must rebuild a table referenced by foreign keys declares
+	// the explicit marker below. SQLite ignores PRAGMA foreign_keys changes
+	// inside a transaction, so disable enforcement only around this migration
+	// run and verify the whole schema with foreign_key_check afterwards. The
+	// single-writer configuration (SetMaxOpenConns(1)) makes the connection-local
+	// pragma deterministic.
+	if pendingForeignKeyRebuild(migrations, applied) {
+		if _, err := database.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return 0, fmt.Errorf("db: disable foreign keys for rebuild migration: %w", err)
+		}
+		defer func() {
+			_, _ = database.ExecContext(context.Background(), `PRAGMA foreign_keys = ON`)
+		}()
 	}
 
 	for _, m := range migrations {
@@ -65,6 +81,20 @@ func Migrate(ctx context.Context, database *sql.DB, fsys fs.FS) (int, error) {
 		return 0, err
 	}
 	return len(migrations), nil
+}
+
+const foreignKeyRebuildMarker = "-- neda:foreign-keys-off"
+
+func pendingForeignKeyRebuild(migrations []migration, applied map[int]appliedMigration) bool {
+	for _, m := range migrations {
+		if _, ok := applied[m.version]; ok {
+			continue
+		}
+		if strings.Contains(m.sql, foreignKeyRebuildMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 func ensureSchemaMigrations(ctx context.Context, database *sql.DB) error {

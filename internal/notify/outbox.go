@@ -21,13 +21,14 @@ type EventKind string
 
 const (
 	KindAvailability      EventKind = "availability"
+	KindUnavailable       EventKind = "unavailable"
 	KindProviderDegraded  EventKind = "provider_degraded"
 	KindProviderRecovered EventKind = "provider_recovered"
 )
 
 func (k EventKind) valid() bool {
 	switch k {
-	case KindAvailability, KindProviderDegraded, KindProviderRecovered:
+	case KindAvailability, KindUnavailable, KindProviderDegraded, KindProviderRecovered:
 		return true
 	default:
 		return false
@@ -81,6 +82,10 @@ type Event struct {
 	ErrorKind    string
 	FailureCount *int
 
+	// Silent requests a notification without a sound. Only the informational
+	// unavailable notice uses it; availability notifications stay normal.
+	Silent bool
+
 	CreatedAt time.Time
 }
 
@@ -132,6 +137,22 @@ func (e Event) Validate() error {
 		if strings.TrimSpace(e.ErrorKind) != "" || e.FailureCount != nil {
 			return errors.New("notify: availability event must not carry health fields")
 		}
+		if e.Silent {
+			return errors.New("notify: availability event must not be silent")
+		}
+	case KindUnavailable:
+		if strings.TrimSpace(e.MonitorID) == "" {
+			return errors.New("notify: unavailable event monitor id is required")
+		}
+		if e.EpisodeID != nil {
+			return errors.New("notify: unavailable event must not carry an availability episode id")
+		}
+		if strings.TrimSpace(e.ErrorKind) != "" || e.FailureCount != nil {
+			return errors.New("notify: unavailable event must not carry health fields")
+		}
+		if !e.Silent {
+			return errors.New("notify: unavailable event must be silent")
+		}
 	case KindProviderDegraded, KindProviderRecovered:
 		if strings.TrimSpace(e.MonitorID) != "" {
 			return errors.New("notify: provider-health event must not carry a monitor id")
@@ -170,8 +191,8 @@ const insertEventQuery = `INSERT INTO events
 	(id, kind, dedupe_key, monitor_id, provider_id, episode_id, occurred_at,
 	 train_number, operator, origin_name, destination_name, departure_at, arrival_at,
 	 wagon_name, class_name, price_amount, price_currency, booking_url,
-	 error_kind, failure_count, created_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	 error_kind, failure_count, silent, created_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(dedupe_key) DO NOTHING`
 
 const insertDeliveryQuery = `INSERT INTO notification_deliveries
@@ -302,8 +323,16 @@ func eventArgs(event Event) []any {
 		nullableString(event.BookingURL),
 		nullableString(event.ErrorKind),
 		nullableInt(event.FailureCount),
+		boolToInt(event.Silent),
 		formatTime(event.CreatedAt),
 	}
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func nullableString(value string) any {

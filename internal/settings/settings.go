@@ -62,17 +62,19 @@ type TelegramStatus struct {
 
 // View is the complete non-secret settings response.
 type View struct {
-	PollIntervalSeconds int
-	PushEnabled         bool
-	MonitoringEnabled   bool
-	Telegram            TelegramStatus
+	PollIntervalSeconds        int
+	PushEnabled                bool
+	MonitoringEnabled          bool
+	UnavailableNotifyAfterMins int
+	Telegram                   TelegramStatus
 }
 
 // Update is a partial settings edit. At least one field must be present.
 type Update struct {
-	PollIntervalSeconds *int
-	PushEnabled         *bool
-	MonitoringEnabled   *bool
+	PollIntervalSeconds        *int
+	PushEnabled                *bool
+	MonitoringEnabled          *bool
+	UnavailableNotifyAfterMins *int
 }
 
 // TestResult reports the persisted post-test settings view and the test
@@ -137,10 +139,15 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	grace, err := s.store.UnavailableNotifyAfter(ctx)
+	if err != nil {
+		return View{}, err
+	}
 	view := View{
-		PollIntervalSeconds: int(interval / time.Second),
-		PushEnabled:         pushEnabled,
-		MonitoringEnabled:   monitoringEnabled,
+		PollIntervalSeconds:        int(interval / time.Second),
+		PushEnabled:                pushEnabled,
+		MonitoringEnabled:          monitoringEnabled,
+		UnavailableNotifyAfterMins: int(grace / time.Minute),
 	}
 	if s.telegram == nil {
 		return view, nil
@@ -183,7 +190,8 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 	if s == nil || s.store == nil {
 		return View{}, errors.New("settings: not initialized")
 	}
-	if update.PollIntervalSeconds == nil && update.PushEnabled == nil && update.MonitoringEnabled == nil {
+	if update.PollIntervalSeconds == nil && update.PushEnabled == nil &&
+		update.MonitoringEnabled == nil && update.UnavailableNotifyAfterMins == nil {
 		return View{}, &ValidationError{Message: "at least one setting is required"}
 	}
 	var interval time.Duration
@@ -198,6 +206,19 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 			}
 		}
 		interval = time.Duration(seconds) * time.Second
+	}
+	var grace time.Duration
+	if update.UnavailableNotifyAfterMins != nil {
+		minutes := *update.UnavailableNotifyAfterMins
+		minMinutes := int(store.MinUnavailableNotifyAfter / time.Minute)
+		maxMinutes := int(store.MaxUnavailableNotifyAfter / time.Minute)
+		if minutes < minMinutes || minutes > maxMinutes {
+			return View{}, &ValidationError{
+				Field:   "unavailableNotifyAfterMinutes",
+				Message: fmt.Sprintf("must be between %d and %d minutes", minMinutes, maxMinutes),
+			}
+		}
+		grace = time.Duration(minutes) * time.Minute
 	}
 	now := s.now().UTC()
 	if now.IsZero() {
@@ -216,6 +237,11 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 		}
 		if update.MonitoringEnabled != nil {
 			if err := tx.SetMonitoringEnabled(ctx, *update.MonitoringEnabled, now); err != nil {
+				return err
+			}
+		}
+		if update.UnavailableNotifyAfterMins != nil {
+			if err := tx.SetUnavailableNotifyAfter(ctx, grace, now); err != nil {
 				return err
 			}
 		}

@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import {
   DeliveryStatusBadge,
+  EventKindBadge,
   ObservationStateBadge,
   ProviderHealthBadge,
 } from "./status";
@@ -41,6 +42,17 @@ describe("availability status language", () => {
     render(<ObservationStateBadge state="not_reservable" missing />);
     expect(screen.getByText(/Unknown · not returned/)).toBeInTheDocument();
     expect(screen.queryByText("Not reservable")).not.toBeInTheDocument();
+  });
+});
+
+describe("event kind language", () => {
+  it("distinguishes an unavailable notice from an availability event", () => {
+    const { rerender } = render(<EventKindBadge kind="availability" />);
+    expect(screen.getByText("Availability")).toBeInTheDocument();
+
+    rerender(<EventKindBadge kind="unavailable" />);
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Availability")).not.toBeInTheDocument();
   });
 });
 

@@ -9,6 +9,7 @@ export type CheckOutcome =
   | "abandoned";
 export type EventKind =
   | "availability"
+  | "unavailable"
   | "provider_degraded"
   | "provider_recovered";
 export type DeliveryChannel = "telegram" | "push";
@@ -316,7 +317,7 @@ export interface EventRecord {
   monitorLabel?: string;
   episodeId?: number | null;
   occurredAt: string;
-  state?: "reservable";
+  state?: "reservable" | "not_reservable";
   trainNumber?: string;
   operator?: string;
   originName?: string;
@@ -330,6 +331,7 @@ export interface EventRecord {
   bookingUrl?: string;
   errorKind?: string;
   failureCount?: number | null;
+  silent: boolean;
   createdAt: string;
   deliveries: DeliveryState[];
   deliverySummary: DeliverySummary;
@@ -410,6 +412,7 @@ export interface Settings {
   pollIntervalSeconds: number;
   pushEnabled: boolean;
   monitoringEnabled: boolean;
+  unavailableNotifyAfterMinutes: number;
   telegram: TelegramSettings;
 }
 
@@ -417,6 +420,7 @@ export interface SettingsUpdateRequest {
   pollIntervalSeconds?: number;
   pushEnabled?: boolean;
   monitoringEnabled?: boolean;
+  unavailableNotifyAfterMinutes?: number;
 }
 
 export interface TelegramConfigRequest {

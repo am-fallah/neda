@@ -42,10 +42,11 @@ func queryEventKind(r *http.Request) (notify.EventKind, *queryError) {
 	}
 	kind := notify.EventKind(raw)
 	switch kind {
-	case notify.KindAvailability, notify.KindProviderDegraded, notify.KindProviderRecovered:
+	case notify.KindAvailability, notify.KindUnavailable,
+		notify.KindProviderDegraded, notify.KindProviderRecovered:
 		return kind, nil
 	default:
-		return "", &queryError{Field: "kind", Message: "must be availability, provider_degraded, or provider_recovered"}
+		return "", &queryError{Field: "kind", Message: "must be availability, unavailable, provider_degraded, or provider_recovered"}
 	}
 }
 

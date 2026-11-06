@@ -441,7 +441,7 @@ func (w *Worker) monitoringSuppressed(ctx context.Context, kind notify.EventKind
 		return false
 	}
 	switch kind {
-	case notify.KindAvailability:
+	case notify.KindAvailability, notify.KindUnavailable:
 	default:
 		return false
 	}

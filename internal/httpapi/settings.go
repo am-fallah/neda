@@ -12,10 +12,11 @@ import (
 )
 
 type settingsResponse struct {
-	PollIntervalSeconds int                      `json:"pollIntervalSeconds"`
-	PushEnabled         bool                     `json:"pushEnabled"`
-	MonitoringEnabled   bool                     `json:"monitoringEnabled"`
-	Telegram            telegramSettingsResponse `json:"telegram"`
+	PollIntervalSeconds        int                      `json:"pollIntervalSeconds"`
+	PushEnabled                bool                     `json:"pushEnabled"`
+	MonitoringEnabled          bool                     `json:"monitoringEnabled"`
+	UnavailableNotifyAfterMins int                      `json:"unavailableNotifyAfterMinutes"`
+	Telegram                   telegramSettingsResponse `json:"telegram"`
 }
 
 type telegramSettingsResponse struct {
@@ -30,9 +31,10 @@ type telegramSettingsResponse struct {
 }
 
 type settingsUpdateRequest struct {
-	PollIntervalSeconds *int  `json:"pollIntervalSeconds"`
-	PushEnabled         *bool `json:"pushEnabled"`
-	MonitoringEnabled   *bool `json:"monitoringEnabled"`
+	PollIntervalSeconds        *int  `json:"pollIntervalSeconds"`
+	PushEnabled                *bool `json:"pushEnabled"`
+	MonitoringEnabled          *bool `json:"monitoringEnabled"`
+	UnavailableNotifyAfterMins *int  `json:"unavailableNotifyAfterMinutes"`
 }
 
 type telegramConfigRequest struct {
@@ -88,9 +90,10 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	view, err := s.settings.Update(r.Context(), appsettings.Update{
-		PollIntervalSeconds: body.PollIntervalSeconds,
-		PushEnabled:         body.PushEnabled,
-		MonitoringEnabled:   body.MonitoringEnabled,
+		PollIntervalSeconds:        body.PollIntervalSeconds,
+		PushEnabled:                body.PushEnabled,
+		MonitoringEnabled:          body.MonitoringEnabled,
+		UnavailableNotifyAfterMins: body.UnavailableNotifyAfterMins,
 	})
 	if err != nil {
 		s.writeSettingsError(w, r, err)
@@ -137,9 +140,10 @@ func (s *Server) testTelegramSettings(w http.ResponseWriter, r *http.Request) {
 
 func settingsDTO(view appsettings.View) settingsResponse {
 	return settingsResponse{
-		PollIntervalSeconds: view.PollIntervalSeconds,
-		PushEnabled:         view.PushEnabled,
-		MonitoringEnabled:   view.MonitoringEnabled,
+		PollIntervalSeconds:        view.PollIntervalSeconds,
+		PushEnabled:                view.PushEnabled,
+		MonitoringEnabled:          view.MonitoringEnabled,
+		UnavailableNotifyAfterMins: view.UnavailableNotifyAfterMins,
 		Telegram: telegramSettingsResponse{
 			Available:         view.Telegram.Available,
 			Configured:        view.Telegram.Configured,

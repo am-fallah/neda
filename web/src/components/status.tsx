@@ -147,6 +147,13 @@ export function EventKindBadge({ kind }: { kind: EventKind }) {
           Availability
         </Badge>
       );
+    case "unavailable":
+      return (
+        <Badge variant="muted">
+          <CircleSlash aria-hidden="true" />
+          Unavailable
+        </Badge>
+      );
     case "provider_degraded":
       return (
         <Badge variant="warning">

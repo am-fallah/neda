@@ -771,7 +771,7 @@ components:
       in: query
       schema:
         type: string
-        enum: [availability, provider_degraded, provider_recovered]
+        enum: [availability, unavailable, provider_degraded, provider_recovered]
     MonitorID:
       name: monitorId
       in: query
@@ -1564,7 +1564,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [availability, provider_degraded, provider_recovered]
+          enum: [availability, unavailable, provider_degraded, provider_recovered]
         providerId:
           type: string
         monitorId:
@@ -1575,6 +1575,9 @@ components:
           type: integer
           format: int64
           nullable: true
+        silent:
+          type: boolean
+          description: True for the informational unavailable notice; false for sound-enabled availability notifications.
         occurredAt:
           type: string
           format: date-time
@@ -1646,7 +1649,7 @@ components:
           type: string
         eventKind:
           type: string
-          enum: [availability, provider_degraded, provider_recovered]
+          enum: [availability, unavailable, provider_degraded, provider_recovered]
         eventOccurredAt:
           type: string
           format: date-time
@@ -1720,7 +1723,7 @@ components:
           type: string
     SettingsResponse:
       type: object
-      required: [pollIntervalSeconds, pushEnabled, monitoringEnabled, telegram]
+      required: [pollIntervalSeconds, pushEnabled, monitoringEnabled, unavailableNotifyAfterMinutes, telegram]
       properties:
         pollIntervalSeconds:
           type: integer
@@ -1729,6 +1732,11 @@ components:
         monitoringEnabled:
           type: boolean
           description: Global monitoring switch. When false, no new provider checks or availability notifications start.
+        unavailableNotifyAfterMinutes:
+          type: integer
+          minimum: 60
+          maximum: 1440
+          description: Confirmed-unavailable grace period before one silent informational notice.
         telegram:
           $ref: "#/components/schemas/TelegramSettings"
     SettingsUpdateRequest:
@@ -1744,6 +1752,11 @@ components:
         monitoringEnabled:
           type: boolean
           description: Persist the global monitoring switch; changing it wakes the scheduler.
+        unavailableNotifyAfterMinutes:
+          type: integer
+          minimum: 60
+          maximum: 1440
+          description: Confirmed-unavailable grace period in minutes; changing it does not rewrite existing streaks.
     TelegramConfigRequest:
       type: object
       properties:

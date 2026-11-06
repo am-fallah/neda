@@ -82,7 +82,7 @@ func assertPragmas(t *testing.T, database *sql.DB) {
 		t.Fatalf("busy_timeout: %v", err)
 	}
 	if busyTimeout != 5000 {
-		t.Fatalf("busy_timeout = %d, want 5000", busyTimeout)
+		t.Fatalf("busy_timeout = %d, want 6000", busyTimeout)
 	}
 	var autoCheckpoint int
 	if err := database.QueryRow(`PRAGMA wal_autocheckpoint`).Scan(&autoCheckpoint); err != nil {
@@ -100,15 +100,59 @@ func assertPragmas(t *testing.T, database *sql.DB) {
 	}
 }
 
+func TestForeignKeyRebuildMigrationPreservesChildRows(t *testing.T) {
+	database := openTestDB(t)
+	fsys := fstest.MapFS{
+		"0001_parent.sql": &fstest.MapFile{Data: []byte(`
+CREATE TABLE events (id TEXT PRIMARY KEY, kind TEXT NOT NULL);
+CREATE TABLE notification_deliveries (
+	id TEXT PRIMARY KEY,
+	event_id TEXT NOT NULL REFERENCES events(id) ON DELETE CASCADE
+);
+INSERT INTO events VALUES ('e1', 'availability');
+INSERT INTO notification_deliveries VALUES ('d1', 'e1');
+`)},
+		"0002_rebuild.sql": &fstest.MapFile{Data: []byte(`
+-- neda:foreign-keys-off
+PRAGMA legacy_alter_table = ON;
+ALTER TABLE events RENAME TO events_old;
+CREATE TABLE events (id TEXT PRIMARY KEY, kind TEXT NOT NULL, silent INTEGER NOT NULL DEFAULT 0);
+INSERT INTO events (id, kind) SELECT id, kind FROM events_old;
+DROP TABLE events_old;
+PRAGMA legacy_alter_table = OFF;
+`)},
+	}
+	if _, err := Migrate(context.Background(), database.DB, fsys); err != nil {
+		t.Fatalf("Migrate rebuild: %v", err)
+	}
+	var children int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM notification_deliveries`).Scan(&children); err != nil {
+		t.Fatalf("count deliveries: %v", err)
+	}
+	if children != 1 {
+		t.Fatalf("delivery rows = %d, want 1 preserved through rebuild", children)
+	}
+	var foreignKeys int
+	if err := database.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
+		t.Fatalf("foreign_keys: %v", err)
+	}
+	if foreignKeys != 1 {
+		t.Fatalf("foreign_keys = %d after rebuild migration, want 1", foreignKeys)
+	}
+	if _, err := database.Exec(`INSERT INTO events VALUES ('e2', 'unavailable', 1)`); err != nil {
+		t.Fatalf("insert rebuilt event: %v", err)
+	}
+}
+
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 5 {
-		t.Fatalf("migration count = %d, want 5", count)
+	if count := migrateReal(t, database); count != 6 {
+		t.Fatalf("migration count = %d, want 6", count)
 	}
-	if err := database.Ready(context.Background(), 5); err != nil {
+	if err := database.Ready(context.Background(), 6); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if err := database.Ready(context.Background(), 6); err == nil {
+	if err := database.Ready(context.Background(), 5); err == nil {
 		t.Fatal("Ready accepted an unexpected migration count")
 	}
 
@@ -116,18 +160,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 5 {
-		t.Fatalf("schema_migrations count = %d, want 5", migrationsApplied)
+	if migrationsApplied != 6 {
+		t.Fatalf("schema_migrations count = %d, want 6", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 5 {
-		t.Fatalf("second migration count = %d, want 5", count)
+	if count := migrateReal(t, database); count != 6 {
+		t.Fatalf("second migration count = %d, want 6", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 5 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 5", migrationsApplied)
+	if migrationsApplied != 6 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 6", migrationsApplied)
 	}
 
 	var integrity string
@@ -414,7 +458,7 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 5); err != nil {
+	if err := database.Ready(context.Background(), 6); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
 	}
 }

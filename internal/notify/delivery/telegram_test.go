@@ -108,6 +108,59 @@ func TestTelegramSenderDeliversEscapedMessage(t *testing.T) {
 	}
 }
 
+func TestTelegramSenderSendsUnavailableNoticeSilently(t *testing.T) {
+	database := newDeliveryDB(t)
+	var formNotify []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		formNotify = append(formNotify, r.PostForm.Get("disable_notification"))
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":1700000000,"chat":{"id":-100}}}`))
+	}))
+	defer server.Close()
+
+	settings := telegramSettings(t, database, telegramKey(t, 6), true)
+	sender, err := delivery.NewTelegramSender(settings, telegramClientFor(t, server))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := sender.Send(context.Background(), delivery.Record{
+		Channel: notify.ChannelTelegram,
+		Event: notify.Event{
+			Kind:            notify.KindUnavailable,
+			ProviderID:      "mrbilit",
+			OccurredAt:      workerNow,
+			OriginName:      "Yazd",
+			DestinationName: "Mashhad",
+			Silent:          true,
+		},
+	})
+	if result.Outcome != delivery.OutcomeSent {
+		t.Fatalf("unavailable send = %+v", result)
+	}
+	if len(formNotify) != 1 || formNotify[0] != "true" {
+		t.Fatalf("disable_notification = %v, want [true]", formNotify)
+	}
+
+	result = sender.Send(context.Background(), delivery.Record{
+		Channel: notify.ChannelTelegram,
+		Event: notify.Event{
+			Kind:            notify.KindAvailability,
+			ProviderID:      "mrbilit",
+			OccurredAt:      workerNow,
+			OriginName:      "Yazd",
+			DestinationName: "Mashhad",
+		},
+	})
+	if result.Outcome != delivery.OutcomeSent {
+		t.Fatalf("availability send = %+v", result)
+	}
+	if len(formNotify) != 2 || formNotify[1] != "" {
+		t.Fatalf("availability disable_notification = %v, want empty", formNotify)
+	}
+}
+
 func TestTelegramSenderAuthorizationAndTransientErrors(t *testing.T) {
 	cases := []struct {
 		name       string
