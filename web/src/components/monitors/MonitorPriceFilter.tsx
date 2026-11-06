@@ -94,7 +94,7 @@ export function MonitorPriceFilter({
                 placeholder={
                   knownMin !== null ? formatAmount(knownMin) : "Min amount"
                 }
-                className="h-9 font-mono tabular-nums"
+                className="font-mono tabular-nums"
                 value={min}
                 onChange={(event) => onMinChange(event.target.value)}
                 aria-invalid={error ? true : undefined}
@@ -110,7 +110,7 @@ export function MonitorPriceFilter({
                 placeholder={
                   knownMax !== null ? formatAmount(knownMax) : "Max amount"
                 }
-                className="h-9 font-mono tabular-nums"
+                className="font-mono tabular-nums"
                 value={max}
                 onChange={(event) => onMaxChange(event.target.value)}
                 aria-invalid={error ? true : undefined}

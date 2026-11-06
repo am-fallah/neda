@@ -903,7 +903,7 @@ export function SettingsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Settings" description="Loading settings…" />
         <LoadingState rows={3} label="Loading settings" />
       </div>
@@ -912,7 +912,7 @@ export function SettingsPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Settings" />
         <ErrorState
           error={error}
@@ -926,7 +926,7 @@ export function SettingsPage() {
   if (!settings) return null;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Settings"
         description="Non-secret application settings and encrypted notification configuration. Stored secrets are never shown again."

@@ -91,7 +91,7 @@ export function MonitorListPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Monitors" description="Loading monitors…" />
         <LoadingState rows={3} label="Loading monitors" />
       </div>
@@ -100,7 +100,7 @@ export function MonitorListPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Monitors" />
         <ErrorState
           error={error}
@@ -116,7 +116,7 @@ export function MonitorListPage() {
   const noProviders = (data?.providers.length ?? 0) === 0;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Monitors"
         description="Each monitor tracks one route and departure date across one or more providers. Monitoring runs on the server."

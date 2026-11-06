@@ -66,7 +66,7 @@ export function EventDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Event detail" description="Loading event…" />
         <LoadingState rows={3} label="Loading event" />
       </div>
@@ -75,7 +75,7 @@ export function EventDetailPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Event detail" />
         <ErrorState
           error={error}
@@ -100,7 +100,7 @@ export function EventDetailPage() {
   const fullyDelivered = isFullyDelivered(event.deliverySummary);
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="History"
         title={

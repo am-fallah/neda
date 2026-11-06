@@ -33,7 +33,7 @@ export function PageHeader({
         ) : null}
         <h1
           className={cn(
-            "text-2xl font-semibold tracking-tight text-balance",
+            "text-[1.75rem] leading-9 font-semibold tracking-[-0.025em] text-balance",
             titleClassName,
           )}
         >

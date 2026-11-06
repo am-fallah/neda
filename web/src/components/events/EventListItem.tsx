@@ -17,7 +17,7 @@ export function EventListItem({ event }: { event: EventRecord }) {
   return (
     <Link
       to={`/events/${encodeURIComponent(event.id)}`}
-      className="group flex flex-col gap-2 rounded-xl border bg-card p-4 transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="group flex flex-col gap-2 rounded-lg border bg-card p-4 transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <div className="flex flex-wrap items-center gap-2">
         <EventKindBadge kind={event.kind} />

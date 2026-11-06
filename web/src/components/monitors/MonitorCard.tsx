@@ -68,7 +68,7 @@ export function MonitorCard({
   return (
     <Link
       to={`/monitors/${encodeURIComponent(monitor.id)}`}
-      className="group flex flex-col gap-3 rounded-xl border bg-card p-5 transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      className="group flex flex-col gap-3 rounded-lg border bg-card p-5 transition-colors hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">

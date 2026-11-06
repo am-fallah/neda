@@ -46,7 +46,7 @@ export function MonitorEditPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title={data ? `Edit ${data.monitor.label}` : "Edit monitor"}
         description="Changing the route, date, passengers, or providers resets availability state. Label-only changes do not."

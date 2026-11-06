@@ -47,7 +47,7 @@ function MonitorCreateSkeleton() {
         <Skeleton className="h-3 w-16" />
       </div>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_22rem] 2xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <div className="rounded-xl border bg-card p-5 sm:p-6">
+        <div className="rounded-lg border bg-card p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <Skeleton className="size-9 rounded-lg" />
             <div className="flex flex-1 flex-col gap-2">
@@ -60,7 +60,7 @@ function MonitorCreateSkeleton() {
             <Skeleton className="h-11 w-full" />
             <Skeleton className="h-3 w-64 max-w-full" />
           </div>
-          <div className="mt-5 flex items-center gap-3 rounded-xl border bg-muted/20 px-4 py-3">
+          <div className="mt-5 flex items-center gap-3 rounded-lg border bg-muted/20 px-4 py-3">
             <Skeleton className="size-9 rounded-lg" />
             <div className="flex flex-1 flex-col gap-2">
               <Skeleton className="h-3.5 w-40" />
@@ -72,7 +72,7 @@ function MonitorCreateSkeleton() {
             <Skeleton className="h-10 w-32" />
           </div>
         </div>
-        <div className="rounded-xl border bg-card p-5">
+        <div className="rounded-lg border bg-card p-5">
           <div className="flex items-start gap-3">
             <Skeleton className="size-9 rounded-lg" />
             <div className="flex flex-1 flex-col gap-2">
@@ -151,7 +151,6 @@ export function MonitorCreatePage() {
         </nav>
         <PageHeader
           title="New monitor"
-          titleClassName="text-[1.75rem] leading-9 tracking-[-0.025em]"
           description="Search the selected provider, choose the wagons or fare options to watch, and confirm the monitor."
           actions={
             <Button asChild variant="outline">
@@ -189,7 +188,7 @@ export function MonitorCreatePage() {
                 development. It never contacts a real ticket source and is not
                 part of the provider search flow above.
               </p>
-              <div className="mt-4 rounded-xl border bg-muted/15 p-4">
+              <div className="mt-4 rounded-lg border bg-muted/15 p-4">
                 <MonitorForm
                   mode="create"
                   initialValues={emptyMonitorForm()}

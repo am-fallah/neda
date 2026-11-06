@@ -6,7 +6,7 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 export function NotFoundPage() {
   useDocumentTitle("Not found");
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Page not found"
         description="That page does not exist in the dashboard."

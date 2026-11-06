@@ -548,7 +548,7 @@ export function MonitorDetailPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Monitor" description="Loading monitor…" />
         <LoadingState rows={4} label="Loading monitor" />
       </div>
@@ -557,7 +557,7 @@ export function MonitorDetailPage() {
 
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="flex flex-col gap-6">
         <PageHeader title="Monitor" />
         <ErrorState
           error={error}
@@ -588,7 +588,7 @@ export function MonitorDetailPage() {
   const activeTargets = monitor.providers.filter((target) => target.active);
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         eyebrow="Monitor"
         title={monitor.label}
