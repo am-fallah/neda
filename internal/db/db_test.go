@@ -82,7 +82,7 @@ func assertPragmas(t *testing.T, database *sql.DB) {
 		t.Fatalf("busy_timeout: %v", err)
 	}
 	if busyTimeout != 5000 {
-		t.Fatalf("busy_timeout = %d, want 6000", busyTimeout)
+		t.Fatalf("busy_timeout = %d, want 5000", busyTimeout)
 	}
 	var autoCheckpoint int
 	if err := database.QueryRow(`PRAGMA wal_autocheckpoint`).Scan(&autoCheckpoint); err != nil {
@@ -146,13 +146,13 @@ PRAGMA legacy_alter_table = OFF;
 
 func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	database := openTestDB(t)
-	if count := migrateReal(t, database); count != 6 {
-		t.Fatalf("migration count = %d, want 6", count)
+	if count := migrateReal(t, database); count != 7 {
+		t.Fatalf("migration count = %d, want 7", count)
 	}
-	if err := database.Ready(context.Background(), 6); err != nil {
+	if err := database.Ready(context.Background(), 7); err != nil {
 		t.Fatalf("Ready: %v", err)
 	}
-	if err := database.Ready(context.Background(), 5); err == nil {
+	if err := database.Ready(context.Background(), 6); err == nil {
 		t.Fatal("Ready accepted an unexpected migration count")
 	}
 
@@ -160,18 +160,18 @@ func TestMigrateAppliesAllAndIsIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 6 {
-		t.Fatalf("schema_migrations count = %d, want 6", migrationsApplied)
+	if migrationsApplied != 7 {
+		t.Fatalf("schema_migrations count = %d, want 7", migrationsApplied)
 	}
 
-	if count := migrateReal(t, database); count != 6 {
-		t.Fatalf("second migration count = %d, want 6", count)
+	if count := migrateReal(t, database); count != 7 {
+		t.Fatalf("second migration count = %d, want 7", count)
 	}
 	if err := database.QueryRow(`SELECT COUNT(*) FROM schema_migrations`).Scan(&migrationsApplied); err != nil {
 		t.Fatal(err)
 	}
-	if migrationsApplied != 6 {
-		t.Fatalf("schema_migrations count after rerun = %d, want 6", migrationsApplied)
+	if migrationsApplied != 7 {
+		t.Fatalf("schema_migrations count after rerun = %d, want 7", migrationsApplied)
 	}
 
 	var integrity string
@@ -458,7 +458,7 @@ func TestOpenAcceptsRelativePath(t *testing.T) {
 	if _, err := Migrate(context.Background(), database.DB, migrations.FS); err != nil {
 		t.Fatalf("Migrate(relative): %v", err)
 	}
-	if err := database.Ready(context.Background(), 6); err != nil {
+	if err := database.Ready(context.Background(), 7); err != nil {
 		t.Fatalf("Ready(relative): %v", err)
 	}
 }

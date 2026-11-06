@@ -22,7 +22,16 @@ type settingsPayload struct {
 	PushEnabled                bool                    `json:"pushEnabled"`
 	MonitoringEnabled          bool                    `json:"monitoringEnabled"`
 	UnavailableNotifyAfterMins int                     `json:"unavailableNotifyAfterMinutes"`
+	DailyReport                dailyReportPayload      `json:"dailyReport"`
 	Telegram                   telegramSettingsPayload `json:"telegram"`
+}
+
+type dailyReportPayload struct {
+	Time           string     `json:"time"`
+	LastReportDate string     `json:"lastReportDate"`
+	LastStatus     string     `json:"lastStatus"`
+	LastSentAt     *time.Time `json:"lastSentAt"`
+	LastErrorKind  string     `json:"lastErrorKind"`
 }
 
 type telegramSettingsPayload struct {
@@ -54,6 +63,10 @@ func settingsUpdateBodyWithMonitoring(poll *int, push, monitoring *bool) string 
 }
 
 func settingsUpdateBodyFull(poll *int, push, monitoring *bool, graceMinutes *int) string {
+	return settingsUpdateBodyAll(poll, push, monitoring, graceMinutes, nil)
+}
+
+func settingsUpdateBodyAll(poll *int, push, monitoring *bool, graceMinutes *int, reportTime *string) string {
 	payload := map[string]any{}
 	if poll != nil {
 		payload["pollIntervalSeconds"] = *poll
@@ -66,6 +79,9 @@ func settingsUpdateBodyFull(poll *int, push, monitoring *bool, graceMinutes *int
 	}
 	if graceMinutes != nil {
 		payload["unavailableNotifyAfterMinutes"] = *graceMinutes
+	}
+	if reportTime != nil {
+		payload["dailyReportTime"] = *reportTime
 	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -99,7 +115,7 @@ func TestSettingsGetUpdateAndValidation(t *testing.T) {
 	}
 	payload := decodeSettings(t, recorder.Body.Bytes())
 	if payload.PollIntervalSeconds != 300 || payload.PushEnabled || !payload.MonitoringEnabled ||
-		payload.UnavailableNotifyAfterMins != 180 {
+		payload.UnavailableNotifyAfterMins != 180 || payload.DailyReport.Time != "00:05" {
 		t.Fatalf("default settings = %+v", payload)
 	}
 	if !payload.Telegram.Available || payload.Telegram.Configured || payload.Telegram.Readable {
@@ -117,14 +133,16 @@ func TestSettingsGetUpdateAndValidation(t *testing.T) {
 	push := true
 	monitoring := false
 	grace := 90
+	reportTime := "06:30"
 	updated := fixture.request(t, http.MethodPut, "/api/v1/settings",
-		settingsUpdateBodyFull(&poll, &push, &monitoring, &grace), session, csrf, authOrigin)
+		settingsUpdateBodyAll(&poll, &push, &monitoring, &grace, &reportTime), session, csrf, authOrigin)
 	if updated.Code != http.StatusOK {
 		t.Fatalf("PUT settings status = %d, body=%s", updated.Code, updated.Body.String())
 	}
 	updatedPayload := decodeSettings(t, updated.Body.Bytes())
 	if updatedPayload.PollIntervalSeconds != 120 || !updatedPayload.PushEnabled ||
-		updatedPayload.MonitoringEnabled || updatedPayload.UnavailableNotifyAfterMins != 90 {
+		updatedPayload.MonitoringEnabled || updatedPayload.UnavailableNotifyAfterMins != 90 ||
+		updatedPayload.DailyReport.Time != "06:30" {
 		t.Fatalf("updated settings = %+v", updatedPayload)
 	}
 	reloaded := fixture.request(t, http.MethodGet, "/api/v1/settings", "", session, "", "")
@@ -132,7 +150,8 @@ func TestSettingsGetUpdateAndValidation(t *testing.T) {
 		t.Fatalf("reloaded settings status = %d", reloaded.Code)
 	}
 	if got := decodeSettings(t, reloaded.Body.Bytes()); got.PollIntervalSeconds != 120 ||
-		!got.PushEnabled || got.MonitoringEnabled || got.UnavailableNotifyAfterMins != 90 {
+		!got.PushEnabled || got.MonitoringEnabled || got.UnavailableNotifyAfterMins != 90 ||
+		got.DailyReport.Time != "06:30" {
 		t.Fatalf("reloaded settings = %+v", got)
 	}
 

@@ -135,7 +135,8 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 		t.Fatalf("View: %v", err)
 	}
 	if view.PollIntervalSeconds != 300 || view.PushEnabled || !view.MonitoringEnabled ||
-		view.UnavailableNotifyAfterMins != 180 || view.Telegram.Available {
+		view.UnavailableNotifyAfterMins != 180 || view.DailyReport.Time != "00:05" ||
+		view.Telegram.Available {
 		t.Fatalf("default view = %+v", view)
 	}
 
@@ -143,17 +144,19 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	push := true
 	monitoring := false
 	graceMinutes := 90
+	reportTime := "06:30"
 	updated, err := h.service.Update(ctx, settings.Update{
 		PollIntervalSeconds:        &poll,
 		PushEnabled:                &push,
 		MonitoringEnabled:          &monitoring,
 		UnavailableNotifyAfterMins: &graceMinutes,
+		DailyReportTime:            &reportTime,
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
 	if updated.PollIntervalSeconds != 120 || !updated.PushEnabled || updated.MonitoringEnabled ||
-		updated.UnavailableNotifyAfterMins != 90 {
+		updated.UnavailableNotifyAfterMins != 90 || updated.DailyReport.Time != "06:30" {
 		t.Fatalf("updated view = %+v", updated)
 	}
 	interval, err := h.store.PollInterval(ctx)
@@ -172,6 +175,10 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	if err != nil || grace != 90*time.Minute {
 		t.Fatalf("stored grace = %v, %v", grace, err)
 	}
+	storedTime, err := h.store.DailyReportTime(ctx)
+	if err != nil || storedTime != "06:30" {
+		t.Fatalf("stored report time = %q, %v", storedTime, err)
+	}
 
 	invalid := 30
 	var validation *settings.ValidationError
@@ -183,6 +190,11 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	if _, err := h.service.Update(ctx, settings.Update{UnavailableNotifyAfterMins: &invalidGrace}); !errors.As(err, &validation) ||
 		validation.Field != "unavailableNotifyAfterMinutes" {
 		t.Fatalf("invalid grace error = %v", err)
+	}
+	invalidTime := "6:30"
+	if _, err := h.service.Update(ctx, settings.Update{DailyReportTime: &invalidTime}); !errors.As(err, &validation) ||
+		validation.Field != "dailyReportTime" {
+		t.Fatalf("invalid report time error = %v", err)
 	}
 	if _, err := h.service.Update(ctx, settings.Update{}); !errors.As(err, &validation) {
 		t.Fatalf("empty update error = %v", err)

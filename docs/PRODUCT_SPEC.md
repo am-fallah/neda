@@ -191,6 +191,12 @@ Common requirements:
 - A separate event and delivery are created per provider-specific availability event. One provider's event is never suppressed because another provider's state differs.
 - If a monitor expires before an availability delivery is sent, the stale ticket notification is skipped (the historical event remains visible). Provider-health deliveries are not tied to monitor expiry.
 
+#### Owner-approved notification additions (2026-11-06)
+
+- **Global monitoring switch:** a persisted ON/OFF control in Settings. OFF stops new provider checks and suppresses availability/unavailability delivery while preserving monitor rows and expiration reconciliation. In-flight checks are finalized as discarded; resume staggers overdue monitors.
+- **Unavailability grace:** no immediate sold-out notification. A fare that remains confirmed unavailable for the configurable grace period (default 3h, range 1–24h) produces one silent informational notice. Provider errors/timeouts/unknown/empty/malformed results never advance the timer; a gap longer than the tolerated polling window resets the streak. Availability returning sends the existing immediate, sound-enabled notification. State is persisted across restarts.
+- **Daily Telegram report:** one silent report at 00:05 Asia/Tehran (configurable) covering the previous complete local day, with Jalali and Gregorian dates, even on quiet days. It summarizes durable activity, prevents duplicate reports per date, and records at-most-once semantics when a crash makes the external send outcome ambiguous. Global monitoring OFF does not stop reports.
+
 #### Telegram
 
 - Owner supplies an existing bot token and chat ID through the dashboard after implementation.

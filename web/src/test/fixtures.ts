@@ -270,6 +270,7 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     pushEnabled: false,
     monitoringEnabled: true,
     unavailableNotifyAfterMinutes: 180,
+    dailyReport: { time: "00:05" },
     telegram: {
       available: true,
       configured: true,

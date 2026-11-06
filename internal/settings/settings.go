@@ -60,12 +60,23 @@ type TelegramStatus struct {
 	LastErrorKind     string
 }
 
+// DailyReportStatus is the non-secret daily-report configuration and last
+// attempt status. It never contains message text or Telegram credentials.
+type DailyReportStatus struct {
+	Time           string
+	LastReportDate string
+	LastStatus     string
+	LastSentAt     *time.Time
+	LastErrorKind  string
+}
+
 // View is the complete non-secret settings response.
 type View struct {
 	PollIntervalSeconds        int
 	PushEnabled                bool
 	MonitoringEnabled          bool
 	UnavailableNotifyAfterMins int
+	DailyReport                DailyReportStatus
 	Telegram                   TelegramStatus
 }
 
@@ -75,6 +86,7 @@ type Update struct {
 	PushEnabled                *bool
 	MonitoringEnabled          *bool
 	UnavailableNotifyAfterMins *int
+	DailyReportTime            *string
 }
 
 // TestResult reports the persisted post-test settings view and the test
@@ -143,11 +155,26 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	reportTime, err := s.store.DailyReportTime(ctx)
+	if err != nil {
+		return View{}, err
+	}
+	dailyReport := DailyReportStatus{Time: reportTime}
+	latest, err := s.store.LatestDailyReport(ctx)
+	if err == nil {
+		dailyReport.LastReportDate = latest.ReportDate
+		dailyReport.LastStatus = string(latest.Status)
+		dailyReport.LastSentAt = latest.SentAt
+		dailyReport.LastErrorKind = latest.LastErrorKind
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return View{}, err
+	}
 	view := View{
 		PollIntervalSeconds:        int(interval / time.Second),
 		PushEnabled:                pushEnabled,
 		MonitoringEnabled:          monitoringEnabled,
 		UnavailableNotifyAfterMins: int(grace / time.Minute),
+		DailyReport:                dailyReport,
 	}
 	if s.telegram == nil {
 		return view, nil
@@ -191,7 +218,8 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 		return View{}, errors.New("settings: not initialized")
 	}
 	if update.PollIntervalSeconds == nil && update.PushEnabled == nil &&
-		update.MonitoringEnabled == nil && update.UnavailableNotifyAfterMins == nil {
+		update.MonitoringEnabled == nil && update.UnavailableNotifyAfterMins == nil &&
+		update.DailyReportTime == nil {
 		return View{}, &ValidationError{Message: "at least one setting is required"}
 	}
 	var interval time.Duration
@@ -220,6 +248,16 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 		}
 		grace = time.Duration(minutes) * time.Minute
 	}
+	var reportTime string
+	if update.DailyReportTime != nil {
+		reportTime = strings.TrimSpace(*update.DailyReportTime)
+		if err := store.ValidateDailyReportTime(reportTime); err != nil {
+			return View{}, &ValidationError{
+				Field:   "dailyReportTime",
+				Message: err.Error(),
+			}
+		}
+	}
 	now := s.now().UTC()
 	if now.IsZero() {
 		return View{}, errors.New("settings: update timestamp is required")
@@ -242,6 +280,11 @@ func (s *Service) Update(ctx context.Context, update Update) (View, error) {
 		}
 		if update.UnavailableNotifyAfterMins != nil {
 			if err := tx.SetUnavailableNotifyAfter(ctx, grace, now); err != nil {
+				return err
+			}
+		}
+		if update.DailyReportTime != nil {
+			if err := tx.SetDailyReportTime(ctx, reportTime, now); err != nil {
 				return err
 			}
 		}
