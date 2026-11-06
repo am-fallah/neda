@@ -249,15 +249,25 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 			return err
 		}
 		hasOutbox = len(deliveries) > 0
+		interval, err := txStore.PollInterval(ctx)
+		if err != nil {
+			return err
+		}
+		grace, err := txStore.UnavailableNotifyAfter(ctx)
+		if err != nil {
+			return err
+		}
 		availabilityResult, err := availability.Apply(ctx, tx, availability.Input{
-			MonitorID:     attempt.MonitorID,
-			TargetID:      attempt.TargetID,
-			ProviderID:    attempt.ProviderID,
-			ConfigVersion: attempt.ConfigVersion,
-			ObservedAt:    outcomeResult.ObservedAt,
-			Now:           txNow,
-			Result:        outcomeResult,
-			Deliveries:    deliveries,
+			MonitorID:        attempt.MonitorID,
+			TargetID:         attempt.TargetID,
+			ProviderID:       attempt.ProviderID,
+			ConfigVersion:    attempt.ConfigVersion,
+			ObservedAt:       outcomeResult.ObservedAt,
+			Now:              txNow,
+			Result:           outcomeResult,
+			Deliveries:       deliveries,
+			UnavailableGrace: grace,
+			UnavailableGap:   availability.GapTolerance(interval),
 		})
 		if err != nil {
 			return fmt.Errorf("scheduler: apply availability: %w", err)
@@ -277,10 +287,6 @@ func (r *OutcomeRunner) finalizeSuccess(ctx context.Context, attempt CheckAttemp
 		}
 		events = append(events, healthResult.EventsCreated...)
 
-		interval, err := txStore.PollInterval(ctx)
-		if err != nil {
-			return err
-		}
 		decision, err := DecideTargetSchedule(txNow, interval, gate.target.ConsecutiveFailures, attempt.Classification, r.random)
 		if err != nil {
 			return err

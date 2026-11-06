@@ -106,9 +106,11 @@ export function EventDetailPage() {
         title={
           event.kind === "availability"
             ? "Availability event"
-            : event.kind === "provider_degraded"
-              ? "Provider degraded event"
-              : "Provider recovered event"
+            : event.kind === "unavailable"
+              ? "Unavailable event"
+              : event.kind === "provider_degraded"
+                ? "Provider degraded event"
+                : "Provider recovered event"
         }
         description={
           <span className="flex flex-wrap items-center gap-2">
@@ -176,10 +178,16 @@ export function EventDetailPage() {
               </DetailRow>
             ) : null}
 
-            {event.kind === "availability" ? (
+            {event.kind === "availability" || event.kind === "unavailable" ? (
               <>
                 <DetailRow label="State">
-                  <Badge variant="success">Reservable at detection</Badge>
+                  {event.kind === "availability" ? (
+                    <Badge variant="success">Reservable at detection</Badge>
+                  ) : (
+                    <Badge variant="muted">
+                      Confirmed unavailable for the grace period
+                    </Badge>
+                  )}
                 </DetailRow>
                 <DetailRow label="Route">
                   {event.originName || event.destinationName
@@ -293,7 +301,7 @@ export function EventDetailPage() {
                 View deliveries for this event
               </Link>
             </Button>
-            {event.kind === "availability" ? (
+            {event.kind === "availability" || event.kind === "unavailable" ? (
               <p className="text-xs text-muted-foreground">
                 Telegram and Push channels are delivered independently.
               </p>

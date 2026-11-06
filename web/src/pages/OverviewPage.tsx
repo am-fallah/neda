@@ -213,6 +213,8 @@ function eventKindLabel(kind: EventRecord["kind"]): string {
   switch (kind) {
     case "availability":
       return "Availability";
+    case "unavailable":
+      return "Unavailable";
     case "provider_degraded":
       return "Provider degraded";
     case "provider_recovered":

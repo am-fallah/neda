@@ -194,6 +194,37 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("saves the unavailability grace period in minutes", async () => {
+    updateMock.mockResolvedValue(
+      makeSettings({ unavailableNotifyAfterMinutes: 240 }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const hours = await screen.findByLabelText("Grace period (hours)");
+    expect(hours).toHaveValue(3);
+
+    await user.clear(hours);
+    await user.type(hours, "25");
+    await user.click(
+      screen.getByRole("button", { name: "Save grace period" }),
+    );
+    expect(
+      screen.getByText("Enter a whole number between 1 and 24 hours."),
+    ).toBeInTheDocument();
+    expect(updateMock).not.toHaveBeenCalled();
+
+    await user.clear(hours);
+    await user.type(hours, "4");
+    await user.click(
+      screen.getByRole("button", { name: "Save grace period" }),
+    );
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({
+        unavailableNotifyAfterMinutes: 240,
+      }),
+    );
+  });
+
   it("validates and saves the polling interval", async () => {
     updateMock.mockResolvedValue(
       makeSettings({ pollIntervalSeconds: 600 }),

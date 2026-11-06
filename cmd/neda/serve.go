@@ -128,6 +128,10 @@ func runServe(stdout, stderr io.Writer) int {
 		logger.Error("monitoring setting initialization failed", "error", err)
 		return 1
 	}
+	if err := appStore.EnsureUnavailableNotifyAfter(ctx, time.Now().UTC()); err != nil {
+		logger.Error("unavailability grace initialization failed", "error", err)
+		return 1
+	}
 	pollInterval, err := appStore.PollInterval(ctx)
 	if err != nil {
 		logger.Error("poll interval configuration is invalid", "error", err)

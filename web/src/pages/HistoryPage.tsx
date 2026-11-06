@@ -53,6 +53,7 @@ const PAGE_SIZE = 25;
 const EVENT_KINDS: Array<{ value: "" | EventKind; label: string }> = [
   { value: "", label: "All event types" },
   { value: "availability", label: "Availability" },
+  { value: "unavailable", label: "Unavailable" },
   { value: "provider_degraded", label: "Provider degraded" },
   { value: "provider_recovered", label: "Provider recovered" },
 ];

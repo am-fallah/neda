@@ -203,6 +203,7 @@ export function makeEvent(overrides: Partial<EventRecord> = {}): EventRecord {
     bookingUrl: "https://mrbilit.com/trains/tehran-mashhad?departureDate=1405-08-06",
     errorKind: "",
     failureCount: null,
+    silent: false,
     createdAt: NOW,
     deliveries: [makeDeliveryState()],
     deliverySummary: {
@@ -268,6 +269,7 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
     pollIntervalSeconds: 300,
     pushEnabled: false,
     monitoringEnabled: true,
+    unavailableNotifyAfterMinutes: 180,
     telegram: {
       available: true,
       configured: true,

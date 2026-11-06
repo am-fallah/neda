@@ -94,6 +94,39 @@ func TestFormatTelegramOmitsUnvalidatedBookingURLs(t *testing.T) {
 	}
 }
 
+func TestFormatTelegramUnavailableIsInformational(t *testing.T) {
+	event := notify.Event{
+		Kind:            notify.KindUnavailable,
+		ProviderID:      "mrbilit",
+		MonitorID:       "m1",
+		OccurredAt:      formatNow,
+		OriginName:      "Yazd",
+		DestinationName: "Mashhad",
+		TrainNumber:     "101",
+		WagonName:       "Wagon 1",
+		ClassName:       "Economy",
+		Silent:          true,
+	}
+	text, err := notify.FormatTelegram(event)
+	if err != nil {
+		t.Fatalf("FormatTelegram: %v", err)
+	}
+	for _, want := range []string{
+		"Ticket unavailable",
+		"Yazd → Mashhad",
+		"Train: 101",
+		"Wagon/class: Wagon 1 / Economy",
+		"remained confirmed unavailable across the configured grace period",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("message missing %q:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "Ticket available") {
+		t.Fatalf("unavailable notice claims availability:\n%s", text)
+	}
+}
+
 func TestFormatTelegramHealthAndRecoveryAreDistinct(t *testing.T) {
 	failures := 3
 	degraded := notify.Event{

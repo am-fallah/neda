@@ -15,6 +15,27 @@ import (
 	"github.com/am-fallah/neda/internal/provider"
 )
 
+const (
+	// DefaultUnavailableGapTolerance is the minimum allowed gap between
+	// consecutive confirmed NotReservable observations. A longer gap starts a
+	// new streak so missed/inconclusive checks cannot falsely prove continuity.
+	DefaultUnavailableGapTolerance = 15 * time.Minute
+)
+
+// GapTolerance returns the maximum accepted gap for a poll interval. It
+// tolerates one missed check at any configured interval while keeping the
+// default five-minute interval at the documented 15-minute floor.
+func GapTolerance(pollInterval time.Duration) time.Duration {
+	if pollInterval <= 0 {
+		return DefaultUnavailableGapTolerance
+	}
+	doubled := 2 * pollInterval
+	if doubled > DefaultUnavailableGapTolerance {
+		return doubled
+	}
+	return DefaultUnavailableGapTolerance
+}
+
 // Input is one successful provider result applied to a monitor target.
 type Input struct {
 	MonitorID     string
@@ -25,16 +46,23 @@ type Input struct {
 	Now           time.Time
 	Result        provider.Result
 	Deliveries    []notify.Delivery
+	// UnavailableGrace is the confirmed-unavailable duration before one silent
+	// notice. Zero disables the notice (used only by tests).
+	UnavailableGrace time.Duration
+	// UnavailableGap is the maximum gap between decisive NotReservable
+	// observations that still proves a continuous streak.
+	UnavailableGap time.Duration
 }
 
 // Result reports the state/episode/event changes made by Apply.
 type Result struct {
-	StatesUpserted int
-	EpisodesOpened []int64
-	EpisodesClosed []int64
-	EventsCreated  []string
-	MissingStates  int
-	Warnings       []string
+	StatesUpserted     int
+	EpisodesOpened     []int64
+	EpisodesClosed     []int64
+	EventsCreated      []string
+	UnavailableNotices int
+	MissingStates      int
+	Warnings           []string
 }
 
 type stateKey struct {
@@ -52,13 +80,23 @@ type observation struct {
 }
 
 type currentState struct {
-	id             int64
-	state          provider.State
-	stateSince     time.Time
-	lastDecisiveAt *time.Time
+	id                    int64
+	state                 provider.State
+	stateSince            time.Time
+	lastDecisiveAt        *time.Time
+	unavailableSince      *time.Time
+	lastNotReservableAt   *time.Time
+	unavailableNotifiedAt *time.Time
 }
 
-const selectStateQuery = `SELECT id, state, state_since, last_decisive_at
+type unavailableTracker struct {
+	since               *time.Time
+	lastNotReservableAt *time.Time
+	notifiedAt          *time.Time
+}
+
+const selectStateQuery = `SELECT id, state, state_since, last_decisive_at,
+	unavailable_since, last_not_reservable_at, unavailable_notified_at
 FROM inventory_states
 WHERE monitor_provider_id = ? AND config_version = ? AND journey_key = ? AND offering_key = ?`
 
@@ -66,8 +104,9 @@ const insertStateQuery = `INSERT INTO inventory_states
 	(monitor_provider_id, config_version, journey_key, offering_key, state, state_since,
 	 last_observed_at, last_decisive_at, last_missing_at, last_reason, last_capacity,
 	 train_number, operator, origin_name, destination_name, departure_at, arrival_at,
-	 wagon_name, class_name, price_amount, price_currency, last_booking_url, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	 wagon_name, class_name, price_amount, price_currency, last_booking_url,
+	 unavailable_since, last_not_reservable_at, unavailable_notified_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 const updateStateQuery = `UPDATE inventory_states SET
 	state = ?, state_since = ?, last_observed_at = ?,
@@ -75,8 +114,12 @@ const updateStateQuery = `UPDATE inventory_states SET
 	last_reason = ?, last_capacity = ?, train_number = ?, operator = ?,
 	origin_name = ?, destination_name = ?, departure_at = ?, arrival_at = ?,
 	wagon_name = ?, class_name = ?, price_amount = ?, price_currency = ?,
-	last_booking_url = ?, updated_at = ?
+	last_booking_url = ?, unavailable_since = ?, last_not_reservable_at = ?,
+	unavailable_notified_at = ?, updated_at = ?
 WHERE id = ?`
+
+const markUnavailableNotifiedQuery = `UPDATE inventory_states
+SET unavailable_notified_at = ?, updated_at = ? WHERE id = ?`
 
 const openEpisodeQuery = `SELECT id FROM availability_episodes WHERE state_id = ? AND closed_at IS NULL`
 
@@ -111,6 +154,9 @@ func Apply(ctx context.Context, tx *sql.Tx, input Input) (Result, error) {
 
 	input.ObservedAt = input.ObservedAt.UTC()
 	input.Now = input.Now.UTC()
+	if input.UnavailableGap <= 0 {
+		input.UnavailableGap = DefaultUnavailableGapTolerance
+	}
 	var result Result
 	observed := make(map[stateKey]bool, len(order))
 	conflictWarning := false
@@ -131,11 +177,30 @@ func Apply(ctx context.Context, tx *sql.Tx, input Input) (Result, error) {
 		if conflict {
 			newState = provider.StateUnknown
 		}
-		stateID, err := upsertState(ctx, tx, input, key, obs, current, found, newState)
+		tracker := nextUnavailableTracker(current, found, newState, input.ObservedAt, input.UnavailableGap)
+		stateID, err := upsertState(ctx, tx, input, key, obs, current, found, newState, tracker)
 		if err != nil {
 			return Result{}, err
 		}
 		result.StatesUpserted++
+
+		if newState == provider.StateNotReservable && tracker.since != nil &&
+			tracker.notifiedAt == nil && input.UnavailableGrace > 0 &&
+			input.ObservedAt.Sub(*tracker.since) >= input.UnavailableGrace {
+			enqueued, err := enqueueUnavailableEvent(ctx, tx, input, obs, stateID, *tracker.since)
+			if err != nil {
+				return Result{}, err
+			}
+			if err := markUnavailableNotified(ctx, tx, stateID, input.ObservedAt, input.Now); err != nil {
+				return Result{}, err
+			}
+			notified := input.ObservedAt
+			tracker.notifiedAt = &notified
+			if enqueued.Created {
+				result.EventsCreated = append(result.EventsCreated, enqueued.EventID)
+			}
+			result.UnavailableNotices++
+		}
 
 		switch newState {
 		case provider.StateReservable:
@@ -201,6 +266,12 @@ func (in Input) validate() error {
 	}
 	if in.Now.IsZero() {
 		return errors.New("availability: now is required")
+	}
+	if in.UnavailableGrace < 0 {
+		return errors.New("availability: unavailable grace must not be negative")
+	}
+	if in.UnavailableGap < 0 {
+		return errors.New("availability: unavailable gap must not be negative")
 	}
 	for _, delivery := range in.Deliveries {
 		if err := delivery.Validate(); err != nil {
@@ -270,14 +341,18 @@ func resolveObservation(observations []observation) (observation, bool) {
 
 func loadState(ctx context.Context, tx *sql.Tx, input Input, key stateKey) (currentState, bool, error) {
 	var (
-		current      currentState
-		state        string
-		stateSince   string
-		lastDecisive sql.NullString
+		current               currentState
+		state                 string
+		stateSince            string
+		lastDecisive          sql.NullString
+		unavailableSince      sql.NullString
+		lastNotReservableAt   sql.NullString
+		unavailableNotifiedAt sql.NullString
 	)
 	err := tx.QueryRowContext(ctx, selectStateQuery,
 		input.TargetID, input.ConfigVersion, key.journeyKey, key.offeringKey,
-	).Scan(&current.id, &state, &stateSince, &lastDecisive)
+	).Scan(&current.id, &state, &stateSince, &lastDecisive,
+		&unavailableSince, &lastNotReservableAt, &unavailableNotifiedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return currentState{}, false, nil
 	}
@@ -299,10 +374,66 @@ func loadState(ctx context.Context, tx *sql.Tx, input Input, key stateKey) (curr
 		}
 		current.lastDecisiveAt = &parsed
 	}
+	if current.unavailableSince, err = parseOptionalTime(unavailableSince); err != nil {
+		return currentState{}, false, err
+	}
+	if current.lastNotReservableAt, err = parseOptionalTime(lastNotReservableAt); err != nil {
+		return currentState{}, false, err
+	}
+	if current.unavailableNotifiedAt, err = parseOptionalTime(unavailableNotifiedAt); err != nil {
+		return currentState{}, false, err
+	}
 	return current, true, nil
 }
 
-func upsertState(ctx context.Context, tx *sql.Tx, input Input, key stateKey, obs observation, current currentState, found bool, newState provider.State) (int64, error) {
+// nextUnavailableTracker advances the confirmed-unavailable streak. Only a
+// decisive NotReservable observation advances time. Unknown/missing results
+// preserve the evidence but do not extend it; the next NotReservable must fall
+// within the gap tolerance to continue the same streak.
+func nextUnavailableTracker(current currentState, found bool, newState provider.State, observedAt time.Time, gap time.Duration) unavailableTracker {
+	switch newState {
+	case provider.StateReservable:
+		return unavailableTracker{}
+	case provider.StateNotReservable:
+		tracker := unavailableTracker{}
+		if found && current.unavailableSince != nil && current.lastNotReservableAt != nil &&
+			!observedAt.Before(*current.lastNotReservableAt) &&
+			observedAt.Sub(*current.lastNotReservableAt) <= gap {
+			since := *current.unavailableSince
+			tracker.since = &since
+			if current.unavailableNotifiedAt != nil {
+				notified := *current.unavailableNotifiedAt
+				tracker.notifiedAt = &notified
+			}
+		} else {
+			since := observedAt
+			tracker.since = &since
+		}
+		last := observedAt
+		tracker.lastNotReservableAt = &last
+		return tracker
+	default: // Unknown preserves the existing evidence untouched.
+		if !found {
+			return unavailableTracker{}
+		}
+		tracker := unavailableTracker{}
+		if current.unavailableSince != nil {
+			since := *current.unavailableSince
+			tracker.since = &since
+		}
+		if current.lastNotReservableAt != nil {
+			last := *current.lastNotReservableAt
+			tracker.lastNotReservableAt = &last
+		}
+		if current.unavailableNotifiedAt != nil {
+			notified := *current.unavailableNotifiedAt
+			tracker.notifiedAt = &notified
+		}
+		return tracker
+	}
+}
+
+func upsertState(ctx context.Context, tx *sql.Tx, input Input, key stateKey, obs observation, current currentState, found bool, newState provider.State, tracker unavailableTracker) (int64, error) {
 	stateSince := input.ObservedAt
 	if found && current.state == newState {
 		stateSince = current.stateSince
@@ -338,7 +469,9 @@ func upsertState(ctx context.Context, tx *sql.Tx, input Input, key stateKey, obs
 			decisive, nullableString(obs.reason), nullableInt(obs.capacity),
 			trainNumber, operator, originName, destinationName, departureAt, arrivalAt,
 			wagonName, className, priceAmount, priceCurrency,
-			nullableString(obs.bookingURL), formatTime(input.Now),
+			nullableString(obs.bookingURL), nullableTrackerTime(tracker.since),
+			nullableTrackerTime(tracker.lastNotReservableAt), nullableTrackerTime(tracker.notifiedAt),
+			formatTime(input.Now),
 		)
 		if err != nil {
 			return 0, fmt.Errorf("availability: insert state: %w", err)
@@ -355,7 +488,9 @@ func upsertState(ctx context.Context, tx *sql.Tx, input Input, key stateKey, obs
 		decisive, nullableString(obs.reason), nullableInt(obs.capacity),
 		trainNumber, operator, originName, destinationName, departureAt, arrivalAt,
 		wagonName, className, priceAmount, priceCurrency,
-		nullableString(obs.bookingURL), formatTime(input.Now), current.id,
+		nullableString(obs.bookingURL), nullableTrackerTime(tracker.since),
+		nullableTrackerTime(tracker.lastNotReservableAt), nullableTrackerTime(tracker.notifiedAt),
+		formatTime(input.Now), current.id,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("availability: update state: %w", err)
@@ -455,6 +590,85 @@ func enqueueAvailabilityEvent(ctx context.Context, tx *sql.Tx, input Input, obs 
 		return notify.EnqueueResult{}, fmt.Errorf("availability: enqueue event: %w", err)
 	}
 	return enqueued, nil
+}
+
+func enqueueUnavailableEvent(
+	ctx context.Context,
+	tx *sql.Tx,
+	input Input,
+	obs observation,
+	stateID int64,
+	since time.Time,
+) (notify.EnqueueResult, error) {
+	var priceAmount *int64
+	priceCurrency := ""
+	if obs.offering.Price != nil {
+		amount := obs.offering.Price.Amount
+		priceAmount = &amount
+		priceCurrency = obs.offering.Price.Currency
+	}
+	sinceKey := formatTime(since)
+	event := notify.Event{
+		ID:              fmt.Sprintf("unavailable-state-%d-%d", stateID, since.UnixNano()),
+		Kind:            notify.KindUnavailable,
+		DedupeKey:       fmt.Sprintf("unavailable:state:%d:%s", stateID, sinceKey),
+		MonitorID:       input.MonitorID,
+		ProviderID:      string(input.ProviderID),
+		OccurredAt:      input.ObservedAt,
+		TrainNumber:     obs.journey.TrainNumber,
+		Operator:        obs.journey.Operator,
+		OriginName:      obs.journey.OriginName,
+		DestinationName: obs.journey.DestinationName,
+		DepartureAt:     obs.journey.DepartureAt,
+		ArrivalAt:       obs.journey.ArrivalAt,
+		WagonName:       obs.offering.WagonName,
+		ClassName:       obs.offering.ClassName,
+		PriceAmount:     priceAmount,
+		PriceCurrency:   priceCurrency,
+		BookingURL:      obs.bookingURL,
+		Silent:          true,
+		CreatedAt:       input.Now,
+	}
+	enqueued, err := notify.Enqueue(ctx, tx, event, input.Deliveries)
+	if err != nil {
+		return notify.EnqueueResult{}, fmt.Errorf("availability: enqueue unavailable event: %w", err)
+	}
+	return enqueued, nil
+}
+
+func markUnavailableNotified(ctx context.Context, tx *sql.Tx, stateID int64, notifiedAt, now time.Time) error {
+	result, err := tx.ExecContext(ctx, markUnavailableNotifiedQuery,
+		formatTime(notifiedAt), formatTime(now), stateID,
+	)
+	if err != nil {
+		return fmt.Errorf("availability: mark unavailable notified: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("availability: unavailable notified rows: %w", err)
+	}
+	if updated != 1 {
+		return errors.New("availability: state disappeared while marking unavailable notified")
+	}
+	return nil
+}
+
+func nullableTrackerTime(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return formatTime(*value)
+}
+
+func parseOptionalTime(value sql.NullString) (*time.Time, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	parsed, err := parseTime(value.String)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }
 
 func markMissingStates(ctx context.Context, tx *sql.Tx, input Input, observed map[stateKey]bool) (int, error) {

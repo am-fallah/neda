@@ -40,6 +40,7 @@ const settings: Settings = {
   pollIntervalSeconds: 300,
   pushEnabled: true,
   monitoringEnabled: true,
+  unavailableNotifyAfterMinutes: 180,
   telegram: {
     available: true,
     configured: true,

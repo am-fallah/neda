@@ -61,6 +61,33 @@ func TestFormatPushAvailabilityUsesJalaliAndBookingURL(t *testing.T) {
 	}
 }
 
+func TestFormatPushUnavailableRequestsSilentNotification(t *testing.T) {
+	event := notify.Event{
+		ID:              "unavailable-1",
+		Kind:            notify.KindUnavailable,
+		ProviderID:      "mrbilit",
+		MonitorID:       "m1",
+		OccurredAt:      formatNow,
+		OriginName:      "Yazd",
+		DestinationName: "Mashhad",
+		Silent:          true,
+	}
+	raw, err := notify.FormatPush(event, "https://neda.example.com")
+	if err != nil {
+		t.Fatalf("FormatPush: %v", err)
+	}
+	var payload notify.PushPayload
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !payload.Silent || payload.Title != "Ticket unavailable" || payload.Kind != "unavailable" {
+		t.Fatalf("payload = %+v, want silent unavailable", payload)
+	}
+	if strings.Contains(payload.Body, "Ticket available") {
+		t.Fatalf("unavailable payload claims availability: %q", payload.Body)
+	}
+}
+
 func TestFormatPushFallsBackToEventDetail(t *testing.T) {
 	event := notify.Event{
 		ID:         "abc",

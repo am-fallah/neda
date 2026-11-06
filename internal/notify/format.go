@@ -27,6 +27,8 @@ func FormatTelegram(event Event) (string, error) {
 	switch event.Kind {
 	case KindAvailability:
 		return formatAvailabilityTelegram(event), nil
+	case KindUnavailable:
+		return formatUnavailableTelegram(event), nil
 	case KindProviderDegraded:
 		return formatProviderHealthTelegram(event, false), nil
 	case KindProviderRecovered:
@@ -34,6 +36,45 @@ func FormatTelegram(event Event) (string, error) {
 	default:
 		return "", fmt.Errorf("notify: unsupported event kind %q", event.Kind)
 	}
+}
+
+func formatUnavailableTelegram(event Event) string {
+	route := joinRoute(event.OriginName, event.DestinationName)
+	lines := []string{"<b>Ticket unavailable</b>"}
+	if route != "" {
+		lines = append(lines, EscapeTelegramHTML(route))
+	}
+	if event.DepartureAt != nil {
+		lines = append(lines, "Departure: "+EscapeTelegramHTML(formatEventTime(*event.DepartureAt)))
+	}
+	train := strings.TrimSpace(event.TrainNumber)
+	if train != "" {
+		if operator := strings.TrimSpace(event.Operator); operator != "" {
+			train += " (" + operator + ")"
+		}
+		lines = append(lines, "Train: "+EscapeTelegramHTML(train))
+	}
+	vehicle := strings.TrimSpace(event.WagonName)
+	class := strings.TrimSpace(event.ClassName)
+	switch {
+	case vehicle != "" && class != "":
+		lines = append(lines, "Wagon/class: "+EscapeTelegramHTML(vehicle+" / "+class))
+	case vehicle != "":
+		lines = append(lines, "Wagon: "+EscapeTelegramHTML(vehicle))
+	case class != "":
+		lines = append(lines, "Class: "+EscapeTelegramHTML(class))
+	}
+	if provider := displayProvider(event.ProviderID); provider != "" {
+		lines = append(lines, "Provider: "+EscapeTelegramHTML(provider))
+	}
+	lines = append(lines, "This fare has remained confirmed unavailable across the configured grace period.")
+	if !event.OccurredAt.IsZero() {
+		lines = append(lines, "Detected: "+EscapeTelegramHTML(formatEventTime(event.OccurredAt)))
+	}
+	if booking := validatedBookingURL(event.BookingURL); booking != "" {
+		lines = append(lines, `<a href="`+EscapeTelegramHTML(booking)+`">Open booking</a>`)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatAvailabilityTelegram(event Event) string {
@@ -135,6 +176,7 @@ type PushPayload struct {
 	Tag     string `json:"tag,omitempty"`
 	EventID string `json:"eventId,omitempty"`
 	Kind    string `json:"kind"`
+	Silent  bool   `json:"silent,omitempty"`
 }
 
 const maxPushPayloadBytes = 3500
@@ -147,6 +189,8 @@ func FormatPush(event Event, publicURL string) ([]byte, error) {
 	switch event.Kind {
 	case KindAvailability:
 		payload = formatAvailabilityPush(event, publicURL)
+	case KindUnavailable:
+		payload = formatUnavailablePush(event, publicURL)
 	case KindProviderDegraded:
 		payload = formatProviderHealthPush(event, publicURL, false)
 	case KindProviderRecovered:
@@ -200,6 +244,43 @@ func formatAvailabilityPush(event Event, publicURL string) PushPayload {
 	if provider := displayProvider(event.ProviderID); provider != "" {
 		lines = append(lines, "Provider: "+provider)
 	}
+	if value := formatEventTime(event.OccurredAt); value != "" {
+		lines = append(lines, "Detected: "+value)
+	}
+	payload.Body = strings.Join(lines, "\n")
+	payload.URL = pushTargetURL(event, publicURL)
+	return payload
+}
+
+func formatUnavailablePush(event Event, publicURL string) PushPayload {
+	payload := PushPayload{Title: "Ticket unavailable", Silent: true}
+	lines := make([]string, 0, 7)
+	if route := joinRoute(event.OriginName, event.DestinationName); route != "" {
+		lines = append(lines, route)
+	}
+	if event.DepartureAt != nil {
+		if value := formatEventTime(*event.DepartureAt); value != "" {
+			lines = append(lines, "Departure: "+value)
+		}
+	}
+	if train := strings.TrimSpace(event.TrainNumber); train != "" {
+		if operator := strings.TrimSpace(event.Operator); operator != "" {
+			train += " (" + operator + ")"
+		}
+		lines = append(lines, "Train: "+train)
+	}
+	switch value := strings.TrimSpace(event.WagonName); {
+	case value != "" && strings.TrimSpace(event.ClassName) != "":
+		lines = append(lines, "Wagon/class: "+value+" / "+strings.TrimSpace(event.ClassName))
+	case value != "":
+		lines = append(lines, "Wagon: "+value)
+	case strings.TrimSpace(event.ClassName) != "":
+		lines = append(lines, "Class: "+strings.TrimSpace(event.ClassName))
+	}
+	if provider := displayProvider(event.ProviderID); provider != "" {
+		lines = append(lines, "Provider: "+provider)
+	}
+	lines = append(lines, "This fare remained confirmed unavailable across the grace period.")
 	if value := formatEventTime(event.OccurredAt); value != "" {
 		lines = append(lines, "Detected: "+value)
 	}

@@ -92,6 +92,37 @@ func TestTelegramCredentialsValidation(t *testing.T) {
 	}
 }
 
+func TestTelegramSendMessageWithDisableNotification(t *testing.T) {
+	var form url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("ParseForm: %v", err)
+		}
+		form = r.PostForm
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":1700000000,"chat":{"id":-100}}}`))
+	}))
+	defer server.Close()
+
+	client := testTelegramClient(t, server, time.Second)
+	credentials := testTelegramCredentials(t)
+	if _, err := client.SendMessageWithOptions(context.Background(), credentials, "quiet", notify.SendMessageOptions{
+		DisableNotification: true,
+	}); err != nil {
+		t.Fatalf("SendMessageWithOptions: %v", err)
+	}
+	if form.Get("disable_notification") != "true" {
+		t.Fatalf("disable_notification = %q, want true", form.Get("disable_notification"))
+	}
+
+	if _, err := client.SendMessage(context.Background(), credentials, "normal"); err != nil {
+		t.Fatalf("SendMessage: %v", err)
+	}
+	if form.Get("disable_notification") != "" {
+		t.Fatalf("normal message set disable_notification = %q", form.Get("disable_notification"))
+	}
+}
+
 func TestTelegramClientGetMe(t *testing.T) {
 	var calls int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

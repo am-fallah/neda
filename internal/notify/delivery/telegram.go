@@ -49,7 +49,9 @@ func (s *TelegramSender) Send(ctx context.Context, record Record) Result {
 	if err != nil {
 		return Failed("telegram_format_failed")
 	}
-	if _, err := s.client.SendMessage(ctx, credentials, text); err != nil {
+	if _, err := s.client.SendMessageWithOptions(ctx, credentials, text, notify.SendMessageOptions{
+		DisableNotification: record.Event.Silent,
+	}); err != nil {
 		var telegramErr *notify.TelegramError
 		if !errors.As(err, &telegramErr) || telegramErr == nil {
 			return Failed("telegram_unknown")

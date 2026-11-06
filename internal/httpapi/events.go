@@ -40,6 +40,7 @@ type eventResponse struct {
 
 	ErrorKind    string `json:"errorKind,omitempty"`
 	FailureCount *int   `json:"failureCount,omitempty"`
+	Silent       bool   `json:"silent"`
 
 	CreatedAt       time.Time               `json:"createdAt"`
 	Deliveries      []deliveryStateResponse `json:"deliveries"`
@@ -139,8 +140,11 @@ func (s *Server) getEvent(w http.ResponseWriter, r *http.Request, id string) {
 
 func eventDTO(event store.EventRecord) eventResponse {
 	state := ""
-	if event.Kind == notify.KindAvailability {
+	switch event.Kind {
+	case notify.KindAvailability:
 		state = string(provider.StateReservable)
+	case notify.KindUnavailable:
+		state = string(provider.StateNotReservable)
 	}
 	deliveries := make([]deliveryStateResponse, 0, len(event.Deliveries))
 	for _, delivery := range event.Deliveries {
@@ -179,6 +183,7 @@ func eventDTO(event store.EventRecord) eventResponse {
 		BookingURL:      event.BookingURL,
 		ErrorKind:       event.ErrorKind,
 		FailureCount:    event.FailureCount,
+		Silent:          event.Silent,
 		CreatedAt:       event.CreatedAt.UTC(),
 		Deliveries:      deliveries,
 		DeliverySummary: deliverySummaryResponse{
