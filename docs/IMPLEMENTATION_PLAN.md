@@ -732,7 +732,17 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 
 | 2026-10-25 | `NM-00`–`NM-12` | IN_PROGRESS → DONE | Implemented the approved New Monitor hierarchy/price/provider-boundary scope: train→wagon→fare presentation, wagon default selection with exact/partial fare keys, qualified positive provider price display, client-side min/max filtering and sorting that never alter selection or payload, explicit unpriced handling, provider-neutral search/error/UI boundaries, capability-driven route-ID validation, and monitor-detail wagon grouping. Updated brief/spec/architecture/OpenAPI/MrBilit/frontend acceptance/README and this tracker. No schema migration, production provider registration, live provider request, real monitor, Telegram/Push message, or deployment. | `make check`, `make race`, frontend lint/typecheck/161 tests/build; production Playwright/axe 0 violations at 1440 light/dark and 390/360/320 mobile with no overflow; PR [#43](https://github.com/am-fallah/neda/pull/43) Go CI [40208801085](https://github.com/am-fallah/neda/actions/runs/40208801085), frontend [40208801006](https://github.com/am-fallah/neda/actions/runs/40208801006), Docker [40208801156](https://github.com/am-fallah/neda/actions/runs/40208801156) passed. |
 
-## 12. Tracker maintenance rules
+## 12. Approved 2026-11-06 enhancements
+
+| ID | Priority | Status | Dependencies | Task / acceptance | Evidence |
+|---|---|---|---|---|---|
+| `GSW-001` | P0 | IN_PROGRESS | — | Persist `monitoring_enabled` (default true, missing=true) and expose it through the settings service/API without touching monitor rows. AC: default/persistence/backward-compatibility tests. | `internal/store/monitoring.go`, `internal/settings/settings.go`, `internal/httpapi/settings.go`; store/settings/HTTP tests. |
+| `GSW-002` | P0 | IN_PROGRESS | GSW-001 | Gate scheduler dispatch and check-stage provider I/O; finalize in-flight checks as `discarded` with a clear reason; stagger resume. AC: no dispatch/IO when off, no running rows, resume staggered, expiry continues. | `internal/scheduler/scheduler.go`, `check.go`, `outcome.go`; scheduler tests. |
+| `GSW-003` | P0 | IN_PROGRESS | GSW-001 | Suppress availability/unavailability outbox delivery while off; keep provider-health and reports unaffected. AC: skipped reason and independent delivery tests. | `internal/notify/delivery/worker.go`; delivery tests. |
+| `GSW-004` | P1 | IN_PROGRESS | GSW-001 | Accessible persisted ON/OFF control in Settings with loading/error states. AC: role=switch, aria-checked, tests. | `web/src/pages/SettingsPage.tsx`, `web/src/components/ui/switch.tsx`; SettingsPage tests. |
+| `GSW-005` | P0 | IN_PROGRESS | GSW-001..004 | Run Go/frontend checks, update docs/OpenAPI, merge PR, record merge commit/CI. | Pending PR/CI. |
+
+## 13. Tracker maintenance rules
 
 - Update status when a task starts, becomes blocked, and completes.
 - Add an evidence row to §7 for every `DONE`/`BLOCKED` transition.

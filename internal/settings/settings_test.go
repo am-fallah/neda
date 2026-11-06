@@ -134,17 +134,22 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("View: %v", err)
 	}
-	if view.PollIntervalSeconds != 300 || view.PushEnabled || view.Telegram.Available {
+	if view.PollIntervalSeconds != 300 || view.PushEnabled || !view.MonitoringEnabled || view.Telegram.Available {
 		t.Fatalf("default view = %+v", view)
 	}
 
 	poll := 120
 	push := true
-	updated, err := h.service.Update(ctx, settings.Update{PollIntervalSeconds: &poll, PushEnabled: &push})
+	monitoring := false
+	updated, err := h.service.Update(ctx, settings.Update{
+		PollIntervalSeconds: &poll,
+		PushEnabled:         &push,
+		MonitoringEnabled:   &monitoring,
+	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	if updated.PollIntervalSeconds != 120 || !updated.PushEnabled {
+	if updated.PollIntervalSeconds != 120 || !updated.PushEnabled || updated.MonitoringEnabled {
 		t.Fatalf("updated view = %+v", updated)
 	}
 	interval, err := h.store.PollInterval(ctx)
@@ -154,6 +159,10 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	enabled, err := h.store.PushEnabled(ctx)
 	if err != nil || !enabled {
 		t.Fatalf("stored push = %v, %v", enabled, err)
+	}
+	monitoringEnabled, err := h.store.MonitoringEnabled(ctx)
+	if err != nil || monitoringEnabled {
+		t.Fatalf("stored monitoring = %v, %v", monitoringEnabled, err)
 	}
 
 	invalid := 30
@@ -172,6 +181,43 @@ func TestServiceViewDefaultsAndUpdate(t *testing.T) {
 	withTelegram := newSettingsHarness(t, true)
 	if _, err := settings.New(withTelegram.store, withTelegram.telegram, nil, nil); err == nil {
 		t.Fatal("settings.New accepted telegram settings without a tester")
+	}
+}
+
+func TestServiceMonitoringUpdateWakesScheduler(t *testing.T) {
+	h := newSettingsHarness(t, false)
+	ctx := context.Background()
+	var wakes int
+	h.service.SetWake(func() { wakes++ })
+
+	disabled := false
+	view, err := h.service.Update(ctx, settings.Update{MonitoringEnabled: &disabled})
+	if err != nil {
+		t.Fatalf("Update monitoring off: %v", err)
+	}
+	if view.MonitoringEnabled {
+		t.Fatalf("monitoring view = %+v", view)
+	}
+	if wakes != 1 {
+		t.Fatalf("wake count after monitoring update = %d, want 1", wakes)
+	}
+
+	// Poll-interval and Push updates also wake the scheduler; they are safe
+	// no-ops when monitoring does not change.
+	poll := 120
+	if _, err := h.service.Update(ctx, settings.Update{PollIntervalSeconds: &poll}); err != nil {
+		t.Fatalf("Update interval: %v", err)
+	}
+	if wakes != 1 {
+		t.Fatalf("wake count after interval-only update = %d, want 1", wakes)
+	}
+
+	invalid := 30
+	if _, err := h.service.Update(ctx, settings.Update{PollIntervalSeconds: &invalid}); err == nil {
+		t.Fatal("Update accepted an invalid interval")
+	}
+	if wakes != 1 {
+		t.Fatalf("wake count after failed update = %d, want 1", wakes)
 	}
 }
 

@@ -501,6 +501,7 @@ describe("display helpers", () => {
     const settings: Settings = {
       pollIntervalSeconds: 300,
       pushEnabled: true,
+      monitoringEnabled: true,
       telegram: {
         available: true,
         configured: true,

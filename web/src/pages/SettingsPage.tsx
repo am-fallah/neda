@@ -7,6 +7,7 @@ import {
   Loader2,
   LockKeyhole,
   MessageCircle,
+  Power,
   Save,
   Send,
   Settings2,
@@ -44,6 +45,7 @@ import {
 } from "@/components/ui/card";
 import { FormField, fieldProps } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { useApiResource } from "@/hooks/useApiResource";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useTheme } from "@/lib/theme";
@@ -121,6 +123,94 @@ function TelegramStatus({ settings }: { settings: Settings }) {
       <p className="text-xs text-muted-foreground">
         The bot token and raw chat ID are never returned to this browser. Only
         this masked label is shown.
+      </p>
+    </div>
+  );
+}
+
+function MonitoringForm({
+  settings,
+  onUpdated,
+}: {
+  settings: Settings;
+  onUpdated: (settings: Settings) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function handleChange(next: boolean) {
+    setError("");
+    setSaving(true);
+    try {
+      const updated = await settingsApi.update({ monitoringEnabled: next });
+      onUpdated(updated);
+      toast.success(next ? "Monitoring resumed" : "Monitoring paused", {
+        description: next
+          ? "Eligible monitors will resume on the scheduler's normal spacing and rate limits."
+          : "No new provider checks or availability notifications will start. Existing monitors are unchanged.",
+      });
+    } catch (caught) {
+      if (isApiError(caught)) {
+        setError(caught.message);
+      } else {
+        setError("The monitoring switch could not be changed.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {!settings.monitoringEnabled ? (
+        <Alert variant="warning">
+          <AlertTriangle aria-hidden="true" />
+          <AlertTitle>Global monitoring is off</AlertTitle>
+          <AlertDescription>
+            No new provider checks or availability notifications are started.
+            In-flight checks finish and are discarded without changing
+            availability. Monitor settings, expiration reconciliation, and daily
+            reports continue.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="flex flex-col gap-4 rounded-lg border bg-muted/15 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-medium">Global monitoring</p>
+            <Badge variant={settings.monitoringEnabled ? "success" : "warning"}>
+              {settings.monitoringEnabled ? "On" : "Off"}
+            </Badge>
+          </div>
+          <p className="max-w-2xl text-xs leading-relaxed text-muted-foreground">
+            When off, the scheduler stops dispatching checks and suppresses
+            availability notifications. When on, overdue monitors resume at the
+            normal worker and provider-spacing limits instead of bursting.
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-sm font-medium" aria-hidden="true">
+            {settings.monitoringEnabled ? "On" : "Off"}
+          </span>
+          <Switch
+            checked={settings.monitoringEnabled}
+            onCheckedChange={(next) => void handleChange(next)}
+            aria-label="Global monitoring"
+            disabled={saving}
+          />
+        </div>
+      </div>
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTriangle aria-hidden="true" />
+          <AlertTitle>Monitoring switch failed</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <Power className="size-3.5" aria-hidden="true" />
+        Individual monitor pause/resume settings are never changed by this
+        switch.
       </p>
     </div>
   );
@@ -642,11 +732,12 @@ export function SettingsPage() {
             Monitoring
           </CardTitle>
           <CardDescription>
-            Global polling interval for all active monitors. The server enforces
-            the 60–3600 second bounds.
+            Global monitoring switch and the polling interval for active
+            monitors. The server enforces the 60–3600 second bounds.
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-5">
+          <MonitoringForm settings={settings} onUpdated={setSettings} />
           <PollingIntervalForm settings={settings} onUpdated={setSettings} />
         </CardContent>
       </Card>

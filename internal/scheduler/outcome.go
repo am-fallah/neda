@@ -31,6 +31,7 @@ type DeliverySource func(ctx context.Context, tx *sql.Tx) ([]notify.Delivery, er
 type OutcomeRunnerConfig struct {
 	Stage      *CheckStage
 	Store      *store.Store
+	Monitoring MonitoringSwitch
 	Deliveries DeliverySource
 	Wake       func()
 	Now        func() time.Time
@@ -45,6 +46,7 @@ type OutcomeRunnerConfig struct {
 type OutcomeRunner struct {
 	stage      *CheckStage
 	store      *store.Store
+	monitoring MonitoringSwitch
 	deliveries DeliverySource
 	wake       func()
 	now        func() time.Time
@@ -96,6 +98,7 @@ func NewOutcomeRunner(cfg OutcomeRunnerConfig) (*OutcomeRunner, error) {
 	return &OutcomeRunner{
 		stage:      cfg.Stage,
 		store:      cfg.Store,
+		monitoring: cfg.Monitoring,
 		deliveries: cfg.Deliveries,
 		wake:       cfg.Wake,
 		now:        cfg.Now,
@@ -118,8 +121,34 @@ func (r *OutcomeRunner) Run(ctx context.Context, target Target) (Result, error) 
 		return Result{Settled: false}, err
 	}
 	if attempt.CheckRunID == 0 {
+		if attempt.MonitoringDisabled {
+			// No running row was committed because the global switch turned off
+			// (or could not be read) before provider I/O. Leave the due generation
+			// unconsumed; the scheduler's off gate prevents a retry loop.
+			r.logger.Info("check skipped before provider I/O: global monitoring is off",
+				"monitor_id", attempt.MonitorID,
+				"target_id", attempt.TargetID,
+				"provider_id", string(attempt.ProviderID),
+			)
+			return Result{Settled: false}, nil
+		}
 		// No running row was committed (for example, a pre-canceled context).
 		return Result{Settled: true}, nil
+	}
+
+	// A check that was already executing when the switch turned off is not
+	// allowed to mutate availability/health state or enqueue notifications. It
+	// is finalized as discarded with a stable reason. A switch read failure fails
+	// closed for the same reason.
+	if r.monitoring != nil {
+		enabled, err := r.monitoring.MonitoringEnabled(ctx)
+		if err != nil {
+			r.logOutcomeError("monitoring switch read failed", attempt, "monitoring_state_unavailable")
+			return r.finalizeDiscarded(ctx, attempt, "monitoring_state_unavailable")
+		}
+		if !enabled {
+			return r.finalizeDiscarded(ctx, attempt, "monitoring_disabled")
+		}
 	}
 
 	if attempt.Err == nil {

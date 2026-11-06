@@ -267,6 +267,7 @@ export function makeSettings(overrides: Partial<Settings> = {}): Settings {
   return {
     pollIntervalSeconds: 300,
     pushEnabled: false,
+    monitoringEnabled: true,
     telegram: {
       available: true,
       configured: true,

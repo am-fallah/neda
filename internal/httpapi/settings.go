@@ -14,6 +14,7 @@ import (
 type settingsResponse struct {
 	PollIntervalSeconds int                      `json:"pollIntervalSeconds"`
 	PushEnabled         bool                     `json:"pushEnabled"`
+	MonitoringEnabled   bool                     `json:"monitoringEnabled"`
 	Telegram            telegramSettingsResponse `json:"telegram"`
 }
 
@@ -31,6 +32,7 @@ type telegramSettingsResponse struct {
 type settingsUpdateRequest struct {
 	PollIntervalSeconds *int  `json:"pollIntervalSeconds"`
 	PushEnabled         *bool `json:"pushEnabled"`
+	MonitoringEnabled   *bool `json:"monitoringEnabled"`
 }
 
 type telegramConfigRequest struct {
@@ -88,6 +90,7 @@ func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
 	view, err := s.settings.Update(r.Context(), appsettings.Update{
 		PollIntervalSeconds: body.PollIntervalSeconds,
 		PushEnabled:         body.PushEnabled,
+		MonitoringEnabled:   body.MonitoringEnabled,
 	})
 	if err != nil {
 		s.writeSettingsError(w, r, err)
@@ -136,6 +139,7 @@ func settingsDTO(view appsettings.View) settingsResponse {
 	return settingsResponse{
 		PollIntervalSeconds: view.PollIntervalSeconds,
 		PushEnabled:         view.PushEnabled,
+		MonitoringEnabled:   view.MonitoringEnabled,
 		Telegram: telegramSettingsResponse{
 			Available:         view.Telegram.Available,
 			Configured:        view.Telegram.Configured,

@@ -91,10 +91,18 @@ type Record struct {
 	MonitorExpired bool
 }
 
+// MonitoringSwitch is the global monitoring gate. A nil switch means enabled.
+// When monitoring is off, availability/unavailability deliveries are skipped;
+// provider-health and unrelated Telegram messages continue.
+type MonitoringSwitch interface {
+	MonitoringEnabled(ctx context.Context) (bool, error)
+}
+
 // Config controls the worker. DB and at least one sender are required.
 type Config struct {
 	DB            *sql.DB
 	Senders       map[notify.Channel]Sender
+	Monitoring    MonitoringSwitch
 	Now           func() time.Time
 	Lease         time.Duration
 	Concurrency   int
@@ -112,6 +120,7 @@ type Config struct {
 type Worker struct {
 	db            *sql.DB
 	senders       map[notify.Channel]Sender
+	monitoring    MonitoringSwitch
 	now           func() time.Time
 	lease         time.Duration
 	concurrency   int
@@ -203,6 +212,7 @@ func New(cfg Config) (*Worker, error) {
 	return &Worker{
 		db:            cfg.DB,
 		senders:       cfg.Senders,
+		monitoring:    cfg.Monitoring,
 		now:           cfg.Now,
 		lease:         cfg.Lease,
 		concurrency:   cfg.Concurrency,
@@ -383,6 +393,10 @@ func (w *Worker) sendOne(ctx context.Context, record Record) {
 		w.finalize(record, failedAttempt(started, w.now().UTC(), "skipped", "monitor_expired", 0), statusSkipped, "monitor_expired", 0, nil)
 		return
 	}
+	if w.monitoringSuppressed(ctx, record.Event.Kind) {
+		w.finalize(record, failedAttempt(started, w.now().UTC(), "skipped", "monitoring_disabled", 0), statusSkipped, "monitoring_disabled", 0, nil)
+		return
+	}
 	sender := w.senders[record.Channel]
 	if sender == nil {
 		w.finalize(record, failedAttempt(started, w.now().UTC(), "skipped", "channel_unavailable", 0), statusSkipped, "channel_unavailable", 0, nil)
@@ -417,6 +431,25 @@ func (w *Worker) sendOne(ctx context.Context, record Record) {
 		kind := safeKind(result.ErrorKind, "permanent")
 		w.finalize(record, failedAttempt(started, finished, "failed", kind, result.HTTPStatus), statusFailed, kind, result.HTTPStatus, nil)
 	}
+}
+
+// monitoringSuppressed reports whether this event must not be delivered while
+// the global monitoring switch is off. A settings read error fails closed for
+// monitoring events; unrelated notification kinds are never suppressed.
+func (w *Worker) monitoringSuppressed(ctx context.Context, kind notify.EventKind) bool {
+	if w.monitoring == nil {
+		return false
+	}
+	switch kind {
+	case notify.KindAvailability:
+	default:
+		return false
+	}
+	enabled, err := w.monitoring.MonitoringEnabled(ctx)
+	if err != nil {
+		return true
+	}
+	return !enabled
 }
 
 func (w *Worker) retryDelay(attemptNo int, retryAfter time.Duration) time.Duration {

@@ -159,6 +159,41 @@ describe("SettingsPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the persisted global monitoring state and toggles it", async () => {
+    updateMock.mockResolvedValue(
+      makeSettings({ monitoringEnabled: false }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const control = await screen.findByRole("switch", {
+      name: "Global monitoring",
+    });
+    expect(control).toHaveAttribute("aria-checked", "true");
+    expect(screen.getAllByText("On").length).toBeGreaterThan(0);
+
+    await user.click(control);
+    await waitFor(() =>
+      expect(updateMock).toHaveBeenCalledWith({ monitoringEnabled: false }),
+    );
+    expect(control).toHaveAttribute("aria-checked", "false");
+    expect(
+      screen.getByText("Global monitoring is off"),
+    ).toBeInTheDocument();
+  });
+
+  it("shows an error when the monitoring switch cannot be saved", async () => {
+    updateMock.mockRejectedValue(new Error("network down"));
+    const user = userEvent.setup();
+    renderPage();
+    const control = await screen.findByRole("switch", {
+      name: "Global monitoring",
+    });
+    await user.click(control);
+    expect(
+      await screen.findByText("The monitoring switch could not be changed."),
+    ).toBeInTheDocument();
+  });
+
   it("validates and saves the polling interval", async () => {
     updateMock.mockResolvedValue(
       makeSettings({ pollIntervalSeconds: 600 }),

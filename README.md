@@ -18,7 +18,7 @@ Neda is built for one technical owner who self-hosts the service. It is not SaaS
 
 - **Independent monitors** for a route, departure date, adult/child/infant counts, and one or more provider targets. Monitors can be paused, resumed, edited, and deleted; they expire automatically after the departure day ends in Tehran.
 - **URL-first MrBilit creation**: paste a public MrBilit train-search URL, review the train → wagon → fare hierarchy, and select the exact wagons or offerings to watch. Future offerings are not added automatically.
-- **Background scheduling** with a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, jitter, exponential target backoff, restart recovery, and near-term checks after edits or resume.
+- **Background scheduling** with a global monitoring switch, a global polling interval, a bounded worker pool, per-monitor serialization, per-provider spacing, jitter, exponential target backoff, restart recovery, and near-term checks after edits or resume.
 - **Conservative availability tracking** using `Reservable`, `NotReservable`, and `Unknown`, durable availability episodes, and deduplicated availability events.
 - **Two independent notification channels**: Telegram Bot API and browser Web Push. Both use a transactional outbox, a retrying delivery worker, and per-channel delivery history.
 - **Provider health tracking**, separate from ticket availability: last attempt/success/error, consecutive infrastructure failures, one deduplicated degraded episode after three failures, a recovery event, and stale detection.
@@ -70,6 +70,8 @@ The price filter and sorting in this screen are view-only. They never change the
 The scheduler runs inside the Go process. It selects active, non-expired targets, runs at most one check per monitor at a time, and keeps a configurable number of workers busy (default 2, maximum 16). Provider checks are spaced at least 5 seconds apart per provider.
 
 The global polling interval is a SQLite setting, defaulting to 300 seconds and bounded to 60–3600 seconds. After a check finishes, the next due time is calculated from the completion time with ±10% jitter. The effective start time can be later because of worker capacity, provider spacing, and backoff.
+
+The global monitoring switch is also a SQLite setting, defaulting to **on**. When turned **off**, the scheduler stops dispatching provider checks and suppresses availability notifications. In-flight checks are finalized as discarded without changing availability, and individual monitor settings are untouched. Expiry reconciliation and reporting continue. Turning monitoring back on staggers overdue monitors so they resume within the normal worker/provider limits rather than bursting.
 
 Transient provider failures use exponential target backoff: the first failure waits 2× the interval, and the delay is capped at `max(4× interval, 30 minutes)` with jitter. A provider `Retry-After` value is honored as a lower bound. Configuration, route, and ordinary 4xx errors do not trigger outage backoff. The adapter itself supports bounded HTTP retries, but the current production composition disables them (`NoRetries: true`); scheduler backoff is the active retry mechanism.
 
@@ -192,7 +194,7 @@ The frontend is a single-page application served by the Go binary. It is English
 | `/monitors/:id` | Status, route/date/passengers, selected offerings, last observations, recent checks, provider diagnostics, pause/resume, edit, and delete. |
 | `/monitors/:id/edit` | Label edits; material route/date/passenger changes require a fresh selection set. |
 | `/events`, `/events/:id` | Availability and provider-health event history, delivery status, filters, cursor pagination, and booking links. |
-| `/settings` | Global polling interval, Telegram configuration/test, browser Push devices, password change, and appearance. |
+| `/settings` | Global monitoring switch, global polling interval, Telegram configuration/test, browser Push devices, password change, and appearance. |
 
 The private REST API lives under `/api/v1` and covers auth, monitors, providers and search, events, deliveries, overview, settings, and Push. `/healthz` and `/readyz` are public; `/api/v1/auth/login` and `/api/v1/auth/session` are intentionally accessible to the login page. The hand-written OpenAPI 3.0.3 document is [`docs/openapi.yaml`](docs/openapi.yaml).
 

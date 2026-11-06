@@ -1720,12 +1720,15 @@ components:
           type: string
     SettingsResponse:
       type: object
-      required: [pollIntervalSeconds, pushEnabled, telegram]
+      required: [pollIntervalSeconds, pushEnabled, monitoringEnabled, telegram]
       properties:
         pollIntervalSeconds:
           type: integer
         pushEnabled:
           type: boolean
+        monitoringEnabled:
+          type: boolean
+          description: Global monitoring switch. When false, no new provider checks or availability notifications start.
         telegram:
           $ref: "#/components/schemas/TelegramSettings"
     SettingsUpdateRequest:
@@ -1738,6 +1741,9 @@ components:
           maximum: 3600
         pushEnabled:
           type: boolean
+        monitoringEnabled:
+          type: boolean
+          description: Persist the global monitoring switch; changing it wakes the scheduler.
     TelegramConfigRequest:
       type: object
       properties:
