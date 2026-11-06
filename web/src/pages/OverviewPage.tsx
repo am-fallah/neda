@@ -361,7 +361,7 @@ function MonitorSection({ monitors }: { monitors: Monitor[] }) {
       <h2 id="monitors-heading" className="text-sm font-semibold">
         Monitors
       </h2>
-      <div className="overflow-hidden rounded-xl border bg-card">
+      <div className="overflow-hidden rounded-lg border bg-card">
         {groups.map((group, index) => (
           <section
             key={group.key}

@@ -11,19 +11,21 @@
   --card-foreground: oklch(0.21 0.006 285);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.21 0.006 285);
-  --primary: oklch(0.45 0.09 180);
-  --primary-foreground: oklch(0.985 0.002 90);
+  /* The Add Train Link page is the visual reference: a neutral primary and
+     accent keep functional color reserved for availability/delivery meaning. */
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
   --secondary: oklch(0.96 0.004 95);
   --secondary-foreground: oklch(0.31 0.008 285);
   --muted: oklch(0.96 0.004 95);
   --muted-foreground: oklch(0.5 0.01 285);
-  --accent: oklch(0.95 0.02 180);
-  --accent-foreground: oklch(0.3 0.05 180);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
   --destructive: oklch(0.55 0.2 25);
   --destructive-foreground: oklch(0.985 0.002 90);
   --border: oklch(0.9 0.005 95);
   --input: oklch(0.9 0.005 95);
-  --ring: oklch(0.55 0.08 180);
+  --ring: oklch(0.55 0 0);
   --success: oklch(0.5 0.13 155);
   --success-foreground: oklch(0.985 0.002 90);
   --warning: oklch(0.68 0.14 75);
@@ -38,19 +40,19 @@
   --card-foreground: oklch(0.95 0.002 90);
   --popover: oklch(0.22 0.006 285);
   --popover-foreground: oklch(0.95 0.002 90);
-  --primary: oklch(0.72 0.1 180);
-  --primary-foreground: oklch(0.18 0.02 180);
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
   --secondary: oklch(0.27 0.006 285);
   --secondary-foreground: oklch(0.92 0.003 90);
   --muted: oklch(0.27 0.006 285);
   --muted-foreground: oklch(0.72 0.008 285);
-  --accent: oklch(0.3 0.03 180);
-  --accent-foreground: oklch(0.9 0.02 180);
+  --accent: var(--secondary);
+  --accent-foreground: var(--foreground);
   --destructive: oklch(0.65 0.18 25);
   --destructive-foreground: oklch(0.16 0.01 25);
   --border: oklch(0.32 0.006 285);
   --input: oklch(0.34 0.006 285);
-  --ring: oklch(0.65 0.08 180);
+  --ring: oklch(0.72 0 0);
   --success: oklch(0.72 0.13 155);
   --success-foreground: oklch(0.18 0.03 155);
   --warning: oklch(0.8 0.13 80);
@@ -58,28 +60,7 @@
   --info: oklch(0.72 0.1 245);
 }
 
-/*
- * The New Monitor route uses a neutral palette for both its content and the
- * shared application shell. The body class is applied only while that route is
- * mounted, so other pages keep the global theme. Semantic status colors
- * (success, warning, destructive) remain available for availability and
- * delivery meaning.
- */
-.monitor-create,
-body.monitor-create-page {
-  --radius: 0.625rem;
-  --primary: var(--foreground);
-  --primary-foreground: var(--background);
-  --accent: var(--secondary);
-  --accent-foreground: var(--foreground);
-  --ring: oklch(0.55 0 0);
-}
-
-.dark .monitor-create,
-.dark body.monitor-create-page {
-  --ring: oklch(0.72 0 0);
-}
-
+/* Keep the Add Train Link number fields free of browser spin buttons. */
 .monitor-create input[type="number"] {
   appearance: textfield;
   -moz-appearance: textfield;

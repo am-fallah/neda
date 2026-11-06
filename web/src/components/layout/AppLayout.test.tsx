@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +40,7 @@ function renderAt(path: string) {
   );
 }
 
-describe("AppLayout New Monitor palette scope", () => {
+describe("AppLayout", () => {
   beforeEach(() => {
     vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);
   });
@@ -50,17 +50,16 @@ describe("AppLayout New Monitor palette scope", () => {
     vi.restoreAllMocks();
   });
 
-  it("applies the page class only while the New Monitor route is mounted",() => {
+  it("renders the shared navigation without route-scoped palette classes", () => {
     renderAt("/monitors/new");
-    expect(document.body).toHaveClass("monitor-create-page");
+    expect(
+      screen.getByRole("navigation", { name: "Primary" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Monitors" })).toBeInTheDocument();
+    expect(document.body).not.toHaveClass("monitor-create-page");
   });
 
-  it("applies the page class with a trailing slash", () => {
-    renderAt("/monitors/new/");
-    expect(document.body).toHaveClass("monitor-create-page");
-  });
-
-  it("removes the page class after navigating away", async () => {
+  it("keeps the shared shell when navigating between routes", async () => {
     const user = userEvent.setup();
     renderAt("/monitors/new");
 
@@ -68,20 +67,10 @@ describe("AppLayout New Monitor palette scope", () => {
       screen.getByRole("button", { name: /back to monitors/i }),
     );
 
-    await waitFor(() =>
-      expect(document.body).not.toHaveClass("monitor-create-page"),
-    );
-  });
-
-  it("removes the page class on unmount", () => {
-    const view = renderAt("/monitors/new");
-    expect(document.body).toHaveClass("monitor-create-page");
-    view.unmount();
-    expect(document.body).not.toHaveClass("monitor-create-page");
-  });
-
-  it("does not apply the page class on other routes", () => {
-    renderAt("/monitors");
+    expect(await screen.findByText("Monitor list")).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Primary" }),
+    ).toBeInTheDocument();
     expect(document.body).not.toHaveClass("monitor-create-page");
   });
 });

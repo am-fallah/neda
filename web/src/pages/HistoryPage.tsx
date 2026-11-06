@@ -335,7 +335,7 @@ export function HistoryPage() {
   );
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="History"
         description="Durable availability and provider-health events, plus per-channel notification delivery status. Historical events are not current availability."

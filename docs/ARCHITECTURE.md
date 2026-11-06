@@ -1675,6 +1675,8 @@ non-functional success. `docs/openapi.yaml` documents the routes.
 ### 16.6 Styling, accessibility, build
 
 - Tailwind + shadcn/ui; CSS variables for light/dark; system theme default with manual toggle.
+- **Visual reference (2026-11-06):** the Add Train Link page is the application-wide reference. Its neutral primary/accent/ring tokens are global; semantic success/warning/info/destructive colors are reserved for availability, delivery, and health meaning. Surfaces use the shared `0.625rem` radius (`rounded-lg`), flat cards, `px-5 sm:px-6` card padding, `h-10` form controls, and `1.75rem` page headings. The former route-scoped palette override was removed.
+- Shared primitives (Card, Button, Input, FormField, Badge, Alert, Switch, PageHeader, EmptyState, ErrorState, LoadingState, Status badges) carry the tokens; pages do not introduce page-specific color systems. Responsive spacing uses the same gap scale on every route.
 - Responsive sidebar/topbar; tables become cards on mobile.
 - Accessibility: semantic landmarks, labels, keyboard navigation, focus rings, error summaries, aria-live for async feedback, color not sole indicator, reduced-motion respect.
 - Vite dev proxy `/api` to `127.0.0.1:8080`; production build to `web/dist`; `web/embed.go` embeds the build into the Go binary, and `internal/webui` serves it with SPA fallback for non-API routes. Missing hashed assets return 404 rather than the SPA shell; API and health paths never fall back. HTML is `no-store`, hashed assets are immutable, and the service-worker bootstrap file is no-cache when that feature is added.

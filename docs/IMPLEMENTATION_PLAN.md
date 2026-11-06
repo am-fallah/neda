@@ -751,6 +751,9 @@ No ordinary test may require live MrBilit access, real Telegram credentials, or 
 | `RPT-003` | P0 | IN_PROGRESS | RPT-001, RPT-002 | Implement 00:05 scheduler, previous-day coverage, silent Telegram delivery, idempotency, bounded retries, skipped-missing-config, crash uncertainty, missed-execution policy. AC: worker and sender tests. | `internal/report/worker.go`, `telegram.go`, `cmd/neda/serve.go`; report tests. |
 | `RPT-004` | P1 | IN_PROGRESS | RPT-001 | Expose report time and sanitized last status in settings/UI. AC: validation/persistence/UI tests. | settings service/API/UI; tests. |
 | `RPT-005` | P0 | IN_PROGRESS | RPT-001..004 | Run full checks, update docs/OpenAPI, merge PR, record evidence. | Pending PR/CI. |
+| `UI-DS-001` | P1 | IN_PROGRESS | — | Consolidate the Add Train Link visual reference into global tokens/components: neutral primary/accent/ring, flat `rounded-lg` surfaces, consistent card padding, `h-10` controls, unified page heading. AC: no route-scoped palette; shared primitives; light/dark contrast preserved. | `web/src/styles.css`, `components/ui/*`, `PageHeader`, `AppLayout`; frontend tests/build. |
+| `UI-DS-002` | P1 | IN_PROGRESS | UI-DS-001 | Apply the reference across pages/components: remove `rounded-xl`/`space-y-6` drift, unify cards, empty/loading/error surfaces, inputs, dialogs. AC: desktop/mobile and light/dark review; tests/build. | Pages/components; frontend checks. |
+| `UI-DS-003` | P1 | IN_PROGRESS | UI-DS-001..002 | Run accessibility/responsive/theme review, update docs, merge PR, record evidence. | Pending PR/CI. |
 
 ## 13. Tracker maintenance rules
 

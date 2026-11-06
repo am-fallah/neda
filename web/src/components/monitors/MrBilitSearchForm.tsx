@@ -317,7 +317,7 @@ function SearchResultsSkeleton({ providerName }: { providerName: string }) {
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-3 w-64 max-w-full" />
       </div>
-      <div className="rounded-xl border bg-card p-4">
+      <div className="rounded-lg border bg-card p-4">
         <div className="flex items-start gap-3">
           <Skeleton className="size-9 rounded-lg" />
           <div className="flex flex-1 flex-col gap-2">
